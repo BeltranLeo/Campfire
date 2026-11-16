@@ -1,0 +1,72 @@
+/* Campfire — generated from tokens.json */
+@font-face { font-family: "Bricolage Grotesque"; src: url("../fonts/BricolageGrotesque-Variable.woff2") format("woff2"); font-weight: 200 800; font-display: swap; }
+@font-face { font-family: "Hanken Grotesk"; src: url("../fonts/HankenGrotesk-Variable.woff2") format("woff2"); font-weight: 100 900; font-display: swap; }
+@font-face { font-family: "JetBrains Mono"; src: url("../fonts/JetBrainsMono-Variable.woff2") format("woff2"); font-weight: 100 800; font-display: swap; }
+:root, [data-theme="light"] {
+  --bg: #f3f0ea;
+  --surface: #fcfbf8;
+  --surface-sunken: #e9e4dc;
+  --line: #d8d1c6;
+  --line-strong: #8d8478;
+  --ink: #1f1a15;
+  --ink-muted: #5a5046;
+  --ink-subtle: #685d50;
+  --accent: #c2410c;
+  --accent-hover: #a3350a;
+  --on-accent: #ffffff;
+  --accent-soft: #fdf1e9;
+  --chain: #0b6e52;
+  --chain-soft: #dcf1e8;
+  --sim: #6535b8;
+  --sim-soft: #ece4fa;
+  --warn: #7d5700;
+  --warn-soft: #f8ebc2;
+  --danger: #b0163a;
+  --danger-soft: #fbe1e6;
+  --focus: #1f1a15;
+}
+[data-theme="dark"] {
+  --bg: #161310;
+  --surface: #1f1b17;
+  --surface-sunken: #100e0c;
+  --line: #39332c;
+  --line-strong: #7a7064;
+  --ink: #f3ede5;
+  --ink-muted: #b9ae9f;
+  --ink-subtle: #9a8f81;
+  --accent: #ff8a4c;
+  --accent-hover: #ffa06e;
+  --on-accent: #1d0f06;
+  --accent-soft: #3a2114;
+  --chain: #45d1a2;
+  --chain-soft: #12362b;
+  --sim: #b9a0ff;
+  --sim-soft: #2a2147;
+  --warn: #edc257;
+  --warn-soft: #372b0c;
+  --danger: #ff8298;
+  --danger-soft: #40161f;
+  --focus: #f3ede5;
+}
+:root {
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 24px;
+  --space-6: 32px;
+  --space-7: 48px;
+  --space-8: 64px;
+  --radius-sm: 4px;
+  --radius-md: 8px;
+  --radius-lg: 12px;
+  --radius-full: 999px;
+  --control-h: 44px;
+  --control-h-sm: 32px;
+  --content-max: 1120px;
+  --measure: 640px;
+  --font-display: "Bricolage Grotesque", "Hanken Grotesk", system-ui, sans-serif;
+  --font-sans: "Hanken Grotesk", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+}
+[data-theme="dark"] { color-scheme: dark; }

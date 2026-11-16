@@ -1,0 +1,8 @@
+/* Page-level glue that the design system leaves to the app. */
+
+:root { color-scheme: light; }
+
+/* The page behind #root must match the theme, or overscroll and short pages show a white strip. */
+html, body { margin: 0; min-height: 100%; background: var(--bg); }
+
+#root { min-height: 100vh; min-height: 100dvh; }

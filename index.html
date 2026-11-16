@@ -1,0 +1,24 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Campfire</title>
+    <script>
+      // Set the theme before the first paint so a dark-mode visitor never sees a light flash.
+      // Must match src/web/theme.ts: localStorage.theme is 'light', 'dark' or absent (follow the system).
+      (function () {
+        var stored = null;
+        try {
+          stored = localStorage.getItem('theme');
+        } catch (e) {}
+        var dark = stored === 'dark' || (stored !== 'light' && window.matchMedia('(prefers-color-scheme: dark)').matches);
+        document.documentElement.setAttribute('data-theme', dark ? 'dark' : 'light');
+      })();
+    </script>
+  </head>
+  <body>
+    <div id="root" class="cf s-screen"></div>
+    <script type="module" src="/src/web/main.tsx"></script>
+  </body>
+</html>
