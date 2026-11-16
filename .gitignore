@@ -9,3 +9,6 @@ dist/
 # Secrets (demo seller seed, admin token, service keys)
 .env
 .env.*
+
+# Vercel CLI project link and local build output
+.vercel/

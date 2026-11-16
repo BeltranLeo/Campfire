@@ -183,10 +183,6 @@ export class DemoSeller {
   // Serialises every action that selects the bot's UTXOs or allocates key indices, so two
   // simultaneous takes on the same instance never spend the same coin twice.
   private queue: Promise<unknown> = Promise.resolve();
-  // Funding transactions already broadcast, by trade record id. A later attempt rebroadcasts the same
-  // transaction instead of building a new one, so a broadcast that timed out but reached the network
-  // can never fund the same escrow twice.
-  private readonly fundingAttempts = new Map<string, string>();
 
   constructor(
     private readonly options: {
@@ -195,6 +191,8 @@ export class DemoSeller {
       wallet: DemoSellerWallet;
       limits?: Partial<DemoSellerLimits>;
       nowSeconds?: () => number;
+      // Cross-instance lock (for example a Postgres advisory lock), held around every wallet action.
+      withLock?: <T>(name: string, fn: () => Promise<T>) => Promise<T>;
     },
   ) {
     if (options.service.demoSellerIdentity !== options.wallet.identity) {
@@ -217,7 +215,9 @@ export class DemoSeller {
   }
 
   private exclusive<T>(fn: () => Promise<T>): Promise<T> {
-    const run = this.queue.then(fn, fn);
+    const withLock = this.options.withLock;
+    const locked = withLock ? () => withLock('campfire-demo-seller', fn) : fn;
+    const run = this.queue.then(locked, locked);
     this.queue = run.catch(() => undefined);
     return run;
   }
@@ -441,8 +441,8 @@ export class DemoSeller {
     });
   }
 
-  // Funds the escrow of an accepted trade. Idempotent: if the escrow already holds the exact
-  // funding (for example after an indexer delay), it records it instead of paying twice.
+  // Funds the escrow of an accepted trade. Idempotent: if the escrow already holds the exact funding
+  // it records it, and if a funding transaction was already signed it only rebroadcasts that one.
   private async fundAccepted(tradeRecordId: string): Promise<StoredTrade> {
     const service = this.options.service;
     const trade = await service.getTrade(tradeRecordId, undefined, true);
@@ -458,7 +458,8 @@ export class DemoSeller {
       return this.view(tradeRecordId);
     }
 
-    const previousHex = this.fundingAttempts.get(tradeRecordId);
+    // Stored in the database, so it survives restarts and is seen by every server instance.
+    const previousHex = trade.pendingFundingTxHex;
     if (previousHex) {
       // Same transaction, same txid: rebroadcasting it is harmless if it already reached the network.
       try {
@@ -479,7 +480,7 @@ export class DemoSeller {
       changeAddress: this.mainAddress,
       tokenChangeAddress: this.mainTokenAddress,
     });
-    this.fundingAttempts.set(tradeRecordId, tx.hex);
+    await service.recordFundingAttempt(tradeRecordId, tx.hex);
     try {
       await service.confirmFunding({ idOrTradeId: tradeRecordId, fundingTxHex: tx.hex });
     } catch (err) {

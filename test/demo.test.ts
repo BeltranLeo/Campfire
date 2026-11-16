@@ -373,6 +373,36 @@ describe('Demo seller bot (protocol section 8)', () => {
     expect(await contract.getUtxos()).toHaveLength(1);
   });
 
+  it('never funds twice from another server instance while the indexer lags', async () => {
+    const ctx = await setupDemo();
+    ctx.failAfterSend(1);
+    const taken = await ctx.take(ctx.bchOffer.offerTxid, '20000');
+    expect(taken.status).toBe(400);
+    const [trade] = await ctx.service.listTrades({ identity: ctx.buyerId });
+    const contract = createEscrowContract(trade.terms!, trade.tradeId!, ctx.provider);
+
+    // A second instance has none of the first one's memory, and its indexer does not list the escrow yet.
+    const otherInstance = new DemoSeller({
+      service: ctx.service,
+      provider: ctx.provider,
+      wallet: botWallet,
+      nowSeconds: ctx.getNow,
+    });
+    const realGetUtxos = ctx.provider.getUtxos.bind(ctx.provider);
+    ctx.provider.getUtxos = async (address: string) =>
+      address === contract.address ? [] : realGetUtxos(address);
+    await otherInstance.reconcile(trade.id);
+    ctx.provider.getUtxos = realGetUtxos;
+
+    // It only rebroadcast the stored transaction, so the escrow still holds a single UTXO.
+    expect(await contract.getUtxos()).toHaveLength(1);
+    await otherInstance.reconcile(trade.id);
+    const after = await ctx.service.getTrade(trade.id);
+    expect(after?.status).toBe('Funded');
+    expect(after?.pendingFundingTxHex).toBeUndefined(); // not exposed outside the arbiter view
+    expect(await contract.getUtxos()).toHaveLength(1);
+  });
+
   it('declines a take it cannot pay for instead of holding an active slot', async () => {
     // After publishing its two offers the bot keeps about 7,000 sats and no PUSD.
     const ctx = await setupDemo({ botSats: 10_000n, botPusd: 0n });

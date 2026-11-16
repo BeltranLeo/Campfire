@@ -77,6 +77,8 @@ export interface StoredTrade {
   escrowAddress?: string;
   escrowTokenAddress?: string;
   encryptedPaymentDetails?: string;
+  // Signed funding transaction already broadcast by the demo seller; retries rebroadcast exactly this one.
+  pendingFundingTxHex?: string;
   fundingDeadline?: number;
   fundingTxid?: string;
   fundingVout?: number;
@@ -122,6 +124,10 @@ export interface StorageAdapter {
 
   addChatMessage(msg: StoredChatMessage): Promise<void>;
   listChatMessages(tradeRecordId: string): Promise<StoredChatMessage[]>;
+
+  // Runs `fn` while holding a named lock shared by every server instance using this storage.
+  // Optional: storage that lives in one process needs no cross-instance lock.
+  withLock?<T>(name: string, fn: () => Promise<T>): Promise<T>;
 }
 
 interface MemorySnapshot {
@@ -248,11 +254,52 @@ export type SqlQueryExecutor = (
   params?: unknown[],
 ) => Promise<{ rows: Record<string, unknown>[] }>;
 
+export interface SqlLockClient {
+  query: SqlQueryExecutor;
+  release(): void;
+}
+
 // Postgres-backed storage adapter for Vercel deployments (e.g. Neon serverless or standard pg Pool).
 export class PostgresStorage implements StorageAdapter {
   private initialized = false;
 
-  constructor(private readonly query: SqlQueryExecutor) {}
+  constructor(
+    private readonly query: SqlQueryExecutor,
+    private readonly options?: {
+      // Dedicated connection for session-level advisory locks (a pooled query may run on any connection).
+      connect?: () => Promise<SqlLockClient>;
+      lockTimeoutMs?: number;
+      lockPollMs?: number;
+    },
+  ) {}
+
+  // Cross-instance mutual exclusion with a Postgres advisory lock held on one dedicated connection.
+  async withLock<T>(name: string, fn: () => Promise<T>): Promise<T> {
+    if (!this.options?.connect) {
+      return fn();
+    }
+    const client = await this.options.connect();
+    const timeoutMs = this.options.lockTimeoutMs ?? 25_000;
+    const pollMs = this.options.lockPollMs ?? 200;
+    const deadline = Date.now() + timeoutMs;
+    try {
+      for (;;) {
+        const { rows } = await client.query('SELECT pg_try_advisory_lock(hashtext($1)) AS locked', [name]);
+        if (rows[0]?.locked === true) break;
+        if (Date.now() >= deadline) {
+          throw new Error(`Timed out waiting for lock "${name}"`);
+        }
+        await new Promise((resolve) => setTimeout(resolve, pollMs));
+      }
+      try {
+        return await fn();
+      } finally {
+        await client.query('SELECT pg_advisory_unlock(hashtext($1))', [name]);
+      }
+    } finally {
+      client.release();
+    }
+  }
 
   private async ensureSchema(): Promise<void> {
     if (this.initialized) return;

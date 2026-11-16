@@ -336,6 +336,7 @@ export class CampfireService {
     // The shared trade key is only visible to the arbiter in a dispute (section 6).
     if (!isArbiter) {
       delete copy.sharedTradeKeyHex;
+      delete copy.pendingFundingTxHex;
     }
     return copy;
   }
@@ -624,6 +625,21 @@ export class CampfireService {
     trade.updatedAt = this.nowSeconds();
     await this.options.storage.saveTrade(trade);
     return this.sanitizeTrade(trade, params.sellerIdentity);
+  }
+
+  // Stores the signed funding transaction before it is broadcast, so any later attempt (from this
+  // or another server instance) rebroadcasts the same transaction instead of funding twice.
+  async recordFundingAttempt(tradeRecordId: string, fundingTxHex: string): Promise<void> {
+    const trade = await this.options.storage.getTrade(tradeRecordId);
+    if (!trade) {
+      throw new Error('Trade not found');
+    }
+    if (trade.status !== 'Accepted') {
+      throw new Error(`Cannot record a funding attempt for trade in state "${trade.status}"`);
+    }
+    trade.pendingFundingTxHex = fundingTxHex;
+    trade.updatedAt = this.nowSeconds();
+    await this.options.storage.saveTrade(trade);
   }
 
   async confirmFunding(params: {
