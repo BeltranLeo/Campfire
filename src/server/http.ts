@@ -1,8 +1,27 @@
 // Framework-agnostic HTTP JSON handler (Web Request -> Response) used by Vercel API routes, Vite dev middleware and tests.
 
-import { BCH_DECIMALS, PUSD_CATEGORY, PUSD_DECIMALS, type VerdictHex } from '../protocol/index.js';
+import { timingSafeEqual } from 'node:crypto';
+import {
+  BCH_DECIMALS,
+  PUSD_CATEGORY,
+  PUSD_DECIMALS,
+  VERDICT_BUYER,
+  VERDICT_SELLER,
+  type VerdictHex,
+} from '../protocol/index.js';
+import { DemoLimitError, type DemoAsset, type DemoSeller } from './demo.js';
 import type { OracleService } from './oracle.js';
 import type { CampfireService } from './service.js';
+import type { StoredTrade } from './storage.js';
+
+class HttpError extends Error {
+  constructor(
+    readonly status: number,
+    message: string,
+  ) {
+    super(message);
+  }
+}
 
 function jsonResponse(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), {
@@ -17,8 +36,34 @@ async function readJson<T = Record<string, unknown>>(req: Request): Promise<T> {
   return JSON.parse(text) as T;
 }
 
-export function createApiHandler(deps: { service: CampfireService; oracle: OracleService }) {
-  const { service, oracle } = deps;
+export function createApiHandler(deps: {
+  service: CampfireService;
+  oracle: OracleService;
+  // Demo seller bot (protocol section 8); demo routes are disabled without it.
+  demo?: DemoSeller;
+  // Bearer token for arbiter and demo-administration routes; those routes are disabled without it.
+  adminToken?: string;
+}) {
+  const { service, oracle, demo, adminToken } = deps;
+
+  const isAdmin = (req: Request): boolean => {
+    if (!adminToken) return false;
+    const header = req.headers.get('authorization') ?? '';
+    const expected = Buffer.from(`Bearer ${adminToken}`);
+    const given = Buffer.from(header);
+    return given.length === expected.length && timingSafeEqual(given, expected);
+  };
+
+  const requireAdmin = (req: Request): void => {
+    if (!isAdmin(req)) {
+      throw new HttpError(403, 'Arbiter and administration routes require the admin token');
+    }
+  };
+
+  // The service key is the default arbiter of every offer, so its views and verdicts are restricted:
+  // the admin may use them on any trade; any visitor may use them only on a disputed demo trade (section 8).
+  const canActAsArbiter = (req: Request, trade: StoredTrade): boolean =>
+    isAdmin(req) || (service.isDemoTrade(trade) && trade.status === 'Disputed');
 
   return async function handleRequest(req: Request): Promise<Response> {
     const url = new URL(req.url, 'http://localhost');
@@ -34,6 +79,7 @@ export function createApiHandler(deps: { service: CampfireService; oracle: Oracl
           pusdCategory: PUSD_CATEGORY,
           bchDecimals: BCH_DECIMALS,
           pusdDecimals: PUSD_DECIMALS,
+          demoSellerIdentity: service.demoSellerIdentity ?? null,
         });
       }
 
@@ -93,9 +139,15 @@ export function createApiHandler(deps: { service: CampfireService; oracle: Oracl
             offerTxHex: string;
             markerReceiveIndex: number;
             broadcast?: boolean;
-            isDemo?: boolean;
           }>(req);
-          const offer = await service.publishOffer(body);
+          // Fields are copied one by one: whether an offer is a demo offer is decided by the service, never the client.
+          const offer = await service.publishOffer({
+            sellerIdentity: body.sellerIdentity,
+            offerJson: body.offerJson,
+            offerTxHex: body.offerTxHex,
+            markerReceiveIndex: body.markerReceiveIndex,
+            broadcast: body.broadcast,
+          });
           return jsonResponse({ offer }, 201);
         }
       }
@@ -141,7 +193,16 @@ export function createApiHandler(deps: { service: CampfireService; oracle: Oracl
             buyerReceiveIndex: number;
             buyerSessionPk: string;
           }>(req);
-          const trade = await service.requestTrade(body);
+          const offer = await service.getOffer(body.offerTxid);
+          const isDemoOffer = demo !== undefined && offer?.sellerIdentity === demo.identity;
+          if (isDemoOffer) {
+            await demo.assertCanTake();
+          }
+          let trade = await service.requestTrade(body);
+          if (isDemoOffer) {
+            // The bot accepts and funds a real escrow within this request.
+            trade = await demo.acceptAndFund(trade.id);
+          }
           return jsonResponse({ trade }, 201);
         }
       }
@@ -150,10 +211,19 @@ export function createApiHandler(deps: { service: CampfireService; oracle: Oracl
       const tradeMatch = path.match(/^\/api\/trades\/([0-9a-f]+)$/i);
       if (method === 'GET' && tradeMatch) {
         const viewer = url.searchParams.get('viewer') ?? undefined;
-        const isArbiter = url.searchParams.get('arbiter') === 'true';
-        const trade = await service.getTrade(tradeMatch[1], viewer, isArbiter);
+        const asArbiter = url.searchParams.get('arbiter') === 'true';
+        if (demo) {
+          await demo.reconcile(tradeMatch[1]);
+        }
+        let trade = await service.getTrade(tradeMatch[1], viewer);
         if (!trade) {
           return jsonResponse({ error: 'Trade not found' }, 404);
+        }
+        if (asArbiter) {
+          if (!canActAsArbiter(req, trade)) {
+            throw new HttpError(403, 'The arbiter view is only available to the arbiter');
+          }
+          trade = await service.getTrade(tradeMatch[1], viewer, true);
         }
         return jsonResponse({ trade });
       }
@@ -171,6 +241,10 @@ export function createApiHandler(deps: { service: CampfireService; oracle: Oracl
           const asArbiter = url.searchParams.get('arbiter') === 'true';
           let decrypted: unknown;
           if (asArbiter) {
+            const trade = await service.getTrade(id);
+            if (!trade || !canActAsArbiter(req, trade)) {
+              throw new HttpError(403, 'The decrypted chat is only available to the arbiter');
+            }
             try {
               decrypted = await service.decryptDisputedChatForArbiter(id);
             } catch {
@@ -211,10 +285,14 @@ export function createApiHandler(deps: { service: CampfireService; oracle: Oracl
           }
           if (action === 'paid') {
             const body = await readJson<{ buyerIdentity: string }>(req);
-            const trade = await service.markPaid({
+            let trade = await service.markPaid({
               idOrTradeId: id,
               buyerIdentity: body.buyerIdentity,
             });
+            if (demo && service.isDemoTrade(trade)) {
+              // The bot releases as soon as the visitor marks the simulated payment as sent.
+              trade = await demo.release(trade.id);
+            }
             return jsonResponse({ trade });
           }
           if (action === 'dispute') {
@@ -227,6 +305,7 @@ export function createApiHandler(deps: { service: CampfireService; oracle: Oracl
             return jsonResponse({ trade });
           }
           if (action === 'verdict') {
+            requireAdmin(req);
             const body = await readJson<{
               verdict: VerdictHex;
               reason?: string;
@@ -251,9 +330,72 @@ export function createApiHandler(deps: { service: CampfireService; oracle: Oracl
         }
       }
 
+      // GET /api/demo: public description of the demo seller and its limits.
+      if (method === 'GET' && path === '/api/demo') {
+        if (!demo) {
+          return jsonResponse({ enabled: false });
+        }
+        const offers = (await service.listOffers({ onlyOpen: true })).filter(
+          (o) => o.sellerIdentity === demo.identity,
+        );
+        return jsonResponse({
+          enabled: true,
+          identity: demo.identity,
+          address: demo.mainAddress,
+          tokenAddress: demo.mainTokenAddress,
+          limits: Object.fromEntries(
+            Object.entries(demo.limits).map(([k, v]) => [k, typeof v === 'bigint' ? v.toString() : v]),
+          ),
+          offers,
+        });
+      }
+
+      // POST /api/demo/offers (admin): publishes the bot's offers on-chain. Spends real sats.
+      if (method === 'POST' && path === '/api/demo/offers') {
+        requireAdmin(req);
+        if (!demo) {
+          throw new HttpError(404, 'Demo mode is not enabled');
+        }
+        const body = await readJson<{ assets?: DemoAsset[] }>(req);
+        const offers = await demo.publishOffers(body.assets);
+        return jsonResponse({ offers }, 201);
+      }
+
+      // POST /api/demo/trades/:id/verdict: the demo arbiter console. Any visitor may decide a
+      // disputed trade against the bot; the verdict is signed with the service arbiter key.
+      const demoVerdictMatch = path.match(/^\/api\/demo\/trades\/([0-9a-f]+)\/verdict$/i);
+      if (method === 'POST' && demoVerdictMatch) {
+        if (!demo) {
+          throw new HttpError(404, 'Demo mode is not enabled');
+        }
+        const trade = await service.getTrade(demoVerdictMatch[1]);
+        if (!trade || !service.isDemoTrade(trade)) {
+          throw new HttpError(403, 'The demo arbiter console only decides trades against the demo seller');
+        }
+        if (trade.status !== 'Disputed') {
+          throw new HttpError(400, `The demo arbiter can only decide a disputed trade (state: "${trade.status}")`);
+        }
+        const body = await readJson<{ verdict: VerdictHex }>(req);
+        if (body.verdict !== VERDICT_BUYER && body.verdict !== VERDICT_SELLER) {
+          throw new HttpError(400, 'Verdict must be "01" (buyer) or "02" (seller)');
+        }
+        const decided = await service.issueArbiterVerdict({
+          idOrTradeId: trade.id,
+          verdict: body.verdict,
+          reason: 'Demo arbiter console: decision taken by the visitor, signed with the service arbiter key',
+        });
+        return jsonResponse({ trade: decided, simulatedArbiter: true });
+      }
+
       return jsonResponse({ error: `Route not found: ${method} ${path}` }, 404);
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
+      if (err instanceof HttpError) {
+        return jsonResponse({ error: message }, err.status);
+      }
+      if (err instanceof DemoLimitError) {
+        return jsonResponse({ error: message }, 429);
+      }
       return jsonResponse({ error: message }, 400);
     }
   };

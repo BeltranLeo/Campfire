@@ -1,6 +1,6 @@
 # Campfire protocol
 
-Status: **approved design; escrow contract implemented** · Format version: `1` · Last updated: 2026-11-16
+Status: **approved design; escrow contract and demo seller implemented** · Format version: `1` · Last updated: 2026-11-16
 
 Campfire is a non-custodial peer-to-peer exchange of BCH and CashTokens (PUSD first) for fiat money. This document specifies the offer format, the trade process and the escrow contract.
 
@@ -413,7 +413,9 @@ Goal: a judge alone completes a real trade on mainnet in a few minutes, from the
   - *Cancel:* the judge cancels and signs; the funds go back to the bot.
   - *Expiry:* demo offers use a 5-minute payment window; if the judge does nothing, the arbiter verdict returns the funds to the bot.
   - *Dispute:* the judge opens a dispute and may then act as arbiter in a demo console that signs the verdict with the service arbiter key. This console only works for trades against the bot.
-- **Limits:** amounts are capped, and takes are rate-limited per wallet so the bot cannot be drained.
+- **Offers:** the bot sells BCH and PUSD at a floating USD price from the oracle, with no margin, and uses `simulated` as its payment method.
+- **Limits:** at most 20,000 sats or 0.10 PUSD per trade, at most 2 unfinished trades at a time and at most 10 trades funded per day, counted across all visitors. Limits per wallet would not help: a new wallet is a new identity (section 1).
+- **Arbiter access:** the service arbiter key is the default arbiter of every offer, so its views and verdicts require an admin token. The demo console is the only exception: anyone may decide a disputed trade whose seller is the bot.
 - **Honesty rule:** everything simulated carries a visible "simulated" label. On-chain steps are real and link to the explorer. The 14-day `refund` path cannot be shown live; the README links a real mainnet transaction for it instead.
 
 Two wallets (or two people) can also trade with each other through the same interface; that is the product, not a demo mode.

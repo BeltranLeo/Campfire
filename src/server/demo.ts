@@ -1,0 +1,556 @@
+// Demo seller bot (protocol section 8): a wallet run by the service that sells small amounts of BCH and PUSD
+// on mainnet, so a visitor can complete a real trade without owning funds. Only the fiat payment is simulated.
+
+import {
+  binToHex,
+  deriveHdPath,
+  deriveHdPrivateNodeChild,
+  deriveHdPrivateNodeFromSeed,
+  deriveHdPublicNode,
+  encodeHdPublicKey,
+  hmacSha256,
+  secp256k1,
+  utf8ToBin,
+  type HdPrivateNodeValid,
+} from '@bitauth/libauth';
+import {
+  SignatureAlgorithm,
+  SignatureTemplate,
+  SighashType,
+  TransactionBuilder,
+  type NetworkProvider,
+  type Utxo,
+} from 'cashscript';
+import {
+  BCH_ASSET,
+  BCH_DECIMALS,
+  PUSD_CATEGORY,
+  PUSD_DECIMALS,
+  buildFundEscrowTransaction,
+  buildPublishOfferTransaction,
+  buildReleaseRequest,
+  createEscrowContract,
+  derivePayoutPkhFromXpub,
+  expectedEscrowFunding,
+  derivePubkeyFromXpub,
+  encryptPaymentDetails,
+  identityFromDefiXpub,
+  matchesEscrowFunding,
+  pkhToCashAddress,
+  pkhToLockingBytecode,
+  toBytes,
+  type OfferDocument,
+  type WalletSpendableUtxo,
+} from '../protocol/index.js';
+import { FUNDING_WINDOW_SEC, type CampfireService, type OfferView } from './service.js';
+import type { StoredTrade, TradeState } from './storage.js';
+
+// Same derivation paths as the test wallets; the `defi` branch holds the contract signing keys.
+const RECEIVE_PATH = "m/44'/145'/0'/0";
+const DEFI_PATH = "m/44'/145'/0'/7";
+
+// receive/0 holds the bot's balance and takes all change. Offer markers use receive/1..99
+// and each trade gets its own payout address from receive/100 onward (one address per use).
+export const DEMO_MAIN_INDEX = 0;
+export const DEMO_MARKER_INDEX_BASE = 1;
+export const DEMO_TRADE_INDEX_BASE = 100;
+
+// Every signature the bot makes uses SIGHASH_ALL | SIGHASH_UTXOS (0x61 with FORKID), like the wallets.
+const BOT_SIGHASH = SighashType.SIGHASH_ALL | SighashType.SIGHASH_UTXOS;
+
+const ACTIVE_STATES: TradeState[] = ['Requested', 'Accepted', 'Funded', 'Paid', 'Disputed'];
+const SELLER_PAYOUT_STATES: TradeState[] = ['Cancelled', 'ResolvedSeller', 'Refunded'];
+
+export const DEMO_PAYMENT_METHOD = 'simulated';
+export const DEMO_OFFER_TERMS =
+  'DEMO OFFER. The fiat payment is simulated: do not send any money, just mark the trade as paid. ' +
+  'The escrow, the release and every other on-chain step are real mainnet transactions.';
+
+export interface DemoSellerLimits {
+  minBchSats: bigint;
+  maxBchSats: bigint;
+  minPusdUnits: bigint;
+  maxPusdUnits: bigint;
+  // Trades that are not finished yet (requested, accepted, funded, paid or disputed).
+  maxActiveTrades: number;
+  // Trades the bot accepted (and therefore funds) in the last 24 hours, across all visitors.
+  maxDailyFundings: number;
+  paymentWindowSec: number;
+  offerLifetimeSec: number;
+}
+
+// Identity is a hash of a presented xpub with no proof of possession (D29), so per-wallet limits are
+// trivially bypassed with a fresh wallet. The limits that bound the bot's losses are global.
+export const DEFAULT_DEMO_LIMITS: DemoSellerLimits = {
+  minBchSats: 5_000n,
+  maxBchSats: 20_000n,
+  minPusdUnits: 1n, // 0.01 PUSD
+  maxPusdUnits: 10n, // 0.10 PUSD
+  maxActiveTrades: 2,
+  maxDailyFundings: 10,
+  paymentWindowSec: 300, // 5 minutes (protocol section 8)
+  offerLifetimeSec: 30 * 86_400,
+};
+
+export type DemoAsset = 'BCH' | 'PUSD';
+
+export class DemoLimitError extends Error {}
+
+export interface DemoSellerWallet {
+  identity: string;
+  defiXpub: string;
+  receiveXpub: string;
+  defiPubkeyHex(index: number): string;
+  defiPrivateKey(index: number): Uint8Array;
+  receivePkhHex(index: number): string;
+  receivePrivateKey(index: number): Uint8Array;
+  receiveAddress(index: number, tokenAware?: boolean): string;
+  // Deterministic per-trade session key, so the bot needs no extra storage to read its own chat.
+  sessionPrivateKey(tradeRecordId: string): Uint8Array;
+}
+
+function privateChild(node: HdPrivateNodeValid, index: number): Uint8Array {
+  const child = deriveHdPrivateNodeChild(node, index);
+  if (typeof child === 'string') {
+    throw new Error(`Demo seller key derivation failed: ${child}`);
+  }
+  return child.privateKey;
+}
+
+// Derives the bot wallet from a secret seed (16 to 64 bytes, kept as a deployment secret).
+export function deriveDemoSellerWallet(seedInput: Uint8Array | string): DemoSellerWallet {
+  const seed = toBytes(seedInput, 'demoSellerSeed');
+  if (seed.length < 16 || seed.length > 64) {
+    throw new Error('Demo seller seed must be 16 to 64 bytes');
+  }
+  const master = deriveHdPrivateNodeFromSeed(seed);
+  if (typeof master === 'string') {
+    throw new Error(`Invalid demo seller seed: ${master}`);
+  }
+  const receiveNode = deriveHdPath(master, RECEIVE_PATH);
+  const defiNode = deriveHdPath(master, DEFI_PATH);
+  if (typeof receiveNode === 'string' || typeof defiNode === 'string') {
+    throw new Error('Demo seller HD derivation failed');
+  }
+  const receiveXpub = encodeHdPublicKey({
+    network: 'mainnet',
+    node: deriveHdPublicNode(receiveNode),
+  }).hdPublicKey;
+  const defiXpub = encodeHdPublicKey({
+    network: 'mainnet',
+    node: deriveHdPublicNode(defiNode),
+  }).hdPublicKey;
+
+  return {
+    identity: identityFromDefiXpub(defiXpub),
+    defiXpub,
+    receiveXpub,
+    defiPubkeyHex: (i) => binToHex(derivePubkeyFromXpub(defiXpub, i)),
+    defiPrivateKey: (i) => privateChild(defiNode, i),
+    receivePkhHex: (i) => binToHex(derivePayoutPkhFromXpub(receiveXpub, i)),
+    receivePrivateKey: (i) => privateChild(receiveNode, i),
+    receiveAddress: (i, tokenAware = false) =>
+      pkhToCashAddress(derivePayoutPkhFromXpub(receiveXpub, i), { tokenAware }),
+    sessionPrivateKey: (tradeRecordId) => {
+      let counter = 0;
+      for (;;) {
+        const candidate = hmacSha256(
+          seed,
+          utf8ToBin(`CMPF-DEMO-SESSION-v1:${tradeRecordId}:${counter}`),
+        );
+        if (secp256k1.validatePrivateKey(candidate)) return candidate;
+        counter += 1;
+      }
+    },
+  };
+}
+
+function compressedPublicKeyHex(privateKey: Uint8Array): string {
+  const pub = secp256k1.derivePublicKeyCompressed(privateKey);
+  if (typeof pub === 'string') {
+    throw new Error(`Failed to derive public key: ${pub}`);
+  }
+  return binToHex(pub);
+}
+
+export function demoAssetId(asset: DemoAsset): string {
+  return asset === 'BCH' ? BCH_ASSET : PUSD_CATEGORY;
+}
+
+export class DemoSeller {
+  readonly limits: DemoSellerLimits;
+  private readonly nowSeconds: () => number;
+  // Serialises every action that selects the bot's UTXOs or allocates key indices, so two
+  // simultaneous takes on the same instance never spend the same coin twice.
+  private queue: Promise<unknown> = Promise.resolve();
+  // Funding transactions already broadcast, by trade record id. A later attempt rebroadcasts the same
+  // transaction instead of building a new one, so a broadcast that timed out but reached the network
+  // can never fund the same escrow twice.
+  private readonly fundingAttempts = new Map<string, string>();
+
+  constructor(
+    private readonly options: {
+      service: CampfireService;
+      provider: NetworkProvider;
+      wallet: DemoSellerWallet;
+      limits?: Partial<DemoSellerLimits>;
+      nowSeconds?: () => number;
+    },
+  ) {
+    if (options.service.demoSellerIdentity !== options.wallet.identity) {
+      throw new Error('CampfireService must be created with demoSellerIdentity set to the demo wallet identity');
+    }
+    this.limits = { ...DEFAULT_DEMO_LIMITS, ...options.limits };
+    this.nowSeconds = options.nowSeconds ?? (() => Math.floor(Date.now() / 1000));
+  }
+
+  get identity(): string {
+    return this.options.wallet.identity;
+  }
+
+  get mainAddress(): string {
+    return this.options.wallet.receiveAddress(DEMO_MAIN_INDEX);
+  }
+
+  get mainTokenAddress(): string {
+    return this.options.wallet.receiveAddress(DEMO_MAIN_INDEX, true);
+  }
+
+  private exclusive<T>(fn: () => Promise<T>): Promise<T> {
+    const run = this.queue.then(fn, fn);
+    this.queue = run.catch(() => undefined);
+    return run;
+  }
+
+  async init(): Promise<void> {
+    await this.options.service.registerIdentity({
+      defiXpub: this.options.wallet.defiXpub,
+      receiveXpub: this.options.wallet.receiveXpub,
+    });
+  }
+
+  // --- Wallet ---
+
+  private signerFor(index: number): SignatureTemplate {
+    return new SignatureTemplate(
+      this.options.wallet.receivePrivateKey(index),
+      BOT_SIGHASH,
+      SignatureAlgorithm.SCHNORR,
+    );
+  }
+
+  private async botTrades(): Promise<StoredTrade[]> {
+    const trades = await this.options.service.listTrades({ identity: this.identity });
+    return trades.filter((t) => t.sellerIdentity === this.identity);
+  }
+
+  // Spendable coins: the main address plus the payout addresses of trades that paid the bot back
+  // (cancel, arbitrate for the seller, refund). Offer markers are never spent here.
+  async spendableUtxos(): Promise<WalletSpendableUtxo[]> {
+    const indices = new Set<number>([DEMO_MAIN_INDEX]);
+    for (const t of await this.botTrades()) {
+      if (SELLER_PAYOUT_STATES.includes(t.status) && t.sellerReceiveIndex !== undefined) {
+        indices.add(t.sellerReceiveIndex);
+      }
+    }
+    const seen = new Set<string>();
+    const result: WalletSpendableUtxo[] = [];
+    for (const index of indices) {
+      const address = this.options.wallet.receiveAddress(index);
+      const utxos: Utxo[] = await this.options.provider.getUtxos(address);
+      for (const u of utxos) {
+        const key = `${u.txid}:${u.vout}`;
+        if (seen.has(key)) continue;
+        seen.add(key);
+        result.push({
+          ...u,
+          lockingBytecode: binToHex(pkhToLockingBytecode(this.options.wallet.receivePkhHex(index))),
+          pathName: 'receive',
+          keyIndex: index,
+          address,
+          signer: this.signerFor(index),
+        } as WalletSpendableUtxo);
+      }
+    }
+    return result;
+  }
+
+  // --- Offers ---
+
+  // Publishes one open offer per requested asset unless the bot already has one. Spends real sats:
+  // it is reached only through an admin-protected route.
+  publishOffers(assets: DemoAsset[] = ['BCH', 'PUSD']): Promise<OfferView[]> {
+    return this.exclusive(async () => {
+      const service = this.options.service;
+      const allOffers = await service.listOffers();
+      const botOffers = allOffers.filter((o) => o.sellerIdentity === this.identity);
+      const published: OfferView[] = [];
+      let markerIndex = DEMO_MARKER_INDEX_BASE + botOffers.length;
+
+      for (const asset of assets) {
+        const assetId = demoAssetId(asset);
+        const existing = botOffers.find(
+          (o) => o.status === 'Published' && o.document.asset === assetId,
+        );
+        if (existing) {
+          published.push(existing);
+          continue;
+        }
+        if (markerIndex >= DEMO_TRADE_INDEX_BASE) {
+          throw new Error('Demo seller has used all offer marker indices');
+        }
+
+        const isBch = asset === 'BCH';
+        const document: OfferDocument = {
+          v: 1,
+          side: 'sell',
+          asset: assetId,
+          assetDecimals: isBch ? BCH_DECIMALS : PUSD_DECIMALS,
+          fiat: 'USD',
+          price: { type: 'floating', pair: isBch ? 'BCH/USD' : 'PUSD/USD', marginBps: 0 },
+          min: (isBch ? this.limits.minBchSats : this.limits.minPusdUnits).toString(),
+          max: (isBch ? this.limits.maxBchSats : this.limits.maxPusdUnits).toString(),
+          paymentMethods: [DEMO_PAYMENT_METHOD],
+          paymentWindowSec: this.limits.paymentWindowSec,
+          terms: DEMO_OFFER_TERMS,
+          expiresAt: this.nowSeconds() + this.limits.offerLifetimeSec,
+          arbiter: service.arbiterPublicKeyHex,
+          oracle: service.oraclePublicKeyHex,
+        };
+
+        const tx = buildPublishOfferTransaction({
+          provider: this.options.provider,
+          document,
+          utxos: await this.spendableUtxos(),
+          markerAddress: this.options.wallet.receiveAddress(markerIndex),
+          changeAddress: this.mainAddress,
+        });
+        const offer = await service.publishOffer({
+          sellerIdentity: this.identity,
+          offerJson: tx.offerJson,
+          offerTxHex: tx.hex,
+          markerReceiveIndex: markerIndex,
+          broadcast: true,
+        });
+        published.push(offer);
+        markerIndex += 1;
+      }
+      return published;
+    });
+  }
+
+  // --- Limits ---
+
+  private async checkLimits(excludeTradeRecordId?: string): Promise<void> {
+    const now = this.nowSeconds();
+    const trades = (await this.botTrades()).filter((t) => t.id !== excludeTradeRecordId);
+    const active = trades.filter((t) => ACTIVE_STATES.includes(t.status)).length;
+    if (active >= this.limits.maxActiveTrades) {
+      throw new DemoLimitError(
+        'The demo seller is busy with other visitors. Please try again in a few minutes.',
+      );
+    }
+    const acceptedToday = trades.filter(
+      (t) => t.fundingDeadline !== undefined && t.fundingDeadline - FUNDING_WINDOW_SEC > now - 86_400,
+    ).length;
+    if (acceptedToday >= this.limits.maxDailyFundings) {
+      throw new DemoLimitError(
+        'The demo seller has reached its daily limit of trades. Please try again tomorrow.',
+      );
+    }
+  }
+
+  // Declines before accepting when the bot cannot pay the escrow, so an empty bot does not keep
+  // trades stuck in Accepted (holding active slots) until the funding window ends.
+  private async checkBalance(trade: Pick<StoredTrade, 'asset' | 'amount'>): Promise<void> {
+    const expected = expectedEscrowFunding(trade);
+    const utxos = await this.spendableUtxos();
+    const sats = utxos.reduce((sum, u) => sum + u.satoshis, 0n);
+    const tokens = expected.token
+      ? utxos
+          .filter((u) => u.token?.category.toLowerCase() === expected.token!.category && !u.token.nft)
+          .reduce((sum, u) => sum + u.token!.amount, 0n)
+      : 0n;
+    // 2,000 sats of margin for the funding fee and the change outputs.
+    if (sats < expected.satoshis + 2000n || (expected.token && tokens < expected.token.amount)) {
+      throw new DemoLimitError(
+        'The demo seller has run out of funds for this offer. Please try again later.',
+      );
+    }
+  }
+
+  // Called before a take on a demo offer is recorded.
+  async assertCanTake(): Promise<void> {
+    await this.checkLimits();
+  }
+
+  // --- Trade actions ---
+
+  // Accepts a requested trade and funds its escrow, both within the request that created the trade.
+  acceptAndFund(tradeRecordId: string): Promise<StoredTrade> {
+    return this.exclusive(async () => {
+      const service = this.options.service;
+      const trade = await service.getTrade(tradeRecordId);
+      if (!trade || !service.isDemoTrade(trade)) {
+        throw new Error('Not a demo trade');
+      }
+      if (trade.status === 'Requested') {
+        try {
+          // Re-checked inside the lock: another take may have been accepted in the meantime.
+          await this.checkLimits(trade.id);
+          await this.checkBalance(trade);
+        } catch (err) {
+          await service.declineTrade({ tradeRecordId: trade.id, sellerIdentity: this.identity });
+          throw err;
+        }
+        await this.accept(trade);
+      }
+      return this.fundAccepted(tradeRecordId);
+    });
+  }
+
+  private async accept(trade: StoredTrade): Promise<void> {
+    const wallet = this.options.wallet;
+    const accepted = (await this.botTrades()).filter((t) => t.tradeId !== undefined).length;
+    const defiIndex = accepted;
+    const receiveIndex = DEMO_TRADE_INDEX_BASE + accepted;
+
+    const sessionKey = wallet.sessionPrivateKey(trade.id);
+    const details = JSON.stringify({
+      simulated: true,
+      method: DEMO_PAYMENT_METHOD,
+      notice:
+        'SIMULATED payment details for the Campfire demo. Do not send any money: just mark the trade as paid.',
+      reference: `DEMO-${trade.id.slice(0, 8).toUpperCase()}`,
+    });
+    const encryptedPaymentDetails = await encryptPaymentDetails(
+      sessionKey,
+      trade.buyerSessionPk,
+      details,
+    );
+
+    await this.options.service.acceptTrade({
+      tradeRecordId: trade.id,
+      sellerIdentity: this.identity,
+      sellerPk: wallet.defiPubkeyHex(defiIndex),
+      sellerDefiIndex: defiIndex,
+      sellerPayoutPkh: wallet.receivePkhHex(receiveIndex),
+      sellerReceiveIndex: receiveIndex,
+      sellerSessionPk: compressedPublicKeyHex(sessionKey),
+      encryptedPaymentDetails,
+    });
+  }
+
+  // Funds the escrow of an accepted trade. Idempotent: if the escrow already holds the exact
+  // funding (for example after an indexer delay), it records it instead of paying twice.
+  private async fundAccepted(tradeRecordId: string): Promise<StoredTrade> {
+    const service = this.options.service;
+    const trade = await service.getTrade(tradeRecordId, undefined, true);
+    if (!trade || trade.status !== 'Accepted' || !trade.terms || !trade.tradeId) {
+      return this.view(tradeRecordId);
+    }
+
+    const terms = trade.terms;
+    const contract = createEscrowContract(terms, trade.tradeId, this.options.provider);
+    const alreadyFunded = (await contract.getUtxos()).some((u) => matchesEscrowFunding(u, terms));
+    if (alreadyFunded) {
+      await service.confirmFunding({ idOrTradeId: tradeRecordId });
+      return this.view(tradeRecordId);
+    }
+
+    const previousHex = this.fundingAttempts.get(tradeRecordId);
+    if (previousHex) {
+      // Same transaction, same txid: rebroadcasting it is harmless if it already reached the network.
+      try {
+        await this.options.provider.sendRawTransaction(previousHex);
+      } catch {
+        // Typically "already known"; the lookup below decides.
+      }
+      await service.confirmFunding({ idOrTradeId: tradeRecordId });
+      return this.view(tradeRecordId);
+    }
+
+    // One attempt per request. If it fails, the next read of the trade (reconcile) checks the
+    // escrow first and only ever rebroadcasts this same transaction.
+    const tx = buildFundEscrowTransaction({
+      contract,
+      terms,
+      utxos: await this.spendableUtxos(),
+      changeAddress: this.mainAddress,
+      tokenChangeAddress: this.mainTokenAddress,
+    });
+    this.fundingAttempts.set(tradeRecordId, tx.hex);
+    try {
+      await service.confirmFunding({ idOrTradeId: tradeRecordId, fundingTxHex: tx.hex });
+    } catch (err) {
+      throw new Error(
+        `Demo seller could not confirm the escrow funding yet: ${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
+    return this.view(tradeRecordId);
+  }
+
+  // Signs and broadcasts `release` once the visitor marks the (simulated) fiat payment as sent.
+  release(tradeRecordId: string): Promise<StoredTrade> {
+    return this.exclusive(async () => {
+      const service = this.options.service;
+      const trade = await service.getTrade(tradeRecordId, undefined, true);
+      if (!trade || !service.isDemoTrade(trade)) {
+        throw new Error('Not a demo trade');
+      }
+      if (trade.status !== 'Paid' || !trade.terms || !trade.tradeId || trade.sellerDefiIndex === undefined) {
+        return this.view(tradeRecordId);
+      }
+      const contract = createEscrowContract(trade.terms, trade.tradeId, this.options.provider);
+      const utxo = (await contract.getUtxos()).find((u) => matchesEscrowFunding(u, trade.terms!));
+      if (!utxo) {
+        throw new Error('Escrow UTXO not found for demo release');
+      }
+      const { fee } = buildReleaseRequest({
+        contract,
+        utxo,
+        buyerPayoutPkh: trade.terms.buyerPayoutPkh,
+        sellerDefiIndex: trade.sellerDefiIndex,
+      });
+      const signer = new SignatureTemplate(
+        this.options.wallet.defiPrivateKey(trade.sellerDefiIndex),
+        BOT_SIGHASH,
+        SignatureAlgorithm.SCHNORR,
+      );
+      const signedTxHex = new TransactionBuilder({ provider: this.options.provider })
+        .addInput(utxo, contract.unlock.release(signer))
+        .addOutput({
+          to: pkhToLockingBytecode(trade.terms.buyerPayoutPkh),
+          amount: utxo.satoshis - fee,
+          token: utxo.token,
+        })
+        .build();
+      // settleEscrow checks the signed transaction in the BCH VM before broadcasting it.
+      await service.settleEscrow({ idOrTradeId: tradeRecordId, path: 'release', signedTxHex });
+      return this.view(tradeRecordId);
+    });
+  }
+
+  // Finishes any step left behind by a failed request (funding or release). Called on trade reads.
+  async reconcile(tradeRecordId: string): Promise<void> {
+    const trade = await this.options.service.getTrade(tradeRecordId);
+    if (!trade || !this.options.service.isDemoTrade(trade)) return;
+    try {
+      if (trade.status === 'Requested' || trade.status === 'Accepted') {
+        await this.acceptAndFund(tradeRecordId);
+      } else if (trade.status === 'Paid') {
+        await this.release(tradeRecordId);
+      }
+    } catch {
+      // Best effort: the read that triggered this still returns the current state.
+    }
+  }
+
+  private async view(tradeRecordId: string): Promise<StoredTrade> {
+    const trade = await this.options.service.getTrade(tradeRecordId);
+    if (!trade) {
+      throw new Error('Trade not found');
+    }
+    return trade;
+  }
+}

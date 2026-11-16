@@ -79,6 +79,10 @@ export class CampfireService {
       oracle: OracleService;
       arbiterPrivateKey: Uint8Array | string;
       nowSeconds?: () => number;
+      // Identity of the demo seller bot (protocol section 8). Only its offers and trades are marked as demo.
+      demoSellerIdentity?: string;
+      // Delay between escrow lookups after broadcasting a funding transaction (the indexer may lag the mempool).
+      fundingLookupDelayMs?: number;
     },
   ) {
     this.arbiterPrivateKey = toBytes(options.arbiterPrivateKey, 'arbiterPrivateKey');
@@ -95,6 +99,15 @@ export class CampfireService {
 
   get oraclePublicKeyHex(): string {
     return this.options.oracle.publicKeyHex;
+  }
+
+  get demoSellerIdentity(): string | undefined {
+    return this.options.demoSellerIdentity;
+  }
+
+  // A trade is a demo trade only when the demo seller bot is its seller; clients cannot claim it.
+  isDemoTrade(trade: Pick<StoredTrade, 'sellerIdentity'>): boolean {
+    return this.options.demoSellerIdentity !== undefined && trade.sellerIdentity === this.options.demoSellerIdentity;
   }
 
   // --- Identity & Reputation (Section 1) ---
@@ -180,7 +193,6 @@ export class CampfireService {
     offerTxHex: string;
     markerReceiveIndex: number;
     broadcast?: boolean;
-    isDemo?: boolean;
   }): Promise<OfferView> {
     const seller = await this.options.storage.getIdentity(params.sellerIdentity);
     if (!seller) {
@@ -237,7 +249,7 @@ export class CampfireService {
       markerVout: 1,
       markerAddress: pkhToCashAddress(markerPkhHex),
       status: 'Published',
-      isDemo: params.isDemo,
+      isDemo: this.isDemoTrade({ sellerIdentity: params.sellerIdentity }),
       createdAt: now,
       updatedAt: now,
     };
@@ -354,37 +366,61 @@ export class CampfireService {
       trade.verdictSignature = binToHex(sig);
       trade.verdictReason = 'Payment window expired without buyer marking fiat as sent';
       trade.verdictIssuedAt = now;
-
-      // Attempt to broadcast `arbitrate` on-chain if the escrow UTXO is unspent.
-      try {
-        const contract = createEscrowContract(trade.terms, trade.tradeId, this.options.provider);
-        const utxos = await contract.getUtxos();
-        const escrowUtxo = utxos.find((u) => matchesEscrowFunding(u, trade.terms!));
-        if (escrowUtxo) {
-          const arb = buildArbitrateSpend({
-            contract,
-            utxo: escrowUtxo,
-            arbiterSig: sig,
-            verdict: VERDICT_SELLER,
-            buyerPayoutPkh: trade.terms.buyerPayoutPkh,
-            sellerPayoutPkh: trade.terms.sellerPayoutPkh,
-            tradeId: trade.tradeId,
-            arbiterPk: this.arbiterPublicKeyHex,
-          });
-          const txDetails = await arb.builder.send();
-          trade.settlementTxid = txDetails.txid;
-        }
-      } catch {
-        // If broadcasting fails (e.g. UTXO not yet available), verdictSignature remains stored for anyone to broadcast.
-      }
-
+      trade.settlementTxid = await this.tryBroadcastArbitrate(trade);
       trade.status = 'ResolvedSeller';
       trade.updatedAt = now;
       trade.completedAt = now;
       await this.options.storage.saveTrade(trade);
+      return trade;
+    }
+
+    // A verdict whose `arbitrate` broadcast failed earlier is retried on every read, so the escrow
+    // never stays locked until `refundTime` because of a transient network error.
+    if (
+      (trade.status === 'ResolvedSeller' || trade.status === 'ResolvedBuyer') &&
+      trade.verdict &&
+      trade.verdictSignature &&
+      !trade.settlementTxid
+    ) {
+      const txid = await this.tryBroadcastArbitrate(trade);
+      if (txid) {
+        trade.settlementTxid = txid;
+        trade.updatedAt = now;
+        await this.options.storage.saveTrade(trade);
+      }
     }
 
     return trade;
+  }
+
+  // Broadcasts `arbitrate` with the stored verdict if the escrow UTXO is unspent; returns undefined on any failure.
+  private async tryBroadcastArbitrate(trade: StoredTrade): Promise<string | undefined> {
+    if (!trade.terms || !trade.tradeId || !trade.verdict || !trade.verdictSignature) {
+      return undefined;
+    }
+    try {
+      const contract = createEscrowContract(trade.terms, trade.tradeId, this.options.provider);
+      const utxos = await contract.getUtxos();
+      const escrowUtxo = utxos.find((u) => matchesEscrowFunding(u, trade.terms!));
+      if (!escrowUtxo) {
+        return undefined;
+      }
+      const arb = buildArbitrateSpend({
+        contract,
+        utxo: escrowUtxo,
+        arbiterSig: trade.verdictSignature,
+        verdict: trade.verdict,
+        buyerPayoutPkh: trade.terms.buyerPayoutPkh,
+        sellerPayoutPkh: trade.terms.sellerPayoutPkh,
+        tradeId: trade.tradeId,
+        arbiterPk: trade.arbiterPk,
+      });
+      const details = await arb.builder.send();
+      return details.txid;
+    } catch {
+      // The signed verdict stays stored, so the next read (or anyone else) can broadcast it.
+      return undefined;
+    }
   }
 
   async requestTrade(params: {
@@ -612,8 +648,17 @@ export class CampfireService {
     }
 
     const contract = createEscrowContract(trade.terms, trade.tradeId, this.options.provider);
-    const utxos = await contract.getUtxos();
-    const matchingUtxo = utxos.find((u) => matchesEscrowFunding(u, trade.terms!));
+    // Right after a broadcast the indexer may not list the new UTXO yet, so look a few times.
+    const attempts = params.fundingTxHex ? 4 : 1;
+    const delayMs = this.options.fundingLookupDelayMs ?? 1000;
+    let matchingUtxo: Awaited<ReturnType<typeof contract.getUtxos>>[number] | undefined;
+    for (let attempt = 0; attempt < attempts && !matchingUtxo; attempt++) {
+      if (attempt > 0 && delayMs > 0) {
+        await new Promise((resolve) => setTimeout(resolve, delayMs));
+      }
+      const utxos = await contract.getUtxos();
+      matchingUtxo = utxos.find((u) => matchesEscrowFunding(u, trade.terms!));
+    }
     if (!matchingUtxo) {
       throw new Error('No UTXO at the escrow address matches the required value and token terms');
     }
@@ -763,7 +808,12 @@ export class CampfireService {
     if (!trade || !trade.terms || !trade.tradeId) {
       throw new Error('Trade or trade terms not found');
     }
-    if (!['Funded', 'Paid', 'Disputed'].includes(trade.status)) {
+    // A resolved trade whose `arbitrate` was never broadcast can still be settled with its stored verdict.
+    const pendingArbitrate =
+      params.path === 'arbitrate' &&
+      (trade.status === 'ResolvedSeller' || trade.status === 'ResolvedBuyer') &&
+      !trade.settlementTxid;
+    if (!['Funded', 'Paid', 'Disputed'].includes(trade.status) && !pendingArbitrate) {
       throw new Error(`Cannot settle escrow in state "${trade.status}"`);
     }
 
@@ -845,7 +895,7 @@ export class CampfireService {
 
     trade.settlementTxid = txid;
     trade.updatedAt = now;
-    trade.completedAt = now;
+    trade.completedAt = trade.completedAt ?? now;
     await this.options.storage.saveTrade(trade);
     return this.sanitizeTrade(trade);
   }

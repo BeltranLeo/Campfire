@@ -95,6 +95,8 @@ const seller = makeWallet('service-test-seller');
 const buyer = makeWallet('service-test-buyer');
 const arbiterSk = sha256.hash(utf8ToBin('service-test-arbiter'));
 const oracleSk = sha256.hash(utf8ToBin('service-test-oracle'));
+const ADMIN_TOKEN = 'service-test-admin-token';
+const ADMIN = { authorization: `Bearer ${ADMIN_TOKEN}` };
 
 function setupTestContext(initialNow = 1_794_900_000) {
   let currentNow = initialNow;
@@ -120,17 +122,20 @@ function setupTestContext(initialNow = 1_794_900_000) {
     arbiterPrivateKey: arbiterSk,
     nowSeconds: () => currentNow,
   });
-  const api = createApiHandler({ service, oracle });
+  const api = createApiHandler({ service, oracle, adminToken: ADMIN_TOKEN });
 
   const jsonReq = async <T = any>(
     method: string,
     path: string,
     body?: unknown,
+    extraHeaders?: Record<string, string>,
   ): Promise<{ status: number; data: T }> => {
+    const headers: Record<string, string> = { ...extraHeaders };
+    if (body) headers['content-type'] = 'application/json';
     const res = await api(
       new Request(`http://localhost${path}`, {
         method,
-        headers: body ? { 'content-type': 'application/json' } : undefined,
+        headers,
         body: body ? JSON.stringify(body) : undefined,
       }),
     );
@@ -567,18 +572,35 @@ describe('CampfireService & HTTP API end-to-end lifecycle', () => {
     });
     expect(dispRes.data.trade.status).toBe('Disputed');
 
+    // The arbiter views and verdicts are closed to anyone without the admin token.
+    const anonChat = await ctx.jsonReq('GET', `/api/trades/${acc1.trade.tradeId}/chat?arbiter=true`);
+    expect(anonChat.status).toBe(403);
+    const anonView = await ctx.jsonReq('GET', `/api/trades/${acc1.trade.tradeId}?arbiter=true`);
+    expect(anonView.status).toBe(403);
+    const anonVerdict = await ctx.jsonReq(
+      'POST',
+      `/api/trades/${acc1.trade.tradeId}/verdict`,
+      { verdict: VERDICT_BUYER },
+      { authorization: 'Bearer wrong-token' },
+    );
+    expect(anonVerdict.status).toBe(403);
+
     // Arbiter reads decrypted chat.
     const arbChat = await ctx.jsonReq(
       'GET',
       `/api/trades/${acc1.trade.tradeId}/chat?arbiter=true`,
+      undefined,
+      ADMIN,
     );
     expect(arbChat.data.decrypted[0].plaintext).toBe('Receipt #777 attached');
 
     // Arbiter issues verdict `0x01` (buyer wins), which automatically broadcasts `arbitrate`.
-    const verdictRes = await ctx.jsonReq('POST', `/api/trades/${acc1.trade.tradeId}/verdict`, {
-      verdict: VERDICT_BUYER,
-      reason: 'Verified receipt #777',
-    });
+    const verdictRes = await ctx.jsonReq(
+      'POST',
+      `/api/trades/${acc1.trade.tradeId}/verdict`,
+      { verdict: VERDICT_BUYER, reason: 'Verified receipt #777' },
+      ADMIN,
+    );
     expect(verdictRes.data.trade.status).toBe('ResolvedBuyer');
     expect(verdictRes.data.trade.settlementTxid).toMatch(/^[0-9a-f]{64}$/);
 

@@ -4,10 +4,12 @@ import { sha256, utf8ToBin } from '@bitauth/libauth';
 import { ElectrumNetworkProvider } from 'cashscript';
 import {
   CampfireService,
+  DemoSeller,
   LivePriceFeed,
   MemoryStorage,
   OracleService,
   createApiHandler,
+  deriveDemoSellerWallet,
 } from '../src/server/index.js';
 
 let handlerPromise: Promise<(req: Request) => Promise<Response>> | null = null;
@@ -28,13 +30,29 @@ async function getHandler(): Promise<(req: Request) => Promise<Response>> {
         privateKey: oraclePrivateKey,
         feed: new LivePriceFeed(),
       });
+      // Demo mode (protocol section 8) is enabled only when the bot's seed is configured.
+      const demoWallet = process.env.DEMO_SELLER_SEED
+        ? deriveDemoSellerWallet(process.env.DEMO_SELLER_SEED)
+        : undefined;
       const service = new CampfireService({
         storage,
         provider,
         oracle,
         arbiterPrivateKey,
+        demoSellerIdentity: demoWallet?.identity,
       });
-      return createApiHandler({ service, oracle });
+      let demo: DemoSeller | undefined;
+      if (demoWallet) {
+        demo = new DemoSeller({ service, provider, wallet: demoWallet });
+        await demo.init();
+      }
+      return createApiHandler({
+        service,
+        oracle,
+        demo,
+        // Without ADMIN_TOKEN the arbiter and demo-administration routes stay disabled.
+        adminToken: process.env.ADMIN_TOKEN || undefined,
+      });
     })();
   }
   return handlerPromise;

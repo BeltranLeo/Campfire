@@ -5,3 +5,7 @@ CLAUDE.local.md
 # Dependencies and build output
 node_modules/
 dist/
+
+# Secrets (demo seller seed, admin token, service keys)
+.env
+.env.*
