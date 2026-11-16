@@ -1,6 +1,7 @@
 import { Route, Routes } from 'react-router';
 import { Shell } from './components/Shell';
 import { DevComponents } from './pages/DevComponents';
+import { Landing } from './pages/Landing';
 import { NotBuilt } from './pages/NotBuilt';
 import { Offers } from './pages/Offers';
 import { Take } from './pages/Take';
@@ -11,7 +12,7 @@ export function App() {
   return (
     <Routes>
       <Route element={<Shell />}>
-        <Route index element={<NotBuilt title="Campfire" />} />
+        <Route index element={<Landing />} />
         <Route path="welcome" element={<NotBuilt title="Welcome" />} />
         <Route path="offers" element={<Offers />} />
         <Route path="offers/new" element={<NotBuilt title="New offer" />} />
