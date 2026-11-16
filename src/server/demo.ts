@@ -3,7 +3,10 @@
 
 import {
   binToHex,
+  decodeTransactionUnsafe,
   deriveHdPath,
+  hexToBin,
+  sha256,
   deriveHdPrivateNodeChild,
   deriveHdPrivateNodeFromSeed,
   deriveHdPublicNode,
@@ -193,6 +196,9 @@ export class DemoSeller {
       nowSeconds?: () => number;
       // Cross-instance lock (for example a Postgres advisory lock), held around every wallet action.
       withLock?: <T>(name: string, fn: () => Promise<T>) => Promise<T>;
+      // How long to wait for the indexer to reflect the bot's own transactions (see waitUntilIndexed).
+      indexPollMs?: number;
+      indexTimeoutMs?: number;
     },
   ) {
     if (options.service.demoSellerIdentity !== options.wallet.identity) {
@@ -275,6 +281,34 @@ export class DemoSeller {
     return result;
   }
 
+  // An Electrum server lists a just-broadcast transaction only a moment later. Until then it still
+  // reports the spent coins as unspent, and the next transaction built from them is rejected as a
+  // mempool conflict (seen on mainnet when publishing two offers in a row). Called while holding the
+  // lock, so the next wallet action of any instance starts from an up-to-date coin list.
+  private async waitUntilIndexed(txHex: string): Promise<void> {
+    const tx = decodeTransactionUnsafe(hexToBin(txHex));
+    const txid = binToHex(sha256.hash(sha256.hash(hexToBin(txHex))).reverse());
+    const spent = new Set(tx.inputs.map((i) => `${binToHex(i.outpointTransactionHash)}:${i.outpointIndex}`));
+    const mainLock = binToHex(pkhToLockingBytecode(this.options.wallet.receivePkhHex(DEMO_MAIN_INDEX)));
+    const change = tx.outputs.flatMap((o, vout) =>
+      binToHex(o.lockingBytecode) === mainLock ? [`${txid}:${vout}`] : [],
+    );
+
+    const pollMs = this.options.indexPollMs ?? 500;
+    const deadline = Date.now() + (this.options.indexTimeoutMs ?? 15_000);
+    for (;;) {
+      const listed = new Set((await this.spendableUtxos()).map((u) => `${u.txid}:${u.vout}`));
+      const spentGone = [...spent].every((o) => !listed.has(o));
+      const changeShown = change.every((o) => listed.has(o));
+      if (spentGone && changeShown) return;
+      if (Date.now() >= deadline) {
+        console.warn(`Indexer has not reflected transaction ${txid} yet; continuing`);
+        return;
+      }
+      await new Promise((resolve) => setTimeout(resolve, pollMs));
+    }
+  }
+
   // --- Offers ---
 
   // Publishes one open offer per requested asset unless the bot already has one. Spends real sats:
@@ -332,6 +366,7 @@ export class DemoSeller {
           markerReceiveIndex: markerIndex,
           broadcast: true,
         });
+        await this.waitUntilIndexed(tx.hex);
         published.push(offer);
         markerIndex += 1;
       }
@@ -468,6 +503,7 @@ export class DemoSeller {
         // Typically "already known"; the lookup below decides.
       }
       await service.confirmFunding({ idOrTradeId: tradeRecordId });
+      await this.waitUntilIndexed(previousHex);
       return this.view(tradeRecordId);
     }
 
@@ -488,6 +524,7 @@ export class DemoSeller {
         `Demo seller could not confirm the escrow funding yet: ${err instanceof Error ? err.message : String(err)}`,
       );
     }
+    await this.waitUntilIndexed(tx.hex);
     return this.view(tradeRecordId);
   }
 

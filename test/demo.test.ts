@@ -87,7 +87,14 @@ const ADMIN = { authorization: `Bearer ${ADMIN_TOKEN}` };
 // Signature hash type byte appended to every signature: ALL | UTXOS | FORKID.
 const SIGHASH_0X61 = 0x61;
 
-async function setupDemo(options?: { limits?: Partial<DemoSellerLimits>; botSats?: bigint; botPusd?: bigint }) {
+async function setupDemo(options?: {
+  limits?: Partial<DemoSellerLimits>;
+  botSats?: bigint;
+  botPusd?: bigint;
+  // After each broadcast, this many lookups of the bot's main address return the coins as they were
+  // before it, like an Electrum server that has not processed the transaction yet.
+  indexerLagLookups?: number;
+}) {
   let currentNow = 1_794_900_000;
   const nowSeconds = () => currentNow;
   const provider = new MockNetworkProvider();
@@ -98,7 +105,22 @@ async function setupDemo(options?: { limits?: Partial<DemoSellerLimits>; botSats
   let failNextBroadcasts = 0;
   let failAfterSendCount = 0;
   const originalSend = provider.sendRawTransaction.bind(provider);
+  const realGetUtxos = provider.getUtxos.bind(provider);
+  const botMainAddress = botWallet.receiveAddress(0);
+  let staleSnapshot: Awaited<ReturnType<typeof realGetUtxos>> | undefined;
+  let staleLookupsLeft = 0;
+  provider.getUtxos = async (address: string) => {
+    if (address === botMainAddress && staleLookupsLeft > 0 && staleSnapshot) {
+      staleLookupsLeft -= 1;
+      return staleSnapshot;
+    }
+    return realGetUtxos(address);
+  };
   provider.sendRawTransaction = async (hex: string) => {
+    if (options?.indexerLagLookups) {
+      staleSnapshot = await realGetUtxos(botMainAddress);
+      staleLookupsLeft = options.indexerLagLookups;
+    }
     if (failNextBroadcasts > 0) {
       failNextBroadcasts -= 1;
       throw new Error('simulated network error');
@@ -127,7 +149,14 @@ async function setupDemo(options?: { limits?: Partial<DemoSellerLimits>; botSats
     demoSellerIdentity: botWallet.identity,
     fundingLookupDelayMs: 0,
   });
-  const demo = new DemoSeller({ service, provider, wallet: botWallet, limits: options?.limits, nowSeconds });
+  const demo = new DemoSeller({
+    service,
+    provider,
+    wallet: botWallet,
+    limits: options?.limits,
+    nowSeconds,
+    indexPollMs: 0,
+  });
   await demo.init();
   const api = createApiHandler({ service, oracle, demo, adminToken: ADMIN_TOKEN });
 
@@ -312,6 +341,19 @@ describe('Demo seller bot (protocol section 8)', () => {
     expect(received[0].token?.category).toBe(PUSD_CATEGORY);
     expect(received[0].token?.amount).toBe(10n);
     expect(received[0].satoshis).toBeGreaterThanOrEqual(6000n);
+  });
+
+  it('waits for a lagging indexer so back-to-back transactions never reuse a spent coin', async () => {
+    // Publishing both offers in a row failed on mainnet with "txn-mempool-conflict" before this wait.
+    const ctx = await setupDemo({ indexerLagLookups: 3 });
+    expect(ctx.bchOffer).toBeDefined();
+    expect(ctx.pusdOffer).toBeDefined();
+
+    // Two takes in quick succession: the second funding must use the first one's change.
+    const first = await ctx.take(ctx.bchOffer.offerTxid, '20000');
+    const second = await ctx.take(ctx.bchOffer.offerTxid, '20000');
+    expect(first.data.trade.status).toBe('Funded');
+    expect(second.data.trade.status).toBe('Funded');
   });
 
   it('rejects amounts above the demo cap', async () => {
