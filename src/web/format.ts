@@ -31,6 +31,12 @@ export function formatFiat(value: number, fiat: string): string {
   return `${value.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ${fiat}`;
 }
 
+/** A fiat amount the protocol computed as a decimal string ("1234.56"), grouped: "1,234.56 ARS". Exact. */
+export function formatFiatAmount(decimal: string, fiat: string): string {
+  const [whole, fraction] = decimal.split('.');
+  return `${groupThousands(whole)}${fraction ? `.${fraction}` : ''} ${fiat}`;
+}
+
 /** The oracle price adjusted by the offer's margin in basis points. */
 export function applyMargin(price: string, marginBps: number): number {
   return Number(price) * (1 + marginBps / 10_000);

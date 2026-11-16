@@ -30,7 +30,7 @@ async function request<T>(method: 'GET' | 'POST', path: string, body?: unknown):
     }
     throw new ApiError(0, 'Campfire could not be reached. Check your connection and try again.');
   }
-  const data = await res.json().catch(() => undefined);
+  const data = (await res.json().catch(() => undefined)) as { error?: unknown } | undefined;
   if (!res.ok) {
     const message = typeof data?.error === 'string' ? data.error : `Campfire answered with an error (${res.status}).`;
     throw new ApiError(res.status, message);
@@ -136,6 +136,18 @@ export interface PriceQuote {
 export interface TradeSummary {
   id: string;
   status: TradeState;
+  offerTxid: string;
   buyerIdentity: string;
   sellerIdentity: string;
+  buyerSessionPk?: string;
+  buyerDefiIndex?: number;
+  buyerReceiveIndex?: number;
+  sellerDefiIndex?: number;
+  sellerReceiveIndex?: number;
+}
+
+export interface DemoInfo {
+  enabled: boolean;
+  identity: string;
+  limits: { maxActiveTrades: number; maxDailyFundings: number };
 }
