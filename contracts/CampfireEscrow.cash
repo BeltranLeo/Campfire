@@ -1,0 +1,56 @@
+pragma cashscript ^0.14.0;
+
+// Payout rule shared by every spending path (protocol section 4.2): the whole
+// escrow UTXO goes to one P2PKH address fixed in the contract, with the same
+// tokens, and at most 1,000 satoshis are left as miner fee.
+function requirePayout(bytes20 payoutPkh) {
+    require(tx.inputs.length == 1, "only one input allowed");
+    require(tx.outputs.length == 1, "only one output allowed");
+    require(tx.outputs[0].lockingBytecode == new LockingBytecodeP2PKH(payoutPkh), "wrong payout address");
+    require(tx.outputs[0].tokenCategory == tx.inputs[0].tokenCategory, "token category changed");
+    require(tx.outputs[0].tokenAmount == tx.inputs[0].tokenAmount, "token amount changed");
+    require(tx.outputs[0].nftCommitment == tx.inputs[0].nftCommitment, "NFT commitment changed");
+    require(tx.outputs[0].value >= tx.inputs[0].value - 1000, "fee above 1000 satoshis");
+}
+
+// Escrow for one trade. No signer chooses the destination: each path pays
+// either the seller's or the buyer's payout address.
+contract CampfireEscrow(
+    pubkey sellerPk,
+    pubkey buyerPk,
+    pubkey arbiterPk,
+    bytes20 sellerPayoutPkh,
+    bytes20 buyerPayoutPkh,
+    bytes32 tradeId,
+    int refundTime
+) {
+    // The seller confirms the fiat payment arrived: pays the buyer.
+    function release(sig sellerSig) {
+        requirePayout(buyerPayoutPkh);
+        require(checkSig(sellerSig, sellerPk), "invalid seller signature");
+    }
+
+    // The buyer gives up the trade: pays the seller.
+    function cancel(sig buyerSig) {
+        requirePayout(sellerPayoutPkh);
+        require(checkSig(buyerSig, buyerPk), "invalid buyer signature");
+    }
+
+    // The arbiter signed a verdict for this trade: 0x01 pays the buyer,
+    // 0x02 pays the seller. Anyone holding the verdict can broadcast it.
+    function arbitrate(datasig arbiterSig, bytes1 verdict) {
+        require(verdict == 0x01 || verdict == 0x02, "unknown verdict");
+        bytes20 winnerPkh = sellerPayoutPkh;
+        if (verdict == 0x01) {
+            winnerPkh = buyerPayoutPkh;
+        }
+        requirePayout(winnerPkh);
+        require(checkDataSig(arbiterSig, tradeId + verdict, arbiterPk), "invalid arbiter verdict");
+    }
+
+    // Nothing else happened before refundTime: pays the seller. Anyone can broadcast it.
+    function refund() {
+        requirePayout(sellerPayoutPkh);
+        require(tx.time >= refundTime, "refund time not reached");
+    }
+}

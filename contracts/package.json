@@ -1,0 +1,19 @@
+{
+  "name": "campfire-contracts",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "compile": "cashc CampfireEscrow.cash -o CampfireEscrow.json",
+    "test": "npm run compile && tsc --noEmit && vitest run"
+  },
+  "dependencies": {
+    "@bitauth/libauth": "3.1.0-next.8",
+    "cashscript": "0.14.0"
+  },
+  "devDependencies": {
+    "@types/node": "26.6.6",
+    "cashc": "0.14.0",
+    "typescript": "7.0.2",
+    "vitest": "5.1.0"
+  }
+}

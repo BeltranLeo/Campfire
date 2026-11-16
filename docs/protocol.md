@@ -1,10 +1,10 @@
 # Campfire protocol
 
-Status: **approved design, not yet implemented** · Format version: `1` · Last updated: 2026-11-15
+Status: **approved design; escrow contract implemented** · Format version: `1` · Last updated: 2026-11-16
 
 Campfire is a non-custodial peer-to-peer exchange of BCH and CashTokens (PUSD first) for fiat money. This document specifies the offer format, the trade process and the escrow contract.
 
-Everything described here targets Bitcoin Cash **mainnet**. Nothing in this document is implemented yet; the contract code shown is an illustrative sketch that has not been compiled.
+Everything described here targets Bitcoin Cash **mainnet**. The escrow contract is implemented in [`contracts/CampfireEscrow.cash`](../contracts/CampfireEscrow.cash).
 
 ## 1. Actors
 
@@ -226,7 +226,7 @@ One contract instance per trade, written in CashScript (`^0.14.0`), deployed as 
 | `sellerPayoutPkh` | `bytes20` | Hash of the seller's payout key |
 | `buyerPayoutPkh` | `bytes20` | Hash of the buyer's payout key |
 | `tradeId` | `bytes32` | Hash of the trade terms |
-| `refundTime` | `int` | Unix time after which the seller can be refunded |
+| `refundTime` | `int` | Unix timestamp (`>= 500,000,000`) after which the seller can be refunded |
 
 ### 4.2 Payout rule
 
@@ -254,36 +254,54 @@ Notes:
 - **If the arbiter disappears**, `release` and `cancel` still work, so the parties can settle either way by agreement. If they do not agree, `refund` returns the funds to the seller at `refundTime`.
 - `refund` favours the seller. A buyer who has paid must open a dispute well before `refundTime`.
 
-Illustrative sketch (not compiled, not final):
+Contract implementation ([`contracts/CampfireEscrow.cash`](../contracts/CampfireEscrow.cash)):
 
 ```cashscript
 pragma cashscript ^0.14.0;
 
+function requirePayout(bytes20 payoutPkh) {
+    require(tx.inputs.length == 1, "only one input allowed");
+    require(tx.outputs.length == 1, "only one output allowed");
+    require(tx.outputs[0].lockingBytecode == new LockingBytecodeP2PKH(payoutPkh), "wrong payout address");
+    require(tx.outputs[0].tokenCategory == tx.inputs[0].tokenCategory, "token category changed");
+    require(tx.outputs[0].tokenAmount == tx.inputs[0].tokenAmount, "token amount changed");
+    require(tx.outputs[0].nftCommitment == tx.inputs[0].nftCommitment, "NFT commitment changed");
+    require(tx.outputs[0].value >= tx.inputs[0].value - 1000, "fee above 1000 satoshis");
+}
+
 contract CampfireEscrow(
-    pubkey sellerPk, pubkey buyerPk, pubkey arbiterPk,
-    bytes20 sellerPayoutPkh, bytes20 buyerPayoutPkh,
-    bytes32 tradeId, int refundTime
+    pubkey sellerPk,
+    pubkey buyerPk,
+    pubkey arbiterPk,
+    bytes20 sellerPayoutPkh,
+    bytes20 buyerPayoutPkh,
+    bytes32 tradeId,
+    int refundTime
 ) {
     function release(sig sellerSig) {
-        require(checkSig(sellerSig, sellerPk));
-        // payout rule (4.2) with buyerPayoutPkh
-        require(tx.inputs.length == 1);
-        require(tx.outputs.length == 1);
-        require(tx.outputs[0].lockingBytecode == new LockingBytecodeP2PKH(buyerPayoutPkh));
-        require(tx.outputs[0].tokenCategory == tx.inputs[0].tokenCategory);
-        require(tx.outputs[0].tokenAmount == tx.inputs[0].tokenAmount);
-        require(tx.outputs[0].nftCommitment == tx.inputs[0].nftCommitment);
-        require(tx.outputs[0].value >= tx.inputs[0].value - 1000);
+        requirePayout(buyerPayoutPkh);
+        require(checkSig(sellerSig, sellerPk), "invalid seller signature");
+    }
+
+    function cancel(sig buyerSig) {
+        requirePayout(sellerPayoutPkh);
+        require(checkSig(buyerSig, buyerPk), "invalid buyer signature");
     }
 
     function arbitrate(datasig arbiterSig, bytes1 verdict) {
-        require(checkDataSig(arbiterSig, tradeId + verdict, arbiterPk));
-        // verdict 0x01 -> payout rule with buyerPayoutPkh
-        // verdict 0x02 -> payout rule with sellerPayoutPkh
+        require(verdict == 0x01 || verdict == 0x02, "unknown verdict");
+        bytes20 winnerPkh = sellerPayoutPkh;
+        if (verdict == 0x01) {
+            winnerPkh = buyerPayoutPkh;
+        }
+        requirePayout(winnerPkh);
+        require(checkDataSig(arbiterSig, tradeId + verdict, arbiterPk), "invalid arbiter verdict");
     }
 
-    // cancel(sig buyerSig): checkSig(buyerSig, buyerPk), payout rule with sellerPayoutPkh
-    // refund():             require(tx.time >= refundTime), payout rule with sellerPayoutPkh
+    function refund() {
+        requirePayout(sellerPayoutPkh);
+        require(tx.time >= refundTime, "refund time not reached");
+    }
 }
 ```
 
