@@ -255,5 +255,3 @@ export function useWallet() {
   return { ...state, ...actions };
 }
 
-/** Shortens an identity or key for display: first 6 and last 4 characters. */
-export const shortId = (value: string) => `${value.slice(0, 6)}…${value.slice(-4)}`;

@@ -1,9 +1,11 @@
 import { useCallback, useEffect, useId, useRef, useState } from 'react';
 import { Link, NavLink } from 'react-router';
 import QRCode from 'qrcode';
-import { shortId, useWallet } from '../wallet';
+import { useWallet } from '../wallet';
 import { CopyButton } from './CopyButton';
 import { Icon, type IconName } from './Icon';
+import { HashLink, shorten } from './Provenance';
+import { Notice, Skeleton } from './States';
 
 // The WizardConnect button at the top right, in its four states (Shell-* screens):
 // disconnected, pairing, connecting and connected with its menu.
@@ -23,7 +25,7 @@ export function WalletButton() {
   if (wallet.status !== 'connected' || !wallet.identity) {
     return (
       <>
-        <button type="button" className="cf-btn" aria-busy="true" disabled>
+        <button type="button" className="cf-btn" aria-busy="true">
           {wallet.status === 'pairing' ? 'Pairing…' : 'Connecting…'}
         </button>
         {wallet.pairing && <PairingDialog uri={wallet.pairing.uri} qrUri={wallet.pairing.qrUri} onClose={wallet.disconnect} />}
@@ -45,7 +47,7 @@ export function WalletButton() {
         }}
       >
         <span className="cf-wallet__dot" aria-hidden="true" />
-        <span className="cf-mono">{shortId(wallet.identity)}</span>
+        <span className="cf-mono">{shorten(wallet.identity)}</span>
         {completed !== null && <span className="cf-subtle">· {plural(completed, 'trade')}</span>}
       </button>
       {menuOpen && <WalletMenu onClose={closeMenu} />}
@@ -81,9 +83,7 @@ function WalletMenu({ onClose }: { onClose: () => void }) {
       <div className="cf-stack" data-gap="1">
         <span className="cf-label">Your identity</span>
         <span className="cf-row" data-nowrap>
-          <span className="cf-hash" data-plain title={wallet.identity}>
-            {shortId(wallet.identity)}
-          </span>
+          <HashLink value={wallet.identity} kind="plain" />
           <CopyButton value={wallet.identity} />
         </span>
       </div>
@@ -183,7 +183,7 @@ function PairingDialog({ uri, qrUri, onClose }: { uri: string; qrUri: string; on
           </>
         )}
         <div className="cf-row">
-          <span className="cf-skel" style={{ width: 10, height: 10, borderRadius: '50%' }} />
+          <Skeleton width={10} height={10} style={{ borderRadius: '50%' }} />
           <span className="cf-small cf-muted">Waiting for the wallet…</span>
         </div>
         <p className="cf-small cf-subtle">
@@ -223,12 +223,9 @@ export function WalletError() {
   if (!error) return null;
   return (
     <div className="s-walleterror">
-      <div className="cf-notice" data-tone="danger" role="alert">
-        <div>
-          <strong>{error.title}</strong>
-          {error.message}
-        </div>
-      </div>
+      <Notice tone="danger" title={error.title}>
+        {error.message}
+      </Notice>
     </div>
   );
 }
