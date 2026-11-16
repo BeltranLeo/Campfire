@@ -11,6 +11,10 @@ export class ApiError extends Error {
   }
 }
 
+// A request that never answers would leave a page loading forever. Writes get longer: taking a demo
+// offer waits for the demo seller's on-chain deposit.
+const TIMEOUT_MS = { GET: 20_000, POST: 60_000 };
+
 async function request<T>(method: 'GET' | 'POST', path: string, body?: unknown): Promise<T> {
   let res: Response;
   try {
@@ -18,15 +22,22 @@ async function request<T>(method: 'GET' | 'POST', path: string, body?: unknown):
       method,
       headers: body === undefined ? undefined : { 'content-type': 'application/json' },
       body: body === undefined ? undefined : JSON.stringify(body),
+      signal: AbortSignal.timeout(TIMEOUT_MS[method]),
     });
-  } catch {
+  } catch (err) {
+    if (err instanceof DOMException && err.name === 'TimeoutError') {
+      throw new ApiError(0, 'Campfire did not answer in time. Try again.');
+    }
     throw new ApiError(0, 'Campfire could not be reached. Check your connection and try again.');
   }
-  const data = await res.json().catch(() => null);
+  const data = await res.json().catch(() => undefined);
   if (!res.ok) {
     const message = typeof data?.error === 'string' ? data.error : `Campfire answered with an error (${res.status}).`;
     throw new ApiError(res.status, message);
   }
+  // A 200 that is not JSON means the request reached something other than the API (a misrouted
+  // deploy, or the dev server without its proxy); treating it as data would show an empty page.
+  if (data === undefined) throw new ApiError(502, `Campfire answered with an error (${res.status}).`);
   return data as T;
 }
 
@@ -70,6 +81,55 @@ export interface Reputation {
 export interface RegisteredIdentity {
   identity: string;
   reputation: Reputation;
+}
+
+export interface ApiConfig {
+  arbiterPk: string;
+  oraclePk: string;
+  pusdCategory: string;
+  bchDecimals: number;
+  pusdDecimals: number;
+  demoSellerIdentity: string | null;
+}
+
+export type OfferPrice = { type: 'fixed'; value: string } | { type: 'floating'; pair: string; marginBps: number };
+
+/** The offer as published on IPFS and indexed by the service (docs/protocol.md, section 2.2). */
+export interface OfferDocument {
+  v: 1;
+  side: 'sell' | 'buy';
+  /** "BCH" or a CashToken category id. */
+  asset: string;
+  assetDecimals: number;
+  fiat: string;
+  price: OfferPrice;
+  /** Smallest and largest trade, in base units (sats, or token base units). */
+  min: string;
+  max: string;
+  paymentMethods: string[];
+  paymentWindowSec: number;
+  terms?: string;
+  expiresAt: number;
+  arbiter: string;
+  oracle?: string;
+}
+
+export interface Offer {
+  offerTxid: string;
+  sellerIdentity: string;
+  status: 'Published' | 'Closed' | 'Expired';
+  /** Set by the service for offers of its demo seller; never decided by the client. */
+  isDemo: boolean;
+  document: OfferDocument;
+  createdAt: number;
+}
+
+export interface PriceQuote {
+  pair: string;
+  /** Fiat per whole unit of the asset, as a decimal string. */
+  price: string;
+  timestamp: number;
+  signature: string;
 }
 
 /** The fields of a trade the app reads so far; more are added as pages need them. */
