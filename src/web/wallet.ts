@@ -6,12 +6,22 @@
 
 import { useSyncExternalStore } from 'react';
 import { DappConnectionManager, clearSession, loadSession } from '@wizardconnect/dapp';
-import { initiateDappRelay, type DappRelayResult } from '@wizardconnect/core';
+import { initiateDappRelay, type DappRelayResult, type SignTransactionRequest } from '@wizardconnect/core';
 import { ApiError, apiGet, apiPost, isFinalState, type RegisteredIdentity, type Reputation, type TradeSummary } from './api';
 
 const SESSION_KEY = 'campfire.wallet';
 const DAPP_NAME = 'Campfire';
 const PAIRING_TIMEOUT_MS = 2 * 60 * 1000;
+// A closed wallet app never answers; without a limit the button would say "Waiting for wallet…" forever.
+const SIGN_TIMEOUT_MS = 2 * 60 * 1000;
+
+/** The wallet refused, failed or did not answer. Nothing was sent; the caller shows one sentence for all three. */
+export class WalletDeclined extends Error {
+  constructor() {
+    super('The wallet did not sign the transaction');
+    this.name = 'WalletDeclined';
+  }
+}
 
 export type WalletStatus = 'disconnected' | 'pairing' | 'connecting' | 'connected';
 
@@ -124,6 +134,25 @@ class WalletController {
       this.set({ activeTrades: trades.filter((t) => !isFinalState(t.status)).length });
     } catch {
       // The count is a convenience; the menu works without it.
+    }
+  }
+
+  /**
+   * Asks the paired wallet to sign a transaction (not to broadcast it) and returns the signed hex.
+   * Throws WalletDeclined if the wallet is not connected, refuses, fails or stays silent for two minutes.
+   */
+  async sign(request: Record<string, unknown>, inputPaths: [number, 'defi', number][]): Promise<string> {
+    const manager = this.manager;
+    if (!manager || this.state.status !== 'connected') throw new WalletDeclined();
+    try {
+      const response = await manager.signTransaction(
+        { transaction: request as unknown as SignTransactionRequest['transaction'], inputPaths },
+        { signal: AbortSignal.timeout(SIGN_TIMEOUT_MS) },
+      );
+      if (response.error || !response.signedTransaction) throw new WalletDeclined();
+      return response.signedTransaction;
+    } catch {
+      throw new WalletDeclined();
     }
   }
 
@@ -248,6 +277,7 @@ const actions = {
   connect: () => controller.connect(),
   disconnect: () => controller.disconnect(),
   refreshActiveTrades: () => controller.refreshActiveTrades(),
+  sign: (request: Record<string, unknown>, inputPaths: [number, 'defi', number][]) => controller.sign(request, inputPaths),
 };
 
 export function useWallet() {

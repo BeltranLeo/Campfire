@@ -3,10 +3,11 @@
 
 import { binToHex } from '@bitauth/libauth';
 import type { NetworkProvider } from 'cashscript';
-import { createEscrowContract, matchesEscrowFunding } from '../protocol/escrow.js';
-import { verifyDerivedPayoutPkh } from '../protocol/keys.js';
-import { computeTradeId, type TradeTerms } from '../protocol/trades.js';
-import type { Trade, TradeState } from './api';
+import { deriveSharedTradeKey } from '../protocol/crypto.js';
+import { buildCancelRequest, createEscrowContract, matchesEscrowFunding, type WalletContractSpendRequest } from '../protocol/escrow.js';
+import { verifyDerivedPayoutPkh, verifyDerivedPubkey } from '../protocol/keys.js';
+import { computeFiatAmount, computeTradeId, verifyPriceQuote, type TradeTerms } from '../protocol/trades.js';
+import type { OfferDocument, Trade, TradeState } from './api';
 import { isFinalState } from './api';
 
 export type Role = 'buyer' | 'seller' | 'visitor';
@@ -90,6 +91,17 @@ export function timeline(trade: Trade, role: Role, amount: string): Step[] {
     steps.push({ state: 'failed', title: 'Payment window ended without a payment', at: trade.verdictIssuedAt });
   }
 
+  // A dispute takes the place of the release while it is open, and stays in the story once it is decided.
+  if (trade.disputedAt !== undefined && s !== 'Dropped') {
+    const by = trade.disputedBy === 'seller' ? 'the seller' : trade.disputedBy === 'buyer' ? (you ? 'you' : 'the buyer') : undefined;
+    steps.push({
+      state: s === 'Disputed' ? 'current' : 'done',
+      title: by ? `Dispute opened by ${by}` : 'Dispute opened',
+      at: trade.disputedAt,
+      note: s === 'Disputed' ? 'Waiting for the arbiter' : undefined,
+    });
+  }
+
   // Step 4, or the ending that replaced it.
   const release = `Seller releases ${amount} ${toBuyer}`;
   switch (s) {
@@ -99,8 +111,10 @@ export function timeline(trade: Trade, role: Role, amount: string): Step[] {
       steps.push({ state: 'todo', title: release });
       break;
     case 'Paid':
+      steps.push({ state: 'current', title: release });
+      break;
     case 'Disputed':
-      steps.push({ state: s === 'Paid' ? 'current' : 'todo', title: release });
+      steps.push({ state: 'todo', title: 'Arbiter decides: funds go to buyer or seller' });
       break;
     case 'Released':
       steps.push({ state: 'done', title: `Seller released ${amount} ${toBuyer}`, at: trade.completedAt, txid: trade.settlementTxid });
@@ -122,6 +136,103 @@ export function timeline(trade: Trade, role: Role, amount: string): Step[] {
       break;
   }
   return steps;
+}
+
+/**
+ * The key buyer and seller share for the chat, handed to the arbiter with a dispute so it can read the
+ * messages (protocol section 6). Undefined when this browser has no session key for the trade.
+ */
+export function disputeKeyHex(sessionPrivateKey: string | null, sellerSessionPk: string | undefined): string | undefined {
+  if (!sessionPrivateKey || !sellerSessionPk) return undefined;
+  try {
+    return binToHex(deriveSharedTradeKey(sessionPrivateKey, sellerSessionPk));
+  } catch {
+    return undefined;
+  }
+}
+
+/** A refusal with a sentence that is already written for the person reading it. */
+export class TradeActionError extends Error {}
+
+/**
+ * The `cancel` transaction for the buyer's wallet to sign: the escrow coin goes back to the seller's payout.
+ * It is built from the same terms and coin the server will check against, so the signed result passes there.
+ */
+export async function buildBuyerCancel(
+  trade: Trade,
+  provider: NetworkProvider,
+  buyerDefiXpub: string,
+): Promise<WalletContractSpendRequest> {
+  if (!trade.termsJson || !trade.tradeId || !trade.fundingTxid || trade.buyerDefiIndex === undefined) {
+    throw new TradeActionError('There is no deposit to cancel yet.');
+  }
+  const terms = JSON.parse(trade.termsJson) as TradeTerms;
+  // The wallet signs with whatever key it is told to and does not compare it with the contract (docs/decisions.md).
+  if (!verifyDerivedPubkey(buyerDefiXpub, trade.buyerDefiIndex, terms.buyerPk)) {
+    throw new TradeActionError('This wallet is not the one that took this trade. Connect the wallet you used to take it.');
+  }
+  const contract = createEscrowContract(terms, trade.tradeId, provider);
+  const utxos = await provider.getUtxos(contract.address);
+  const utxo = utxos.find(
+    (u) => u.txid === trade.fundingTxid && (trade.fundingVout === undefined || u.vout === trade.fundingVout) && matchesEscrowFunding(u, terms),
+  );
+  if (!utxo) throw new TradeActionError('The deposit is not visible on-chain yet. Try again in a moment.');
+  return buildCancelRequest({ contract, utxo, sellerPayoutPkh: terms.sellerPayoutPkh, buyerDefiIndex: trade.buyerDefiIndex });
+}
+
+/**
+ * The terms that count: the ones hashed into the trade id and checked against the escrow address. The same
+ * fields also sit on the trade record, put there by the service, so a check must not read those.
+ */
+export function signedTerms(trade: Trade): Pick<TradeTerms, 'amount' | 'fiatAmount' | 'quote' | 'oraclePk' | 'marginBps'> {
+  if (trade.termsJson) {
+    try {
+      return JSON.parse(trade.termsJson) as TradeTerms;
+    } catch {
+      // Fall through: the escrow check reports a terms mismatch for damaged terms.
+    }
+  }
+  return trade;
+}
+
+export interface ArbiterChecks {
+  /**
+   * The oracle's signature on the quote, and whether that oracle is the one the offer names.
+   * `signature-only`: the signature is valid but the offer was not read, so there is nothing to compare with.
+   */
+  quote: 'valid' | 'signature-only' | 'wrong-signature' | 'other-oracle' | 'none';
+  /** The fiat amount recomputed from amount, price and margin; null when there is no price to compute with. */
+  fiat: { price: string; expected: string; ok: boolean } | null;
+}
+
+/**
+ * What the arbiter can check without trusting the service (protocol section 7.2): the quote's signature
+ * and the fiat amount, both on the signed terms. `offer` is the published offer, or undefined if it could
+ * not be read.
+ */
+export function checkForArbiter(trade: Trade, offer: Pick<OfferDocument, 'price' | 'oracle'> | undefined): ArbiterChecks {
+  const terms = signedTerms(trade);
+  let quote: ArbiterChecks['quote'] = 'none';
+  if (terms.quote && terms.oraclePk) {
+    quote = !verifyPriceQuote(terms.quote, terms.oraclePk)
+      ? 'wrong-signature'
+      : offer?.oracle === undefined
+        ? 'signature-only'
+        : offer.oracle.toLowerCase() !== terms.oraclePk.toLowerCase()
+          ? 'other-oracle'
+          : 'valid';
+  }
+  const price = terms.quote?.price ?? (offer?.price.type === 'fixed' ? offer.price.value : undefined);
+  let fiat: ArbiterChecks['fiat'] = null;
+  if (price !== undefined) {
+    try {
+      const expected = computeFiatAmount({ amount: terms.amount, assetDecimals: trade.assetDecimals, unitPrice: price, marginBps: terms.marginBps });
+      fiat = { price, expected, ok: expected === terms.fiatAmount };
+    } catch {
+      fiat = null;
+    }
+  }
+  return { quote, fiat };
 }
 
 function windowNote(trade: Trade): string | undefined {

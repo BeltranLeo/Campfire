@@ -6,7 +6,7 @@ import { pkhToCashAddress } from '../../protocol/keys.js';
 import { verifyPriceQuote } from '../../protocol/trades.js';
 import { ApiError, apiGet, apiPost, type Reputation, type Trade } from '../api';
 import { assetInfo, type AssetInfo } from '../assets';
-import { Button } from '../components/Button';
+import { Button, WALLET_DECLINED } from '../components/Button';
 import { CopyButton } from '../components/CopyButton';
 import { Details } from '../components/Details';
 import { Icon } from '../components/Icon';
@@ -16,15 +16,38 @@ import { StatusPill } from '../components/StatusPill';
 import { Countdown, Timeline, confirmationsText } from '../components/Timeline';
 import { useConfig } from '../config';
 import { electrum } from '../electrum';
-import { applyMargin, describeMargin, formatAmount, formatClock, formatDate, formatDateTime, formatFiat, formatFiatAmount } from '../format';
+import {
+  applyMargin,
+  describeMargin,
+  formatAmount,
+  formatClock,
+  formatDate,
+  formatDateTime,
+  formatFiat,
+  formatFiatAmount,
+  formatHourMinute,
+} from '../format';
 import { usePoll } from '../hooks/usePoll';
-import { checkEscrow, isFinal, newerTrade, roleOf, timeline, tradeTitle, type EscrowCheck, type Role } from '../trade';
+import {
+  TradeActionError,
+  buildBuyerCancel,
+  checkEscrow,
+  disputeKeyHex,
+  isFinal,
+  newerTrade,
+  roleOf,
+  timeline,
+  tradeTitle,
+  type EscrowCheck,
+  type Role,
+} from '../trade';
 import { DSPROOF_WATCH_SEC, useDoubleSpendWatch, type DoubleSpendState } from '../dsproof';
-import { useWallet } from '../wallet';
+import { WalletDeclined, useWallet } from '../wallet';
 
 // One trade, for the buyer or a visitor (Main, Trade-* screens). One column: title and status, the action
 // card (the only part that changes with the state), progress, and the on-chain details folded away.
-// Not here yet: disputes and cancelling (step 7), the chat (step 12) and the seller's view (step 10).
+// The buyer can mark paid, open a dispute and cancel; the arbiter console is its own page (Arbiter.tsx).
+// Not here yet: the chat (step 12) and the seller's view (step 10).
 
 const POLL_MS = 3000;
 const NO_KEY = 'This browser does not have the key for this trade. Open it on the device where you started it.';
@@ -185,30 +208,85 @@ function BuyerAction(props: {
 }) {
   const { trade } = props;
   const wallet = useWallet();
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  // Which action is running; the others wait, so two writes never race.
+  const [busy, setBusy] = useState<'paid' | 'dispute' | 'cancel' | null>(null);
+  const [error, setError] = useState<{ title: string; message: string } | null>(null);
 
-  async function markPaid() {
-    setBusy(true);
+  // Runs one write. The answer may be lost after the server recorded it (the demo seller releases within
+  // the request; a cancel is broadcast within it): read the trade again before reporting an error, and
+  // never offer the same step twice.
+  async function run(action: 'paid' | 'dispute' | 'cancel', failed: string, write: () => Promise<Trade>) {
+    setBusy(action);
     setError(null);
     try {
-      const { trade: updated } = await apiPost<{ trade: Trade }>(`/api/trades/${trade.id}/paid`, { buyerIdentity: wallet.identity });
-      props.onUpdate(updated);
+      props.onUpdate(await write());
     } catch (err) {
-      // The answer may be lost after the server recorded it (the demo seller releases within the request):
-      // read the trade again before reporting an error, and never offer "Mark as paid" twice.
+      if (err instanceof WalletDeclined) {
+        setError({ title: failed, message: WALLET_DECLINED });
+        return;
+      }
+      if (err instanceof TradeActionError) {
+        setError({ title: failed, message: err.message });
+        return;
+      }
       try {
         const { trade: latest } = await apiGet<{ trade: Trade }>(`/api/trades/${trade.id}?viewer=${wallet.identity}`);
         props.onUpdate(latest);
-        if (latest.status !== 'Funded') return;
+        if (latest.status !== trade.status) return;
       } catch {
         // Fall through to the original error.
       }
-      setError(err instanceof ApiError ? err.message : 'Something went wrong. Try again.');
+      setError({ title: failed, message: err instanceof ApiError ? err.message : 'Something went wrong. Try again.' });
     } finally {
-      setBusy(false);
+      setBusy(null);
     }
   }
+
+  const markPaid = () =>
+    run('paid', 'The trade was not marked as paid', () =>
+      apiPost<{ trade: Trade }>(`/api/trades/${trade.id}/paid`, { buyerIdentity: wallet.identity }).then((r) => r.trade),
+    );
+
+  // The chat key goes along when this browser has it, so the arbiter can read the messages (protocol section 6).
+  const openDispute = () =>
+    run('dispute', 'The dispute was not opened', () => {
+      const sharedTradeKeyHex = disputeKeyHex(readSessionKey(trade.id), trade.sellerSessionPk);
+      return apiPost<{ trade: Trade }>(`/api/trades/${trade.id}/dispute`, {
+        callerIdentity: wallet.identity,
+        ...(sharedTradeKeyHex && { sharedTradeKeyHex }),
+      }).then((r) => r.trade);
+    });
+
+  // The wallet signs the escrow's `cancel` path; the server checks it and broadcasts.
+  const cancelTrade = () =>
+    run('cancel', 'The trade was not cancelled', async () => {
+      if (!wallet.xpubs) throw new WalletDeclined();
+      const built = await buildBuyerCancel(trade, electrum(), wallet.xpubs.defi);
+      const signedTxHex = await wallet.sign(built.request, built.inputPaths);
+      return apiPost<{ trade: Trade }>(`/api/trades/${trade.id}/settle`, { path: 'cancel', signedTxHex }).then((r) => r.trade);
+    });
+
+  const failure = error && (
+    <Notice tone="danger" title={error.title}>
+      {error.message}
+    </Notice>
+  );
+  const disputeButton = (
+    <Button busy={busy === 'dispute'} disabled={busy !== null && busy !== 'dispute'} onClick={openDispute}>
+      Open dispute
+    </Button>
+  );
+  const cancelButton = (
+    <Button
+      variant="danger"
+      signs="Signs in your wallet. Returns the funds to the seller."
+      busy={busy === 'cancel'}
+      disabled={busy !== null && busy !== 'cancel'}
+      onClick={cancelTrade}
+    >
+      Cancel trade
+    </Button>
+  );
 
   switch (trade.status) {
     case 'Requested':
@@ -271,21 +349,19 @@ function BuyerAction(props: {
           <EscrowCheckNotice check={props.check} />
           <ZeroConfNotice ds={props.ds} isDemo={trade.isDemo === true} />
           <PaymentDetails trade={trade} fiat={props.fiat} />
-          {error && (
-            <Notice tone="danger" title="The trade was not marked as paid">
-              {error}
-            </Notice>
-          )}
+          {failure}
           <div className="s-actions">
             <Button
               variant="primary"
-              busy={busy}
-              disabled={props.ds.phase === 'proof'}
+              busy={busy === 'paid'}
+              disabled={props.ds.phase === 'proof' || (busy !== null && busy !== 'paid')}
               onClick={markPaid}
               note="No signature needed. This step is off-chain."
             >
               Mark as paid
             </Button>
+            {disputeButton}
+            {cancelButton}
           </div>
         </ActionCard>
       );
@@ -298,14 +374,39 @@ function BuyerAction(props: {
           reassurance={props.check && props.check !== 'error' && props.check.funding === 'match' ? "The seller's coins are locked for you. They can only go to you or back to the seller." : undefined}
         >
           <p className="cf-muted">You marked the payment as sent. When the seller confirms it, {props.amount} go to your wallet.</p>
+          {failure}
+          <div className="s-actions">
+            {disputeButton}
+            {cancelButton}
+          </div>
         </ActionCard>
       );
-    case 'Disputed':
+    case 'Disputed': {
+      const opened = trade.disputedAt !== undefined ? formatHourMinute(new Date(trade.disputedAt * 1000)) : null;
       return (
-        <ActionCard step="In dispute" title="A dispute is open">
-          <p className="cf-muted">The arbiter will decide who receives the funds. Nothing can be released or cancelled until then.</p>
+        <ActionCard step="Paused · In dispute" title="The arbiter is reviewing this trade">
+          <p className="cf-muted">
+            {trade.disputedBy === 'seller' ? 'The seller opened a dispute' : 'You opened a dispute'}
+            {opened ? ` at ${opened}` : ''}. The arbiter can now read the chat and will decide for the buyer or the seller.
+          </p>
+          {trade.isDemo && (
+            <SimBox tag="Simulated arbiter" label="In this demo you can decide the dispute yourself." bodyGap={3}>
+              <p className="cf-small">
+                On a real trade only the arbiter named in the offer can decide. Here the console signs your choice with the real
+                arbiter key and the result is a real mainnet transaction.
+              </p>
+              <div>
+                <Button variant="primary" to={`/trade/${trade.id}/arbiter`}>
+                  Open demo arbiter console
+                </Button>
+              </div>
+            </SimBox>
+          )}
+          {failure}
+          <div className="s-actions">{cancelButton}</div>
         </ActionCard>
       );
+    }
     default:
       return null;
   }
@@ -524,17 +625,19 @@ function BuyerResult({ trade, amount, payout }: { trade: Trade; amount: string; 
         </>
       );
       break;
-    default:
-      notice = (
-        <Notice title={trade.status === 'Refunded' ? 'The funds went back to the seller' : 'Trade cancelled'}>
-          The escrow returned the funds to the seller.
-        </Notice>
+    default: {
+      const cancelled = trade.status === 'Cancelled';
+      notice = cancelled ? (
+        // Invented copy: the design has no screen for a cancelled trade.
+        <Notice title="Trade cancelled">You cancelled the trade. The escrow returned the funds to the seller. You were not charged.</Notice>
+      ) : (
+        <Notice title="The funds went back to the seller">The escrow returned the funds to the seller.</Notice>
       );
       rows = (
         <>
           {settlement && (
             <>
-              <dt>Transaction</dt>
+              <dt>{cancelled ? 'Cancel' : 'Refund'}</dt>
               <dd>{settlement}</dd>
             </>
           )}
@@ -542,6 +645,7 @@ function BuyerResult({ trade, amount, payout }: { trade: Trade; amount: string; 
           <dd>{formatDateTime(ended)}</dd>
         </>
       );
+    }
   }
   return (
     <section className="cf-card" data-flush>

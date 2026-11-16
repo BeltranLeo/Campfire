@@ -179,6 +179,7 @@ export interface Trade extends TradeSummary {
   paidAt?: number;
   disputedBy?: 'buyer' | 'seller';
   disputedAt?: number;
+  disputeReason?: string;
   verdict?: '01' | '02';
   verdictReason?: string;
   verdictIssuedAt?: number;
@@ -187,6 +188,13 @@ export interface Trade extends TradeSummary {
   createdAt: number;
   updatedAt: number;
   completedAt?: number;
+}
+
+/** GET /api/trades/:id/chat?arbiter=true: the messages as the arbiter reads them after a party handed over the key. */
+export interface ArbiterChat {
+  messages: unknown[];
+  /** Present only when a party handed the shared key to the arbiter. */
+  decrypted?: { id: string; senderIdentity: string; plaintext: string; createdAt: number }[];
 }
 
 export interface DemoInfo {
