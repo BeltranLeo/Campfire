@@ -1,0 +1,79 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Campfire · WizardConnect spike</title>
+  <style>
+    :root { --bg: #fafaf7; --fg: #1d1d1b; --muted: #6b6b66; --line: #ddd9cf; --accent: #c2410c; --ok: #15803d; --bad: #b91c1c; }
+    @media (prefers-color-scheme: dark) { :root { --bg: #161614; --fg: #ecebe6; --muted: #9a9890; --line: #33322e; --accent: #fb923c; --ok: #4ade80; --bad: #f87171; } }
+    * { box-sizing: border-box; }
+    body { margin: 0; background: var(--bg); color: var(--fg); font: 15px/1.5 system-ui, sans-serif; }
+    header { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 12px 16px; border-bottom: 1px solid var(--line); }
+    header h1 { font-size: 17px; margin: 0; }
+    main { max-width: 860px; margin: 0 auto; padding: 16px; }
+    section { border: 1px solid var(--line); border-radius: 8px; padding: 12px 16px; margin: 0 0 16px; }
+    h2 { font-size: 16px; margin: 0 0 8px; }
+    button { font: inherit; padding: 6px 12px; border-radius: 6px; border: 1px solid var(--accent); background: var(--accent); color: #fff; cursor: pointer; }
+    button.secondary { background: transparent; color: var(--accent); }
+    button:disabled { opacity: .5; cursor: default; }
+    code, .mono { font-family: ui-monospace, monospace; font-size: 12.5px; word-break: break-all; }
+    table { border-collapse: collapse; width: 100%; font-size: 13px; }
+    td, th { border-bottom: 1px solid var(--line); padding: 4px 6px; text-align: left; vertical-align: top; }
+    .muted { color: var(--muted); }
+    .ok { color: var(--ok); font-weight: 600; }
+    .bad { color: var(--bad); font-weight: 600; }
+    .warn { border-left: 3px solid var(--accent); padding-left: 10px; }
+    dialog { border: 1px solid var(--line); border-radius: 8px; background: var(--bg); color: var(--fg); max-width: 360px; }
+    dialog img { width: 100%; image-rendering: pixelated; background: #fff; }
+    pre { white-space: pre-wrap; word-break: break-all; font-size: 12px; max-height: 260px; overflow: auto; }
+    .row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>Campfire · WizardConnect spike <span id="dapp-label" class="muted"></span></h1>
+    <div class="row">
+      <span id="chain" class="muted">mainnet …</span>
+      <span id="wallet-status" class="muted">Not connected</span>
+      <button id="connect">Connect wallet</button>
+    </div>
+  </header>
+
+  <main>
+    <p class="warn">Throwaway test page on <strong>BCH mainnet</strong>. Use tiny amounts only. Order: R8 first (two new pairings), then R9 (<a id="other-dapp" href="#">open as the other dapp</a>), then R1.</p>
+
+    <section>
+      <h2>R8 / R9 — extended public keys</h2>
+      <div id="xpubs" class="muted">Connect a wallet to see its keys.</div>
+      <h3 style="font-size:14px">History on this browser</h3>
+      <p class="muted">Recorded on every <code>walletready</code> message from the wallet. Fingerprint = first 8 bytes of SHA-256 of the xpub; identity (D29) = fingerprint of <code>defi</code>.</p>
+      <div id="history"></div>
+      <div class="row"><button id="clear-history" class="secondary">Clear history</button></div>
+    </section>
+
+    <section>
+      <h2>R1 — wallet signs a contract input</h2>
+      <p class="muted">Contract <code>Spike(pubkey pk)</code>, one function <code>spend(sig s)</code> = <code>checkSig(s, pk)</code>. <code>pk</code> = <code>defi/0</code> of the connected wallet. Spending sends everything back to <code>receive/0</code>.</p>
+      <div id="contract" class="muted">Connect a wallet first.</div>
+      <div class="row" style="margin-top:8px">
+        <button id="refresh" class="secondary" disabled>Refresh balance</button>
+        <button id="sign" disabled>Ask wallet to sign</button>
+        <button id="cancel" class="secondary" disabled>Cancel request</button>
+        <button id="broadcast" disabled>Broadcast</button>
+      </div>
+      <div id="result"></div>
+      <div id="funded"></div>
+    </section>
+  </main>
+
+  <dialog id="qr-dialog">
+    <p>Scan with the wallet, or copy the link:</p>
+    <img id="qr-img" alt="WizardConnect QR code">
+    <p class="mono" id="qr-uri"></p>
+    <div class="row"><button id="copy-uri" class="secondary">Copy</button><button id="close-qr" class="secondary">Close</button></div>
+  </dialog>
+
+  <script type="module" src="/src/main.ts"></script>
+</body>
+</html>

@@ -1,3 +1,7 @@
 # Personal Claude Code instructions
 CLAUDE.local.md
 .claude/settings.local.json
+
+# Dependencies and build output
+node_modules/
+dist/

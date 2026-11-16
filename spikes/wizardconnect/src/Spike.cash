@@ -1,0 +1,8 @@
+pragma cashscript ^0.14.0;
+
+// Throwaway contract for the WizardConnect test: spendable by one signature.
+contract Spike(pubkey pk) {
+    function spend(sig s) {
+        require(checkSig(s, pk));
+    }
+}
