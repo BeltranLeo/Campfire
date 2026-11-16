@@ -6,3 +6,11 @@
 html, body { margin: 0; min-height: 100%; background: var(--bg); }
 
 #root { min-height: 100vh; min-height: 100dvh; }
+
+/* The design draws the pairing dialog and the wallet menu in place on artboards; in the app they float. */
+.s-overlay[data-modal] { position: fixed; inset: 0; z-index: 30; overflow-y: auto; }
+.s-dialog:focus { outline: none; }
+.s-walletanchor { position: relative; }
+.s-walletanchor > .s-menu { position: absolute; right: 0; top: calc(100% + var(--space-2)); z-index: 20; width: min(320px, calc(100vw - 2 * var(--space-4))); }
+.s-walleterror { width: 100%; max-width: var(--content-max); margin: 0 auto; padding: var(--space-4) var(--space-5) 0; }
+@media (max-width: 719px) { .s-walleterror { padding: var(--space-4) var(--space-4) 0; } }

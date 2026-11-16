@@ -2,6 +2,9 @@ import { useState } from 'react';
 import { Link, NavLink, Outlet } from 'react-router';
 import { BANNER_LINKS, PROTOCOL_SPEC_URL, REPO_URL, VOTING_ADDRESS } from '../links';
 import { getThemePref, setThemePref, type ThemePref } from '../theme';
+import { useWallet } from '../wallet';
+import { CopyButton } from './CopyButton';
+import { BottomNav, WalletButton, WalletError } from './Wallet';
 
 // Visitors without a wallet see the public pages; "How it works" is the landing page at "/".
 const PUBLIC_NAV = [
@@ -19,8 +22,7 @@ const APP_NAV = [
 ];
 
 export function Shell() {
-  // The wallet arrives with WizardConnect in the next step; until then everyone is a visitor.
-  const connected = false;
+  const connected = useWallet().status === 'connected';
   const nav = connected ? APP_NAV : PUBLIC_NAV;
 
   return (
@@ -40,13 +42,13 @@ export function Shell() {
             ))}
           </nav>
           <span className="cf-grow" />
-          <button type="button" className="cf-btn">
-            Connect wallet
-          </button>
+          <WalletButton />
         </div>
       </header>
+      <WalletError />
       <Outlet />
       <Footer />
+      {connected && <BottomNav />}
     </>
   );
 }
@@ -118,23 +120,5 @@ function ThemeSwitch() {
         </button>
       ))}
     </div>
-  );
-}
-
-function CopyButton({ value }: { value: string }) {
-  const [copied, setCopied] = useState(false);
-  return (
-    <button
-      type="button"
-      className="cf-copy"
-      onClick={() => {
-        navigator.clipboard.writeText(value).then(() => {
-          setCopied(true);
-          setTimeout(() => setCopied(false), 1500);
-        });
-      }}
-    >
-      {copied ? 'Copied' : 'Copy'}
-    </button>
   );
 }
