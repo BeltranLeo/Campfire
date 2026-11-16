@@ -304,6 +304,14 @@ function TakeOffer({ offer }: { offer: Offer }) {
             )}
 
             {limit && <LimitNotice message={limit} demo={demo.data ?? null} />}
+            {prep.error && !prep.data ? (
+              <Notice tone="danger" title="We could not prepare your wallet for this trade">
+                {prep.error instanceof ApiError ? prep.error.message : 'The server did not answer.'}{' '}
+                <button type="button" className="cf-copy" onClick={prep.reload}>
+                  Try again
+                </button>
+              </Notice>
+            ) : null}
             {failure && (
               <Notice tone="danger" title="The offer was not taken">
                 {failure}
@@ -348,7 +356,14 @@ function TakeOffer({ offer }: { offer: Offer }) {
                   busy={taking}
                   disabled={!prep.data}
                   onClick={take}
-                  note={offer.isDemo ? 'No signature needed. The demo seller funds the escrow right away.' : 'No signature needed.'}
+                  note={
+                    // Say why the button waits: a long-used wallet takes a few seconds to find a fresh address.
+                    !prep.data
+                      ? 'Finding a fresh address of your wallet…'
+                      : offer.isDemo
+                        ? 'No signature needed. The demo seller funds the escrow right away.'
+                        : 'No signature needed.'
+                  }
                 >
                   {`Take offer: buy ${formatAmount(amount!, asset)} for ${youPay}`}
                 </Button>
