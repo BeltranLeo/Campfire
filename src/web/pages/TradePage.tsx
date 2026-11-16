@@ -50,6 +50,13 @@ import { WalletDeclined, useWallet } from '../wallet';
 // Not here yet: the chat (step 12) and the seller's view (step 10).
 
 const POLL_MS = 3000;
+// Invented copy: generic reasons for a dispute, chosen from a list.
+const DISPUTE_REASONS = [
+  'The seller did not release after I paid',
+  'The payment details do not work',
+  'The seller is not answering',
+  'Something else',
+];
 const NO_KEY = 'This browser does not have the key for this trade. Open it on the device where you started it.';
 
 export function TradePage() {
@@ -211,6 +218,10 @@ function BuyerAction(props: {
   // Which action is running; the others wait, so two writes never race.
   const [busy, setBusy] = useState<'paid' | 'dispute' | 'cancel' | null>(null);
   const [error, setError] = useState<{ title: string; message: string } | null>(null);
+  // The dispute asks for a reason first (a generic list, plus optional details), so it opens a small form.
+  const [disputing, setDisputing] = useState(false);
+  const [reason, setReason] = useState('');
+  const [details, setDetails] = useState('');
 
   // Runs one write. The answer may be lost after the server recorded it (the demo seller releases within
   // the request; a cancel is broadcast within it): read the trade again before reporting an error, and
@@ -251,8 +262,10 @@ function BuyerAction(props: {
   const openDispute = () =>
     run('dispute', 'The dispute was not opened', () => {
       const sharedTradeKeyHex = disputeKeyHex(readSessionKey(trade.id), trade.sellerSessionPk);
+      const extra = details.trim();
       return apiPost<{ trade: Trade }>(`/api/trades/${trade.id}/dispute`, {
         callerIdentity: wallet.identity,
+        reason: extra ? `${reason}: ${extra}` : reason,
         ...(sharedTradeKeyHex && { sharedTradeKeyHex }),
       }).then((r) => r.trade);
     });
@@ -271,10 +284,46 @@ function BuyerAction(props: {
       {error.message}
     </Notice>
   );
-  const disputeButton = (
-    <Button busy={busy === 'dispute'} disabled={busy !== null && busy !== 'dispute'} onClick={openDispute}>
+  const disputeButton = !disputing && (
+    <Button disabled={busy !== null} onClick={() => setDisputing(true)}>
       Open dispute
     </Button>
+  );
+  // Invented copy: the design has no screen for the reason.
+  const disputeForm = disputing && (
+    <div className="cf-well cf-stack" data-gap="3">
+      <div className="cf-field">
+        <label htmlFor="dispute-reason">Why are you opening a dispute?</label>
+        <select id="dispute-reason" className="cf-select" value={reason} onChange={(e) => setReason(e.target.value)}>
+          <option value="" disabled>
+            Choose a reason
+          </option>
+          {DISPUTE_REASONS.map((r) => (
+            <option key={r}>{r}</option>
+          ))}
+        </select>
+      </div>
+      <div className="cf-field">
+        <label htmlFor="dispute-details">More details (optional)</label>
+        <textarea
+          id="dispute-details"
+          className="cf-textarea"
+          rows={3}
+          maxLength={500}
+          value={details}
+          onChange={(e) => setDetails(e.target.value)}
+        />
+        <span className="cf-hint">The arbiter reads this when it decides.</span>
+      </div>
+      <div className="s-actions">
+        <Button busy={busy === 'dispute'} disabled={reason === '' || (busy !== null && busy !== 'dispute')} onClick={openDispute}>
+          Send dispute
+        </Button>
+        <Button variant="ghost" disabled={busy !== null} onClick={() => setDisputing(false)}>
+          Back
+        </Button>
+      </div>
+    </div>
   );
   const cancelButton = (
     <Button
@@ -350,6 +399,7 @@ function BuyerAction(props: {
           <ZeroConfNotice ds={props.ds} isDemo={trade.isDemo === true} />
           <PaymentDetails trade={trade} fiat={props.fiat} />
           {failure}
+          {disputeForm}
           <div className="s-actions">
             <Button
               variant="primary"
@@ -375,6 +425,7 @@ function BuyerAction(props: {
         >
           <p className="cf-muted">You marked the payment as sent. When the seller confirms it, {props.amount} go to your wallet.</p>
           {failure}
+          {disputeForm}
           <div className="s-actions">
             {disputeButton}
             {cancelButton}
