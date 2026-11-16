@@ -64,6 +64,23 @@ export function formatDate(seconds: number): string {
   return new Date(seconds * 1000).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' });
 }
 
+/** "16 Nov 2026, 14:04" from Unix seconds. */
+export function formatDateTime(seconds: number): string {
+  const date = new Date(seconds * 1000);
+  return `${formatDate(seconds)}, ${formatHourMinute(date)}`;
+}
+
+/** "14:04", 24-hour clock. */
+export function formatHourMinute(date: Date): string {
+  return date.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', hour12: false });
+}
+
+/** "04:37" for a countdown; never negative. */
+export function formatCountdown(seconds: number): string {
+  const s = Math.max(0, Math.floor(seconds));
+  return `${String(Math.floor(s / 60)).padStart(2, '0')}:${String(s % 60).padStart(2, '0')}`;
+}
+
 /** "14:01:32", 24-hour clock in the viewer's time zone. */
 export function formatClock(date: Date): string {
   return date.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false });

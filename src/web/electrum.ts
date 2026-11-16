@@ -4,7 +4,8 @@ import { ElectrumNetworkProvider } from 'cashscript';
 import { payoutAddress } from './take';
 
 let provider: ElectrumNetworkProvider | null = null;
-const electrum = () => (provider ??= new ElectrumNetworkProvider('mainnet'));
+/** One shared mainnet connection; it opens on demand and closes when idle. */
+export const electrum = () => (provider ??= new ElectrumNetworkProvider('mainnet'));
 
 /**
  * The first receive address at or after `start` that has never been used on-chain, so a payout goes to a

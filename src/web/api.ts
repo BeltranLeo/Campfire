@@ -146,6 +146,49 @@ export interface TradeSummary {
   sellerReceiveIndex?: number;
 }
 
+/** A trade as GET /api/trades/:id returns it (src/server/storage.ts, StoredTrade). Times are Unix seconds. */
+export interface Trade extends TradeSummary {
+  /** The contract's trade id (hash of the terms), set on acceptance; not the record id in the URL. */
+  tradeId?: string;
+  asset: string;
+  assetDecimals: number;
+  amount: string;
+  fiat: string;
+  fiatAmount: string;
+  quote?: PriceQuote;
+  marginBps?: number;
+  quoteExpiresAt?: number;
+  buyerPk: string;
+  buyerPayoutPkh: string;
+  sellerPk?: string;
+  sellerPayoutPkh?: string;
+  sellerSessionPk?: string;
+  arbiterPk: string;
+  oraclePk?: string;
+  refundTime?: number;
+  termsJson?: string;
+  escrowAddress?: string;
+  escrowTokenAddress?: string;
+  encryptedPaymentDetails?: string;
+  fundingDeadline?: number;
+  fundingTxid?: string;
+  fundingVout?: number;
+  fundingConfirmations?: number;
+  fundedAt?: number;
+  paymentDeadline?: number;
+  paidAt?: number;
+  disputedBy?: 'buyer' | 'seller';
+  disputedAt?: number;
+  verdict?: '01' | '02';
+  verdictReason?: string;
+  verdictIssuedAt?: number;
+  settlementTxid?: string;
+  isDemo?: boolean;
+  createdAt: number;
+  updatedAt: number;
+  completedAt?: number;
+}
+
 export interface DemoInfo {
   enabled: boolean;
   identity: string;
