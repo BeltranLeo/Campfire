@@ -16,3 +16,6 @@ html, body { margin: 0; min-height: 100%; background: var(--bg); }
 .cf-bottomnav { z-index: 10; }
 .s-walleterror { width: 100%; max-width: var(--content-max); margin: 0 auto; padding: var(--space-4) var(--space-5) 0; }
 @media (max-width: 719px) { .s-walleterror { padding: var(--space-4) var(--space-4) 0; } }
+
+/* A coin logo fills the design's 24px coin circle instead of the text glyph. */
+img.s-coin { display: block; flex: none; background: none; object-fit: cover; }

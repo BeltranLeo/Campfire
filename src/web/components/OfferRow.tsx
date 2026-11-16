@@ -1,4 +1,5 @@
 import type { ReactNode } from 'react';
+import { CoinIcon } from './CoinIcon';
 import { HashLink, ProvenanceTag } from './Provenance';
 import { Skeleton } from './States';
 
@@ -7,6 +8,7 @@ import { Skeleton } from './States';
 
 export interface OfferRowProps {
   coin: string;
+  logo?: string;
   symbol: string;
   /** The price as text, or null when the quote is not available (no number is shown then). */
   price: string | null;
@@ -30,9 +32,7 @@ export function OfferRow(props: OfferRowProps) {
     <div className="s-offer">
       <div className="s-cell">
         <span className="s-asset">
-          <span className="s-coin" aria-hidden="true">
-            {props.coin}
-          </span>
+          <CoinIcon asset={{ coin: props.coin, logo: props.logo }} />
           {props.symbol}
         </span>
         <span className="cf-mono">{props.price ?? '—'}</span>

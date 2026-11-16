@@ -145,6 +145,7 @@ export function Offers() {
               <OfferRow
                 key={offer.offerTxid}
                 coin={asset.coin}
+                logo={asset.logo}
                 symbol={asset.symbol}
                 price={price === null ? null : formatFiat(price, doc.fiat)}
                 priceNote={doc.price.type === 'fixed' ? 'Fixed price' : describeMargin(doc.price.marginBps)}

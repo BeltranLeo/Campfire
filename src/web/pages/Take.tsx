@@ -4,6 +4,7 @@ import { computeFiatAmount, verifyPriceQuote } from '../../protocol/trades.js';
 import { ApiError, apiGet, apiPost, type DemoInfo, type Offer, type PriceQuote, type Reputation, type TradeSummary } from '../api';
 import { assetInfo, type AssetInfo } from '../assets';
 import { Button } from '../components/Button';
+import { CoinIcon } from '../components/CoinIcon';
 import { HashLink, ProvenanceTag } from '../components/Provenance';
 import { EmptyState, Notice, Skeleton } from '../components/States';
 import { useConfig } from '../config';
@@ -199,9 +200,7 @@ function TakeOffer({ offer }: { offer: Offer }) {
         <div className="cf-card__section">
           <div className="cf-row" data-between>
             <span className="s-asset">
-              <span className="s-coin" aria-hidden="true">
-                {asset.coin}
-              </span>
+              <CoinIcon asset={asset} />
               {offer.isDemo ? `${asset.symbol} from Demo seller` : asset.symbol}
             </span>
             {offer.isDemo && <ProvenanceTag kind="sim">Demo seller · simulated fiat</ProvenanceTag>}
