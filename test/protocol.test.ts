@@ -1,12 +1,14 @@
 import { describe, expect, it } from 'vitest';
 import {
   MockNetworkProvider,
+  Network,
   SignatureTemplate,
   TransactionBuilder,
   randomUtxo,
 } from 'cashscript';
 import {
   binToHex,
+  decodeTransactionUnsafe,
   deriveHdPath,
   deriveHdPrivateNodeChild,
   deriveHdPrivateNodeFromSeed,
@@ -14,6 +16,7 @@ import {
   encodeCashAddress,
   encodeHdPublicKey,
   hash160,
+  hexToBin,
   secp256k1,
   sha256,
   utf8ToBin,
@@ -30,6 +33,9 @@ import {
   VERDICT_SELLER,
   buildArbitrateSpend,
   buildCancelRequest,
+  buildCloseOfferTransaction,
+  buildFundEscrowTransaction,
+  buildPublishOfferTransaction,
   buildRefundSpend,
   buildReleaseRequest,
   cashAddressToPkh,
@@ -42,6 +48,7 @@ import {
   derivePayoutPkhFromXpub,
   derivePubkeyFromXpub,
   deriveSharedTradeKey,
+  deriveWalletAddressMap,
   encodeOfferOpReturn,
   encryptChatMessage,
   encryptPaymentDetails,
@@ -55,6 +62,7 @@ import {
   pkhToLockingBytecode,
   signPriceQuote,
   signVerdict,
+  tagWalletUtxos,
   validateOfferDocument,
   validateTradeTerms,
   verifyDerivedPayoutPkh,
@@ -593,5 +601,160 @@ describe('escrow contract instantiation, funding check and spend builders (secti
     );
     expect(sellerUtxos).toHaveLength(1);
     expect(sellerUtxos[0].satoshis).toBe(251_000n - refundSpend.fee);
+  });
+
+  it('publishes an offer on-chain and closes it by spending the 1,000-sat marker output', async () => {
+    const provider = new MockNetworkProvider();
+    provider.network = Network.MAINNET;
+
+    const addressMap = deriveWalletAddressMap({
+      receiveXpub: sellerWallet.receiveXpub,
+      count: 5,
+    });
+    const addr0 = pkhToCashAddress(derivePayoutPkhFromXpub(sellerWallet.receiveXpub, 0));
+    const markerAddr = pkhToCashAddress(derivePayoutPkhFromXpub(sellerWallet.receiveXpub, 1));
+    const changeAddr = pkhToCashAddress(derivePayoutPkhFromXpub(sellerWallet.receiveXpub, 2));
+
+    const rawUtxo = provider.addUtxo(addr0, randomUtxo({ satoshis: 50_000n }));
+    const tagged = tagWalletUtxos([rawUtxo], addressMap).map((u) => ({
+      ...u,
+      signer: new SignatureTemplate(sellerWallet.receivePrivKey(u.keyIndex)),
+    }));
+    expect(tagged).toHaveLength(1);
+    expect(tagged[0].pathName).toBe('receive');
+    expect(tagged[0].keyIndex).toBe(0);
+
+    const doc: OfferDocument = {
+      v: 1,
+      side: 'sell',
+      asset: BCH_ASSET,
+      assetDecimals: BCH_DECIMALS,
+      fiat: 'ARS',
+      price: { type: 'floating', pair: 'BCH/ARS', marginBps: 100 },
+      min: '100000',
+      max: '1000000',
+      paymentMethods: ['bank-transfer'],
+      paymentWindowSec: 3600,
+      expiresAt: 1_795_000_000,
+      arbiter: arbiterPk,
+      oracle: oraclePk,
+    };
+
+    const pubTx = buildPublishOfferTransaction({
+      provider,
+      document: doc,
+      utxos: tagged,
+      markerAddress: markerAddr,
+      changeAddress: changeAddr,
+    });
+    expect(pubTx.inputPaths).toEqual([[0, 'receive', 0]]);
+    expect(pubTx.request.transaction).toBe(pubTx.hex);
+
+    const decodedTx = decodeTransactionUnsafe(hexToBin(pubTx.hex));
+    expect(decodedTx.outputs).toHaveLength(3);
+    expect(decodedTx.outputs[0].valueSatoshis).toBe(0n);
+    expect(decodedTx.outputs[1].valueSatoshis).toBe(MARKER_SATOSHIS);
+
+    const verified = verifyOfferAgainstOpReturn(pubTx.offerJson, decodedTx.outputs[0].lockingBytecode);
+    expect(verified.document).toEqual(doc);
+
+    await pubTx.builder.send();
+    const markerUtxos = await provider.getUtxos(markerAddr);
+    expect(markerUtxos).toHaveLength(1);
+    expect(markerUtxos[0].satoshis).toBe(MARKER_SATOSHIS);
+
+    // Close the offer by spending the 1,000-sat marker output on its own.
+    const taggedMarker = tagWalletUtxos(markerUtxos, addressMap).map((u) => ({
+      ...u,
+      signer: new SignatureTemplate(sellerWallet.receivePrivKey(u.keyIndex)),
+    }));
+    const closeTx = buildCloseOfferTransaction({
+      provider,
+      markerUtxo: taggedMarker[0],
+      destinationAddress: changeAddr,
+    });
+    expect(closeTx.inputPaths).toEqual([[0, 'receive', 1]]);
+    await closeTx.builder.send();
+    expect(await provider.getUtxos(markerAddr)).toHaveLength(0);
+  });
+
+  it('funds both a BCH escrow and a PUSD escrow with exact expected funding and change', async () => {
+    const addressMap = deriveWalletAddressMap({
+      receiveXpub: sellerWallet.receiveXpub,
+      count: 5,
+    });
+    const addr0 = pkhToCashAddress(derivePayoutPkhFromXpub(sellerWallet.receiveXpub, 0));
+    const tokenAddr0 = pkhToCashAddress(derivePayoutPkhFromXpub(sellerWallet.receiveXpub, 0), {
+      tokenAware: true,
+    });
+    const changeAddr = pkhToCashAddress(derivePayoutPkhFromXpub(sellerWallet.receiveXpub, 1));
+    const tokenChangeAddr = pkhToCashAddress(derivePayoutPkhFromXpub(sellerWallet.receiveXpub, 1), {
+      tokenAware: true,
+    });
+
+    // 1. Fund BCH escrow.
+    const provider1 = new MockNetworkProvider();
+    provider1.network = Network.MAINNET;
+    const bchTradeId = computeTradeId(JSON.stringify(bchTerms));
+    const bchContract = createEscrowContract(bchTerms, bchTradeId, provider1);
+
+    const bchWalletUtxo = provider1.addUtxo(addr0, randomUtxo({ satoshis: 400_000n }));
+    const taggedBch = tagWalletUtxos([bchWalletUtxo], addressMap).map((u) => ({
+      ...u,
+      signer: new SignatureTemplate(sellerWallet.receivePrivKey(u.keyIndex)),
+    }));
+
+    const fundBch = buildFundEscrowTransaction({
+      contract: bchContract,
+      terms: bchTerms,
+      utxos: taggedBch,
+      changeAddress: changeAddr,
+    });
+    await fundBch.builder.send();
+
+    const bchEscrowUtxos = await bchContract.getUtxos();
+    expect(bchEscrowUtxos).toHaveLength(1);
+    expect(matchesEscrowFunding(bchEscrowUtxos[0], bchTerms)).toBe(true);
+    expect((await provider1.getUtxos(changeAddr)).length).toBe(1);
+
+    // 2. Fund PUSD escrow (with token change and BCH change).
+    const provider2 = new MockNetworkProvider();
+    provider2.network = Network.MAINNET;
+    const pusdTradeId = computeTradeId(JSON.stringify(pusdTerms));
+    const pusdContract = createEscrowContract(pusdTerms, pusdTradeId, provider2);
+
+    const rawTokenUtxo = provider2.addUtxo(
+      tokenAddr0,
+      randomUtxo({
+        satoshis: 1000n,
+        token: { category: PUSD_CATEGORY, amount: 12_000n },
+      }),
+    );
+    const rawGasUtxo = provider2.addUtxo(addr0, randomUtxo({ satoshis: 25_000n }));
+    const taggedPusd = tagWalletUtxos([rawTokenUtxo, rawGasUtxo], addressMap).map((u) => ({
+      ...u,
+      signer: new SignatureTemplate(sellerWallet.receivePrivKey(u.keyIndex)),
+    }));
+
+    const fundPusd = buildFundEscrowTransaction({
+      contract: pusdContract,
+      terms: pusdTerms,
+      utxos: taggedPusd,
+      changeAddress: changeAddr,
+      tokenChangeAddress: tokenChangeAddr,
+    });
+    expect(fundPusd.inputPaths).toEqual([
+      [0, 'receive', 0],
+      [1, 'receive', 0],
+    ]);
+    await fundPusd.builder.send();
+
+    const pusdEscrowUtxos = await pusdContract.getUtxos();
+    expect(pusdEscrowUtxos).toHaveLength(1);
+    expect(matchesEscrowFunding(pusdEscrowUtxos[0], pusdTerms)).toBe(true);
+
+    const changeUtxos = await provider2.getUtxos(tokenChangeAddr);
+    const tokenChangeUtxo = changeUtxos.find((u) => u.token?.category === PUSD_CATEGORY);
+    expect(tokenChangeUtxo?.token?.amount).toBe(7000n); // 12,000 - 5,000
   });
 });

@@ -3,6 +3,8 @@
 import {
   Contract,
   TransactionBuilder,
+  gatherBchUtxos,
+  gatherFungibleTokenUtxos,
   placeholderSignature,
   type Artifact,
   type NetworkProvider,
@@ -17,7 +19,14 @@ import {
   stringify,
 } from '@bitauth/libauth';
 import artifactJson from '../../contracts/CampfireEscrow.json' with { type: 'json' };
-import { pkhToLockingBytecode, toBytes } from './keys.js';
+import {
+  formatWalletTransactionRequest,
+  pkhToLockingBytecode,
+  toBytes,
+  toUnlockableWalletUtxo,
+  type WalletSpendableUtxo,
+  type WalletTransactionRequest,
+} from './keys.js';
 import { BCH_ASSET, MIN_UNIX_TIMESTAMP } from './offers.js';
 import {
   VERDICT_BUYER,
@@ -303,3 +312,78 @@ export function buildRefundSpend(params: {
   });
   return { builder, hex: builder.build(), fee };
 }
+
+// Builds the seller's funding transaction for either a BCH or a CashToken (PUSD) escrow (protocol section 5).
+export function buildFundEscrowTransaction(params: {
+  contract: Contract;
+  terms: Pick<TradeTerms, 'asset' | 'amount'>;
+  utxos: WalletSpendableUtxo[];
+  changeAddress: string;
+  tokenChangeAddress?: string;
+  feeRate?: number;
+  broadcast?: boolean;
+}): WalletTransactionRequest {
+  const expected = expectedEscrowFunding(params.terms);
+  const feeRate = params.feeRate ?? 1.0;
+
+  if (!expected.token) {
+    const bchPool = params.utxos.filter((u) => !u.token);
+    const totalAvailable = bchPool.reduce((sum, u) => sum + u.satoshis, 0n);
+    const target =
+      totalAvailable >= expected.satoshis + 1000n ? expected.satoshis + 1000n : expected.satoshis + 250n;
+    const { utxos: selected } = gatherBchUtxos(bchPool, target);
+
+    const builder = new TransactionBuilder({ provider: params.contract.provider })
+      .addInputs(selected.map(toUnlockableWalletUtxo))
+      .addOutput({ to: params.contract.address, amount: expected.satoshis })
+      .addBchChangeOutputIfNeeded({ to: params.changeAddress, feeRate });
+
+    return formatWalletTransactionRequest(
+      builder,
+      selected,
+      'Campfire: fund BCH escrow',
+      params.broadcast ?? false,
+    );
+  }
+
+  if (!params.tokenChangeAddress) {
+    throw new Error('Token escrow funding requires a token-aware tokenChangeAddress (bitcoincash:z...)');
+  }
+  const normalizedUtxos = params.utxos.map((u) =>
+    u.token ? { ...u, token: { ...u.token, category: u.token.category.toLowerCase() } } : u,
+  );
+  const { utxos: tokenInputs } = gatherFungibleTokenUtxos(
+    normalizedUtxos,
+    expected.token.category,
+    expected.token.amount,
+  );
+  const tokenInputSats = tokenInputs.reduce((sum, u) => sum + u.satoshis, 0n);
+  const neededBchSats = expected.satoshis + 2000n > tokenInputSats
+    ? expected.satoshis + 2000n - tokenInputSats
+    : 0n;
+
+  const bchInputs =
+    neededBchSats > 0n ? gatherBchUtxos(normalizedUtxos, neededBchSats).utxos : [];
+  const allInputs = [...tokenInputs, ...bchInputs];
+
+  const builder = new TransactionBuilder({ provider: params.contract.provider })
+    .addInputs(allInputs.map(toUnlockableWalletUtxo))
+    .addOutput({
+      to: params.contract.tokenAddress,
+      amount: expected.satoshis,
+      token: expected.token,
+    })
+    .addTokenChangeOutputIfNeeded({
+      category: expected.token.category,
+      to: params.tokenChangeAddress,
+    })
+    .addBchChangeOutputIfNeeded({ to: params.changeAddress, feeRate });
+
+  return formatWalletTransactionRequest(
+    builder,
+    allInputs,
+    'Campfire: fund token escrow',
+    params.broadcast ?? false,
+  );
+}
+

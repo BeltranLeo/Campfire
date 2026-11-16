@@ -10,8 +10,16 @@ import {
   hexToBin,
   secp256k1,
   sha256,
+  stringify,
   utf8ToBin,
 } from '@bitauth/libauth';
+import {
+  placeholderP2PKHUnlocker,
+  type SignatureTemplate,
+  type SpendableUtxo,
+  type TransactionBuilder,
+  type UnlockableUtxo,
+} from 'cashscript';
 
 export const WALLET_PATHS = ['receive', 'change', 'defi'] as const;
 export type WalletPathName = (typeof WALLET_PATHS)[number];
@@ -145,3 +153,108 @@ export function pkhToLockingBytecode(pkh: Uint8Array | string): Uint8Array {
   }
   return Uint8Array.from([0x76, 0xa9, 0x14, ...payload, 0x88, 0xac]);
 }
+
+export interface WalletSpendableUtxo extends SpendableUtxo {
+  pathName: WalletPathName;
+  keyIndex: number;
+  address: string;
+  signer?: SignatureTemplate;
+}
+
+export interface WalletAddressEntry {
+  pathName: WalletPathName;
+  keyIndex: number;
+  pubkeyHex: string;
+  pkhHex: string;
+  address: string;
+  tokenAddress: string;
+  lockingBytecodeHex: string;
+}
+
+// Derives a map from P2PKH lockingBytecode (hex) to wallet path/index metadata for `receive` and `change`.
+export function deriveWalletAddressMap(params: {
+  receiveXpub: string;
+  changeXpub?: string;
+  count?: number;
+  prefix?: CashAddressPrefix;
+}): Map<string, WalletAddressEntry> {
+  const count = params.count ?? 20;
+  const prefix = params.prefix ?? 'bitcoincash';
+  const map = new Map<string, WalletAddressEntry>();
+
+  const branches: [WalletPathName, string][] = [['receive', params.receiveXpub]];
+  if (params.changeXpub) {
+    branches.push(['change', params.changeXpub]);
+  }
+
+  for (const [pathName, xpub] of branches) {
+    for (let i = 0; i < count; i++) {
+      const pubkey = derivePubkeyFromXpub(xpub, i);
+      const pkh = hash160(pubkey);
+      const lockingBytecodeHex = binToHex(pkhToLockingBytecode(pkh));
+      map.set(lockingBytecodeHex, {
+        pathName,
+        keyIndex: i,
+        pubkeyHex: binToHex(pubkey),
+        pkhHex: binToHex(pkh),
+        address: pkhToCashAddress(pkh, { prefix, tokenAware: false }),
+        tokenAddress: pkhToCashAddress(pkh, { prefix, tokenAware: true }),
+        lockingBytecodeHex,
+      });
+    }
+  }
+  return map;
+}
+
+// Tags raw network UTXOs with their wallet derivation path and index using an address map.
+export function tagWalletUtxos(
+  utxos: SpendableUtxo[],
+  addressMap: Map<string, WalletAddressEntry>,
+): WalletSpendableUtxo[] {
+  const tagged: WalletSpendableUtxo[] = [];
+  for (const utxo of utxos) {
+    const entry = addressMap.get(utxo.lockingBytecode.toLowerCase());
+    if (entry) {
+      tagged.push({
+        ...utxo,
+        pathName: entry.pathName,
+        keyIndex: entry.keyIndex,
+        address: entry.address,
+      });
+    }
+  }
+  return tagged;
+}
+
+export function toUnlockableWalletUtxo(utxo: WalletSpendableUtxo): UnlockableUtxo {
+  return {
+    ...utxo,
+    unlocker: utxo.signer ? utxo.signer.unlockP2PKH() : placeholderP2PKHUnlocker(utxo.address),
+  };
+}
+
+export interface WalletTransactionRequest {
+  builder: TransactionBuilder;
+  hex: string;
+  request: Record<string, unknown>;
+  inputPaths: [number, WalletPathName, number][];
+}
+
+export function formatWalletTransactionRequest(
+  builder: TransactionBuilder,
+  inputs: WalletSpendableUtxo[],
+  userPrompt: string,
+  broadcast = false,
+): WalletTransactionRequest {
+  const hex = builder.build();
+  const wc = builder.generateWcTransactionObject({ broadcast, userPrompt });
+  const request = JSON.parse(stringify(wc)) as Record<string, unknown>;
+  request.transaction = hex;
+  const inputPaths: [number, WalletPathName, number][] = inputs.map((u, idx) => [
+    idx,
+    u.pathName,
+    u.keyIndex,
+  ]);
+  return { builder, hex, request, inputPaths };
+}
+

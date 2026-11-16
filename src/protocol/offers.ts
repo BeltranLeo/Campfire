@@ -8,7 +8,20 @@ import {
   sha256,
   utf8ToBin,
 } from '@bitauth/libauth';
-import { isBytes32Hex, isCompressedPubkeyHex, toBytes } from './keys.js';
+import {
+  TransactionBuilder,
+  gatherBchUtxos,
+  type NetworkProvider,
+} from 'cashscript';
+import {
+  formatWalletTransactionRequest,
+  isBytes32Hex,
+  isCompressedPubkeyHex,
+  toBytes,
+  toUnlockableWalletUtxo,
+  type WalletSpendableUtxo,
+  type WalletTransactionRequest,
+} from './keys.js';
 
 export const PROTOCOL_IDENTIFIER = 'CMPF';
 export const FORMAT_VERSION = 1;
@@ -318,3 +331,93 @@ export function verifyOfferAgainstOpReturn(
 
   return { document, onChain, contentHash };
 }
+
+export interface PublishOfferTransactionResult extends WalletTransactionRequest {
+  offerJson: string;
+  contentHash: string;
+  opReturnBytecode: Uint8Array;
+}
+
+// Builds an offer publication transaction (protocol section 3.1):
+// output 0 = OP_RETURN, output 1 = 1,000-sat marker output, output 2 = optional BCH change.
+export function buildPublishOfferTransaction(params: {
+  provider: NetworkProvider;
+  document: OfferDocument;
+  offerJson?: string;
+  utxos: WalletSpendableUtxo[];
+  markerAddress: string;
+  changeAddress: string;
+  feeRate?: number;
+  broadcast?: boolean;
+}): PublishOfferTransactionResult {
+  const offerJson = params.offerJson ?? JSON.stringify(params.document);
+  const parsed = JSON.parse(offerJson) as OfferDocument;
+  validateOfferDocument(parsed);
+
+  const contentHashBytes = hashOfferJson(offerJson);
+  const contentHash = binToHex(contentHashBytes).toLowerCase();
+  const opReturnBytecode = encodeOfferOpReturn({
+    arbiterPk: parsed.arbiter,
+    oraclePk: parsed.oracle,
+    contentHash: contentHashBytes,
+  });
+
+  const feeRate = params.feeRate ?? 1.0;
+  // Estimate 1,000-sat marker + ~500 sats for OP_RETURN, marker, change and input; fall back to MARKER_SATOSHIS + 300n.
+  const bchPool = params.utxos.filter((u) => !u.token);
+  const totalAvailable = bchPool.reduce((sum, u) => sum + u.satoshis, 0n);
+  const target = totalAvailable >= MARKER_SATOSHIS + 1000n ? MARKER_SATOSHIS + 1000n : MARKER_SATOSHIS + 300n;
+  const { utxos: selected } = gatherBchUtxos(bchPool, target);
+
+  const builder = new TransactionBuilder({ provider: params.provider })
+    .addInputs(selected.map(toUnlockableWalletUtxo))
+    .addOutput({ to: opReturnBytecode, amount: 0n })
+    .addOutput({ to: params.markerAddress, amount: MARKER_SATOSHIS })
+    .addBchChangeOutputIfNeeded({ to: params.changeAddress, feeRate });
+
+  const formatted = formatWalletTransactionRequest(
+    builder,
+    selected,
+    'Campfire: publish offer',
+    params.broadcast ?? false,
+  );
+  return {
+    ...formatted,
+    offerJson,
+    contentHash,
+    opReturnBytecode,
+  };
+}
+
+// Builds a transaction that closes an open offer by spending its 1,000-sat marker output (protocol section 2.1).
+// The 1,000-sat marker output covers its own ~192-sat miner fee and leaves ~808 sats (above the 546-sat P2PKH dust limit).
+export function buildCloseOfferTransaction(params: {
+  provider: NetworkProvider;
+  markerUtxo: WalletSpendableUtxo;
+  destinationAddress: string;
+  feeRate?: number;
+  broadcast?: boolean;
+}): WalletTransactionRequest {
+  if (params.markerUtxo.token) {
+    throw new Error('Offer marker UTXO must not carry tokens');
+  }
+  const feeRate = params.feeRate ?? 1.0;
+  const unlockable = toUnlockableWalletUtxo(params.markerUtxo);
+
+  const make = (fee: bigint) =>
+    new TransactionBuilder({ provider: params.provider })
+      .addInputs([unlockable])
+      .addOutput({ to: params.destinationAddress, amount: params.markerUtxo.satoshis - fee });
+
+  const size = make(200n).getTransactionSize();
+  const fee = BigInt(Math.ceil(Number(size) * feeRate));
+  const builder = make(fee);
+
+  return formatWalletTransactionRequest(
+    builder,
+    [params.markerUtxo],
+    'Campfire: close offer',
+    params.broadcast ?? false,
+  );
+}
+
