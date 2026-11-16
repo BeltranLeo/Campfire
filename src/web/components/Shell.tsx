@@ -6,10 +6,10 @@ import { useWallet } from '../wallet';
 import { CopyButton } from './CopyButton';
 import { BottomNav, WalletButton, WalletError } from './Wallet';
 
-// Visitors without a wallet see the public pages; "How it works" is the landing page at "/".
+// Visitors without a wallet see the public pages; the logo leads back to the landing page at "/".
 const PUBLIC_NAV = [
   { to: '/offers', label: 'Offers' },
-  { to: '/', label: 'How it works' },
+  { to: '/about', label: 'About' },
   { to: '/transparency', label: 'Transparency' },
 ];
 

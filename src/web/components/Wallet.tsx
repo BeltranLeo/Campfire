@@ -105,8 +105,8 @@ function WalletMenu({ onClose }: { onClose: () => void }) {
         <Link to="/welcome" onClick={onClose}>
           Preferences
         </Link>
-        <Link to="/help" onClick={onClose}>
-          Help
+        <Link to="/about" onClick={onClose}>
+          About
         </Link>
         <Link to="/transparency" onClick={onClose}>
           Transparency
