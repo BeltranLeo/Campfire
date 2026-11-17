@@ -21,6 +21,9 @@ function lookupProvider(): Promise<ElectrumNetworkProvider> {
   return lookup;
 }
 
+/** The connection kept open for the page, for pages that ask many questions in a row (a wallet's coins). */
+export const keptElectrum = lookupProvider;
+
 const BATCH = 25;
 /**
  * The wallet shows its first unused address on its receive screen, and the owner may have shared it (a

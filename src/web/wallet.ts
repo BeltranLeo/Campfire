@@ -23,6 +23,9 @@ export class WalletDeclined extends Error {
   }
 }
 
+/** Which key signs which input: the input's position, the wallet path (`defi` for contracts) and the key index. */
+export type SigningPath = [number, 'receive' | 'change' | 'defi', number];
+
 export type WalletStatus = 'disconnected' | 'pairing' | 'connecting' | 'connected';
 
 export interface WalletXpubs {
@@ -141,7 +144,7 @@ class WalletController {
    * Asks the paired wallet to sign a transaction (not to broadcast it) and returns the signed hex.
    * Throws WalletDeclined if the wallet is not connected, refuses, fails or stays silent for two minutes.
    */
-  async sign(request: Record<string, unknown>, inputPaths: [number, 'defi', number][]): Promise<string> {
+  async sign(request: Record<string, unknown>, inputPaths: SigningPath[]): Promise<string> {
     const manager = this.manager;
     if (!manager || this.state.status !== 'connected') throw new WalletDeclined();
     try {
@@ -277,7 +280,7 @@ const actions = {
   connect: () => controller.connect(),
   disconnect: () => controller.disconnect(),
   refreshActiveTrades: () => controller.refreshActiveTrades(),
-  sign: (request: Record<string, unknown>, inputPaths: [number, 'defi', number][]) => controller.sign(request, inputPaths),
+  sign: (request: Record<string, unknown>, inputPaths: SigningPath[]) => controller.sign(request, inputPaths),
 };
 
 export function useWallet() {

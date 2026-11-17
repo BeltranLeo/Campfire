@@ -112,6 +112,7 @@
 .cf-seg { display: inline-flex; padding: 2px; border-radius: var(--radius-md); background: var(--surface-sunken); gap: 2px; }
 .cf-seg > button { min-height: 32px; padding: 0 var(--space-3); border: 0; border-radius: 6px; background: transparent; color: var(--ink-muted); font: 600 13px/18px var(--font-sans); cursor: pointer; }
 .cf-seg > button[aria-pressed="true"] { background: var(--surface); color: var(--ink); box-shadow: 0 0 0 1px var(--line); }
+.cf-seg > button:disabled { opacity: .45; cursor: not-allowed; }
 
 /* ---------- Timeline (the trade page spine) ---------- */
 .cf-timeline { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; }

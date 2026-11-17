@@ -3,6 +3,7 @@ import { Shell } from './components/Shell';
 import { About } from './pages/About';
 import { Arbiter } from './pages/Arbiter';
 import { ArbiterList } from './pages/ArbiterList';
+import { CreateOffer } from './pages/CreateOffer';
 import { DevComponents } from './pages/DevComponents';
 import { Landing } from './pages/Landing';
 import { NotBuilt } from './pages/NotBuilt';
@@ -19,7 +20,7 @@ export function App() {
         <Route index element={<Landing />} />
         <Route path="welcome" element={<NotBuilt title="Welcome" />} />
         <Route path="offers" element={<Offers />} />
-        <Route path="offers/new" element={<NotBuilt title="New offer" />} />
+        <Route path="offers/new" element={<CreateOffer />} />
         <Route path="offers/:offerTxid" element={<Take />} />
         <Route path="trade/:id" element={<TradePage />} />
         <Route path="trade/:id/arbiter" element={<Arbiter />} />
