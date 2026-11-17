@@ -38,10 +38,12 @@ import {
   disputeKeyHex,
   isFinal,
   newerTrade,
+  readPaymentDetails,
   roleOf,
   timeline,
   tradeTitle,
   type EscrowCheck,
+  type PaymentDetailsView,
   type Role,
 } from '../trade';
 import { DSPROOF_WATCH_SEC, useDoubleSpendWatch, type DoubleSpendState } from '../dsproof';
@@ -457,31 +459,50 @@ function EscrowCheckNotice({ check }: { check: EscrowCheck | null | 'error' }) {
 
 // The seller's payment details, decrypted in this browser with the session key stored when the offer was taken.
 function PaymentDetails({ trade, fiat }: { trade: Trade; fiat: string }) {
-  const [state, setState] = useState<{ kind: 'loading' } | { kind: 'missing' } | { kind: 'ok'; details: Record<string, unknown> }>({
-    kind: 'loading',
-  });
+  const [state, setState] = useState<
+    { kind: 'loading' } | { kind: 'nokey' } | { kind: 'failed' } | { kind: 'ok'; view: PaymentDetailsView }
+  >({ kind: 'loading' });
   useEffect(() => {
     let current = true;
     const key = readSessionKey(trade.id);
     if (!key || !trade.encryptedPaymentDetails || !trade.sellerSessionPk) {
-      setState({ kind: 'missing' });
+      setState({ kind: 'nokey' });
       return;
     }
-    decryptPaymentDetails(key, trade.sellerSessionPk, trade.encryptedPaymentDetails)
-      .then((text) => JSON.parse(text) as Record<string, unknown>)
-      .then(
-        (details) => current && setState({ kind: 'ok', details }),
-        () => current && setState({ kind: 'missing' }),
-      );
+    decryptPaymentDetails(key, trade.sellerSessionPk, trade.encryptedPaymentDetails).then(
+      (text) => current && setState({ kind: 'ok', view: readPaymentDetails(text) }),
+      () => current && setState({ kind: 'failed' }),
+    );
     return () => {
       current = false;
     };
   }, [trade.id, trade.encryptedPaymentDetails, trade.sellerSessionPk]);
 
   if (state.kind === 'loading') return <Skeleton height={96} />;
-  if (state.kind === 'missing') return <Notice tone="warn">{NO_KEY}</Notice>;
+  if (state.kind === 'nokey') return <Notice tone="warn">{NO_KEY}</Notice>;
+  // Invented copy: the key is here but does not open the details.
+  if (state.kind === 'failed') return <Notice tone="warn">The payment details could not be decrypted with this browser's key for the trade.</Notice>;
 
-  const { simulated, notice: _notice, method, reference, ...rest } = state.details;
+  const amount = (
+    <>
+      <dt>Amount</dt>
+      <dd>
+        <span className="cf-mono">{fiat}</span>
+      </dd>
+    </>
+  );
+  if (state.view.kind === 'text') {
+    return (
+      <div className="cf-well">
+        <dl className="cf-dl">
+          <dt>Pay to</dt>
+          <dd style={{ whiteSpace: 'pre-wrap', overflowWrap: 'anywhere' }}>{state.view.text}</dd>
+          {amount}
+        </dl>
+      </div>
+    );
+  }
+  const { simulated, notice: _notice, method, reference, ...rest } = state.view.fields;
   const rows = (
     <dl className="cf-dl">
       {method !== undefined && (
@@ -504,10 +525,7 @@ function PaymentDetails({ trade, fiat }: { trade: Trade; fiat: string }) {
           <dd>{String(value)}</dd>
         </span>
       ))}
-      <dt>Amount</dt>
-      <dd>
-        <span className="cf-mono">{fiat}</span>
-      </dd>
+      {amount}
     </dl>
   );
   // Only details the seller marked as simulated go in the violet box; the demo seller marks its own.

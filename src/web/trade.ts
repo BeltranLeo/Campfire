@@ -165,6 +165,23 @@ export function disputeKeyHex(sessionPrivateKey: string | null, peerSessionPk: s
   }
 }
 
+/** The seller's payment details as the buyer reads them: labelled fields (the demo seller's JSON) or plain text. */
+export type PaymentDetailsView = { kind: 'fields'; fields: Record<string, unknown> } | { kind: 'text'; text: string };
+
+/**
+ * A real seller types the details as free text ("Bank, CBU, alias"); the demo seller sends a JSON object. Only an
+ * object is read as fields: a bare number such as an account number is valid JSON but is text.
+ */
+export function readPaymentDetails(plaintext: string): PaymentDetailsView {
+  try {
+    const value: unknown = JSON.parse(plaintext);
+    if (value !== null && typeof value === 'object' && !Array.isArray(value)) return { kind: 'fields', fields: value as Record<string, unknown> };
+  } catch {
+    // Not JSON: it is text.
+  }
+  return { kind: 'text', text: plaintext };
+}
+
 /** A refusal with a sentence that is already written for the person reading it. */
 export class TradeActionError extends Error {}
 

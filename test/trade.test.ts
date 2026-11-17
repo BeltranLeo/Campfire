@@ -7,7 +7,7 @@ import { derivePayoutPkhFromXpub, derivePubkeyFromXpub } from '../src/protocol/k
 import { computeTradeId, signPriceQuote, type TradeTerms } from '../src/protocol/trades.js';
 import type { Trade } from '../src/web/api.js';
 import { generateSessionKeyPair } from '../src/web/take.js';
-import { TradeActionError, buildBuyerCancel, checkForArbiter, disputeKeyHex, newerTrade, roleOf, timeline, tradeTitle } from '../src/web/trade.js';
+import { TradeActionError, buildBuyerCancel, checkForArbiter, disputeKeyHex, newerTrade, readPaymentDetails, roleOf, timeline, tradeTitle } from '../src/web/trade.js';
 
 const base: Trade = {
   id: 'rec',
@@ -282,5 +282,26 @@ describe('what the demo arbiter checks', () => {
       fiat: { price: '465.12', expected: '0.07', ok: true },
     });
     expect(checkForArbiter(fixed, undefined)).toEqual({ quote: 'none', fiat: null });
+  });
+});
+
+describe('reading the seller payment details', () => {
+  it('reads the demo seller JSON as labelled fields', () => {
+    expect(readPaymentDetails('{"method":"simulated","reference":"CF-1","simulated":true}')).toEqual({
+      kind: 'fields',
+      fields: { method: 'simulated', reference: 'CF-1', simulated: true },
+    });
+  });
+
+  it('keeps what a real seller typed as plain text, line breaks included', () => {
+    const typed = 'Banco Nación · CBU 0110599520000001234567\nAlias campo.fuego.sur · Reference CF-250';
+    expect(readPaymentDetails(typed)).toEqual({ kind: 'text', text: typed });
+  });
+
+  it('treats text that happens to be valid JSON but not an object as text', () => {
+    // An account number alone is a JSON number; a list or null is not a set of labelled fields.
+    for (const typed of ['0110599520', '[1,2]', 'null', '"alias"', 'true']) {
+      expect(readPaymentDetails(typed)).toEqual({ kind: 'text', text: typed });
+    }
   });
 });
