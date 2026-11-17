@@ -101,6 +101,9 @@ export function timeline(trade: Trade, role: Role, amount: string): Step[] {
     steps.push({ state: 'todo', title: pays });
   } else if (s === 'ResolvedSeller' && !trade.disputedAt) {
     steps.push({ state: 'failed', title: 'Payment window ended without a payment', at: trade.verdictIssuedAt });
+  } else if (trade.disputedAt !== undefined && s !== 'Dropped') {
+    // A dispute opened before the payment was marked as sent: whoever reads the story must see that.
+    steps.push({ state: 'failed', title: `${buyer} had not marked the payment as sent`, note: 'The dispute was opened first' });
   }
 
   // A dispute takes the place of the release while it is open, and stays in the story once it is decided.

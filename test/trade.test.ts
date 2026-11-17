@@ -113,13 +113,21 @@ describe('a dispute in the progress steps', () => {
     expect(titles({ ...disputed, disputedBy: 'seller' })[3]).toBe('current:Dispute opened by the seller');
   });
 
-  it('skips the payment step when the dispute comes before it', () => {
+  it('says the payment was not marked when the dispute comes before it', () => {
     expect(titles({ ...disputed, paidAt: undefined })).toEqual([
       'done:You took the offer',
       'done:Seller funded the escrow',
+      'failed:You had not marked the payment as sent',
       'current:Dispute opened by you',
       'todo:Arbiter decides: funds go to buyer or seller',
     ]);
+  });
+
+  it('says it from the seller and the visitor side too, and not when there was no dispute', () => {
+    const early = { ...disputed, paidAt: undefined };
+    expect(titles(early, 'visitor')[2]).toBe('failed:Buyer had not marked the payment as sent');
+    expect(timeline(early, 'seller', '15,000 sats').map((s) => s.title)).toContain('Buyer had not marked the payment as sent');
+    expect(titles({ ...base, status: 'Funded' }).join()).not.toMatch(/had not marked/);
   });
 
   it('keeps the dispute in the story once it is decided or cancelled', () => {

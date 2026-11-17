@@ -378,9 +378,16 @@ function DisputeCard({ trade }: { trade: Trade }) {
               <dd>{trade.disputeReason}</dd>
             </>
           )}
+          {/* Whether the buyer said the payment was sent is the first thing an arbiter needs to know. */}
+          <dt>Payment marked as sent</dt>
+          <dd>
+            {trade.paidAt !== undefined
+              ? `Yes, by the buyer at ${formatHourMinute(new Date(trade.paidAt * 1000))}`
+              : 'No. The dispute was opened before the buyer marked the payment as sent.'}
+          </dd>
           {trade.isDemo && (
             <>
-              <dt>Payment</dt>
+              <dt>Fiat</dt>
               <dd>
                 <ProvenanceTag kind="sim">Simulated fiat</ProvenanceTag> No money was sent in this demo.
               </dd>
