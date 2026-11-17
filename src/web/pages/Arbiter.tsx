@@ -442,7 +442,9 @@ function ChatCard({ trade, chat, error }: { trade: Trade; chat: ArbiterChat | un
       <div className="cf-chat">
         {messages.map((m) => (
           <div key={m.id} className="cf-msg">
-            <strong>{m.senderIdentity === trade.sellerIdentity ? 'Seller' : 'Buyer'}</strong> {m.plaintext}
+            {/* The author is the role whose session key signed the message, not the identity the request named.
+                "Not signed" is invented copy: the design has no unsigned messages. */}
+            <strong>{m.senderRole === 'seller' ? 'Seller' : m.senderRole === 'buyer' ? 'Buyer' : 'Not signed'}</strong> {m.plaintext}
             <small>{formatHourMinute(new Date(m.createdAt * 1000))}</small>
           </div>
         ))}

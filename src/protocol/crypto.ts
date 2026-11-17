@@ -151,44 +151,63 @@ export async function decryptPaymentDetails(
   return decryptWithKey(key, payload);
 }
 
-// The buyer can compute the same ECDH key as the seller, so encryption alone does not show who wrote the payment
-// details. The seller therefore also signs the ciphertext with their session key, which is committed in the trade
-// terms: the service, the buyer and an arbiter can all check that the details came from the seller.
-function paymentDetailsMessageHash(tradeId: Uint8Array | string, ciphertext: string): Uint8Array {
+// The buyer and the seller derive the same ECDH key, so a ciphertext alone does not show which of them wrote it.
+// Payment details (buy offers) and chat messages are therefore also signed with the author's session key, which is
+// committed in the trade terms: the service, the other party and an arbiter can all check who wrote what.
+const CHAT_SIG_DOMAIN = 'CMPF-CHAT-SIG-v1';
+
+function sessionMessageHash(domain: string, tradeId: Uint8Array | string, ciphertext: string): Uint8Array {
   const id = toBytes(tradeId, 'tradeId');
   if (id.length !== 32) {
     throw new Error(`Expected 32-byte tradeId, got ${id.length} bytes`);
   }
-  return sha256.hash(utf8ToBin(`${PAYMENT_SIG_DOMAIN}:${binToHex(id)}:${ciphertext}`));
+  return sha256.hash(utf8ToBin(`${domain}:${binToHex(id)}:${ciphertext}`));
 }
 
-export function signPaymentDetails(
-  sellerSessionPrivateKey: Uint8Array | string,
-  tradeId: Uint8Array | string,
-  ciphertext: string,
-): string {
+function signWithSessionKey(domain: string, sessionPrivateKey: Uint8Array | string, tradeId: Uint8Array | string, ciphertext: string): string {
   const sig = secp256k1.signMessageHashSchnorr(
-    toBytes(sellerSessionPrivateKey, 'sellerSessionPrivateKey'),
-    paymentDetailsMessageHash(tradeId, ciphertext),
+    toBytes(sessionPrivateKey, 'sessionPrivateKey'),
+    sessionMessageHash(domain, tradeId, ciphertext),
   );
   if (typeof sig === 'string') {
-    throw new Error(`Failed to sign payment details: ${sig}`);
+    throw new Error(`Failed to sign with the session key: ${sig}`);
   }
   return binToHex(sig);
 }
 
-export function verifyPaymentDetailsSignature(
-  sellerSessionPublicKey: Uint8Array | string,
+function verifySessionSignature(
+  domain: string,
+  sessionPublicKey: Uint8Array | string,
   tradeId: Uint8Array | string,
   ciphertext: string,
   signature: Uint8Array | string,
 ): boolean {
   try {
-    const sig = toBytes(signature, 'paymentDetailsSignature');
-    const pk = toBytes(sellerSessionPublicKey, 'sellerSessionPublicKey');
+    const sig = toBytes(signature, 'signature');
+    const pk = toBytes(sessionPublicKey, 'sessionPublicKey');
     if (sig.length !== 64 || pk.length !== 33 || !secp256k1.validatePublicKey(pk)) return false;
-    return secp256k1.verifySignatureSchnorr(sig, pk, paymentDetailsMessageHash(tradeId, ciphertext));
+    return secp256k1.verifySignatureSchnorr(sig, pk, sessionMessageHash(domain, tradeId, ciphertext));
   } catch {
     return false;
   }
 }
+
+export const signPaymentDetails = (sellerSessionPrivateKey: Uint8Array | string, tradeId: Uint8Array | string, ciphertext: string): string =>
+  signWithSessionKey(PAYMENT_SIG_DOMAIN, sellerSessionPrivateKey, tradeId, ciphertext);
+
+export const verifyPaymentDetailsSignature = (
+  sellerSessionPublicKey: Uint8Array | string,
+  tradeId: Uint8Array | string,
+  ciphertext: string,
+  signature: Uint8Array | string,
+): boolean => verifySessionSignature(PAYMENT_SIG_DOMAIN, sellerSessionPublicKey, tradeId, ciphertext, signature);
+
+export const signChatMessage = (senderSessionPrivateKey: Uint8Array | string, tradeId: Uint8Array | string, ciphertext: string): string =>
+  signWithSessionKey(CHAT_SIG_DOMAIN, senderSessionPrivateKey, tradeId, ciphertext);
+
+export const verifyChatMessageSignature = (
+  senderSessionPublicKey: Uint8Array | string,
+  tradeId: Uint8Array | string,
+  ciphertext: string,
+  signature: Uint8Array | string,
+): boolean => verifySessionSignature(CHAT_SIG_DOMAIN, senderSessionPublicKey, tradeId, ciphertext, signature);

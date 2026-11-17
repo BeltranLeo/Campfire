@@ -409,7 +409,7 @@ export function createApiHandler(deps: {
             return jsonResponse({ trade });
           }
           if (action === 'chat') {
-            const body = await readJson<{ senderIdentity: string; ciphertext: string }>(req);
+            const body = await readJson<{ senderIdentity: string; ciphertext: string; signature?: string }>(req);
             const message = await service.postChatMessage({ ...body, idOrTradeId: id });
             return jsonResponse({ message }, 201);
           }

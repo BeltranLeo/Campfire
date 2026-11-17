@@ -202,7 +202,15 @@ export interface Trade extends TradeSummary {
 export interface ArbiterChat {
   messages: unknown[];
   /** Present only when a party handed the shared key to the arbiter. */
-  decrypted?: { id: string; senderIdentity: string; plaintext: string; createdAt: number }[];
+  decrypted?: {
+    id: string;
+    senderIdentity: string;
+    /** Who signed the message with their session key; absent when the signature is missing or wrong. */
+    senderRole?: 'buyer' | 'seller';
+    verified?: boolean;
+    plaintext: string;
+    createdAt: number;
+  }[];
 }
 
 export interface DemoInfo {

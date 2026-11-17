@@ -33,6 +33,7 @@ import {
   verifyDerivedPayoutPkh,
   verifyDerivedPubkey,
   verifyOfferAgainstOpReturn,
+  verifyChatMessageSignature,
   verifyPaymentDetailsSignature,
   verifyPriceQuote,
   verifySignedContractSpend,
@@ -83,6 +84,16 @@ export interface SponsorshipStatus extends SponsorshipLimits {
   nextSlotAt: number | null;
   /** Paid offers the given identity has open now (0 when no identity was asked about). */
   openNow: number;
+}
+
+export interface DecryptedChatMessage {
+  id: string;
+  senderIdentity: string;
+  /** Present only when the message carries a valid signature by that role's session key. */
+  senderRole?: 'buyer' | 'seller';
+  verified: boolean;
+  plaintext: string;
+  createdAt: number;
 }
 
 export const REPUTATION_HONESTY_NOTICE =
@@ -1246,10 +1257,14 @@ export class CampfireService {
 
   // --- Encrypted Chat (Section 6) ---
 
+  // A message counts only with a signature by the sender's session key, committed in the trade terms. Identities are
+  // not proven (section 1) and both parties share the chat key, so without it one party could post messages in the
+  // other's name, such as "payment received", and show them to the arbiter.
   async postChatMessage(params: {
     idOrTradeId: string;
     senderIdentity: string;
     ciphertext: string;
+    signature?: string;
   }): Promise<StoredChatMessage> {
     const trade = await this.options.storage.getTrade(params.idOrTradeId);
     if (!trade) {
@@ -1264,10 +1279,38 @@ export class CampfireService {
     if (!params.ciphertext || !params.ciphertext.includes(':')) {
       throw new Error('Chat message must be an encrypted AES-GCM payload');
     }
+    if (!trade.tradeId || !trade.buyerSessionPk || !trade.sellerSessionPk) {
+      throw new Error('The chat opens once the trade is accepted');
+    }
+    // The role whose session key signed it; a person trading with themselves holds both roles.
+    const roles: ('buyer' | 'seller')[] = [];
+    if (trade.buyerIdentity === params.senderIdentity) roles.push('buyer');
+    if (trade.sellerIdentity === params.senderIdentity) roles.push('seller');
+    const senderRole = params.signature
+      ? roles.find((role) =>
+          verifyChatMessageSignature(
+            role === 'buyer' ? trade.buyerSessionPk! : trade.sellerSessionPk!,
+            trade.tradeId!,
+            params.ciphertext,
+            params.signature!,
+          ),
+        )
+      : undefined;
+    if (!senderRole) {
+      throw new Error("Chat messages must be signed with the sender's session key");
+    }
+    const signature = params.signature!.toLowerCase();
+    // A signed message cannot be posted twice: anyone who reads it could otherwise repeat it later.
+    const existing = await this.options.storage.listChatMessages(trade.id);
+    if (existing.some((m) => m.signature === signature)) {
+      throw new Error('This message was already posted');
+    }
     const msg: StoredChatMessage = {
       id: binToHex(randomBytes(12)),
       tradeRecordId: trade.id,
       senderIdentity: params.senderIdentity,
+      senderRole,
+      signature,
       ciphertext: params.ciphertext,
       createdAt: this.nowSeconds(),
     };
@@ -1286,7 +1329,7 @@ export class CampfireService {
   // In a dispute where a party handed over `sharedTradeKeyHex`, the arbiter can decrypt the chat log.
   async decryptDisputedChatForArbiter(
     idOrTradeId: string,
-  ): Promise<{ id: string; senderIdentity: string; plaintext: string; createdAt: number }[]> {
+  ): Promise<DecryptedChatMessage[]> {
     const trade = await this.options.storage.getTrade(idOrTradeId);
     if (!trade) {
       throw new Error('Trade not found');
@@ -1295,12 +1338,20 @@ export class CampfireService {
       throw new Error('No shared trade key has been handed to the arbiter for this trade');
     }
     const messages = await this.options.storage.listChatMessages(trade.id);
-    const decrypted: { id: string; senderIdentity: string; plaintext: string; createdAt: number }[] = [];
+    const decrypted: DecryptedChatMessage[] = [];
     for (const m of messages) {
       const plaintext = await decryptChatMessage(trade.sharedTradeKeyHex, m.ciphertext);
+      // Checked again here so the arbiter never relies on what was stored: a message counts as written by a role
+      // only if that role's session key signed it.
+      const sessionPk = m.senderRole === 'buyer' ? trade.buyerSessionPk : m.senderRole === 'seller' ? trade.sellerSessionPk : undefined;
+      const verified = Boolean(
+        sessionPk && trade.tradeId && m.signature && verifyChatMessageSignature(sessionPk, trade.tradeId, m.ciphertext, m.signature),
+      );
       decrypted.push({
         id: m.id,
         senderIdentity: m.senderIdentity,
+        ...(verified ? { senderRole: m.senderRole } : {}),
+        verified,
         plaintext,
         createdAt: m.createdAt,
       });

@@ -24,6 +24,7 @@ import {
   generateSessionKeyPair,
   pkhToCashAddress,
   pkhToLockingBytecode,
+  signChatMessage,
   signPaymentDetails,
   tagWalletUtxos,
   type OfferDocument,
@@ -447,6 +448,39 @@ describe('Limits on offers the service pays for', () => {
     const b = await off.register(buyer);
     expect((await off.publish(b, off.buyOffer())).status).toBe(404);
     expect((await off.req('GET', '/api/offers/sponsored')).data).toEqual({ enabled: false });
+  });
+});
+
+describe('Chat on a buy offer', () => {
+  it('opens once both session keys are in the terms, and takes only messages signed by the sender', async () => {
+    const ctx = await setup();
+    const buyerId = await ctx.register(buyer);
+    const sellerId = await ctx.register(seller);
+    const offer = (await ctx.publish(buyerId, ctx.buyOffer())).data.offer;
+    const { taken, accepted, sellerSession } = await takeAndAccept(ctx, offer.offerTxid, buyerId, sellerId);
+    expect(accepted.data.trade.status).toBe('Accepted');
+
+    const badSignature = await ctx.req('POST', `/api/trades/${taken.data.trade.id}/chat`, { senderIdentity: sellerId, ciphertext: 'aa:bb', signature: '00'.repeat(64) });
+    expect(badSignature.status).toBe(400);
+    const tradeId = accepted.data.trade.tradeId!;
+    const ok = await ctx.req('POST', `/api/trades/${taken.data.trade.id}/chat`, {
+      senderIdentity: sellerId,
+      ciphertext: 'aa:bb',
+      signature: signChatMessage(sellerSession.privateKey, tradeId, 'aa:bb'),
+    });
+    expect(ok.status).toBe(201);
+    expect(ok.data.message.senderRole).toBe('seller');
+  });
+
+  it('is closed while the request waits for the buyer', async () => {
+    const ctx = await setup();
+    const buyerId = await ctx.register(buyer);
+    const sellerId = await ctx.register(seller);
+    const offer = (await ctx.publish(buyerId, ctx.buyOffer())).data.offer;
+    const trade = (await ctx.req<{ trade: StoredTrade }>('POST', '/api/trades', { offerTxid: offer.offerTxid, amount: '200000', sellerIdentity: sellerId, ...sellerKeys(0) })).data.trade;
+    const res = await ctx.req('POST', `/api/trades/${trade.id}/chat`, { senderIdentity: sellerId, ciphertext: 'aa:bb', signature: '00'.repeat(64) });
+    expect(res.status).toBe(400);
+    expect(res.data.error).toMatch(/opens once the trade is accepted/);
   });
 });
 

@@ -115,6 +115,9 @@ export interface StoredChatMessage {
   id: string;
   tradeRecordId: string;
   senderIdentity: string;
+  // Whose session key signed the message (protocol section 6); messages stored before signatures have neither.
+  senderRole?: 'buyer' | 'seller';
+  signature?: string;
   ciphertext: string;
   createdAt: number;
 }

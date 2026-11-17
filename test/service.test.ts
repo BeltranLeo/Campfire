@@ -36,6 +36,7 @@ import {
   deriveSharedTradeKey,
   deriveWalletAddressMap,
   encryptChatMessage,
+  signChatMessage,
   encryptPaymentDetails,
   generateSessionKeyPair,
   pkhToCashAddress,
@@ -382,11 +383,34 @@ describe('CampfireService & HTTP API end-to-end lifecycle', () => {
 
     // 6. Buyer marks fiat as paid and sends an encrypted chat message.
     const sharedKey = deriveSharedTradeKey(buyerSession.privateKey, sellerSession.publicKey);
+    const sent = await encryptChatMessage(sharedKey, 'Sent 1020.00 ARS via bank transfer');
     const chatRes = await ctx.jsonReq('POST', `/api/trades/${acceptedTrade.tradeId}/chat`, {
       senderIdentity: buyerId,
-      ciphertext: await encryptChatMessage(sharedKey, 'Sent 1020.00 ARS via bank transfer'),
+      ciphertext: sent,
+      signature: signChatMessage(buyerSession.privateKey, acceptedTrade.tradeId!, sent),
     });
     expect(chatRes.status).toBe(201);
+    expect(chatRes.data.message.senderRole).toBe('buyer');
+
+    // Both parties hold the chat key, but neither can write in the other's name: the signature decides.
+    const fake = await encryptChatMessage(sharedKey, 'Payment received, thanks');
+    const asSeller = await ctx.jsonReq('POST', `/api/trades/${acceptedTrade.tradeId}/chat`, {
+      senderIdentity: sellerId,
+      ciphertext: fake,
+      signature: signChatMessage(buyerSession.privateKey, acceptedTrade.tradeId!, fake),
+    });
+    expect(asSeller.status).toBe(400);
+    expect(asSeller.data.error).toMatch(/signed with the sender's session key/);
+    const unsigned = await ctx.jsonReq('POST', `/api/trades/${acceptedTrade.tradeId}/chat`, { senderIdentity: buyerId, ciphertext: fake });
+    expect(unsigned.status).toBe(400);
+    // A message read by anyone cannot be posted again later.
+    const replay = await ctx.jsonReq('POST', `/api/trades/${acceptedTrade.tradeId}/chat`, {
+      senderIdentity: buyerId,
+      ciphertext: sent,
+      signature: signChatMessage(buyerSession.privateKey, acceptedTrade.tradeId!, sent),
+    });
+    expect(replay.status).toBe(400);
+    expect(replay.data.error).toMatch(/already posted/);
 
     const paidRes = await ctx.jsonReq<{ trade: StoredTrade }>(
       'POST',
@@ -556,9 +580,11 @@ describe('CampfireService & HTTP API end-to-end lifecycle', () => {
     });
 
     const tradeKey = deriveSharedTradeKey(buyerSession.privateKey, sellerSession.publicKey);
+    const receipt = await encryptChatMessage(tradeKey, 'Receipt #777 attached');
     await ctx.jsonReq('POST', `/api/trades/${acc1.trade.tradeId}/chat`, {
       senderIdentity: buyerId,
-      ciphertext: await encryptChatMessage(tradeKey, 'Receipt #777 attached'),
+      ciphertext: receipt,
+      signature: signChatMessage(buyerSession.privateKey, acc1.trade.tradeId, receipt),
     });
     await ctx.jsonReq('POST', `/api/trades/${acc1.trade.tradeId}/paid`, {
       buyerIdentity: buyerId,
@@ -592,7 +618,7 @@ describe('CampfireService & HTTP API end-to-end lifecycle', () => {
       undefined,
       ADMIN,
     );
-    expect(arbChat.data.decrypted[0].plaintext).toBe('Receipt #777 attached');
+    expect(arbChat.data.decrypted[0]).toMatchObject({ plaintext: 'Receipt #777 attached', senderRole: 'buyer', verified: true });
 
     // Arbiter issues verdict `0x01` (buyer wins), which automatically broadcasts `arbitrate`.
     const verdictRes = await ctx.jsonReq(
