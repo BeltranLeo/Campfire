@@ -33,7 +33,13 @@ export const CONTRACT_PATHS: ContractPath[] = [
     txid: 'c957a8401bdb9748010bad67da0e8ad09eaecb383b91affb8b7c055728230a18',
     at: 1794855792,
   },
-  { path: 'cancel', what: 'Returns the funds to the seller.', who: 'Buyer signature', txid: null, at: null },
+  {
+    path: 'cancel',
+    what: 'Returns the funds to the seller.',
+    who: 'Buyer signature',
+    txid: '6d3bbebda998b9fe9b5b9740f47e25be44c179372957214c799a35e9656e4405',
+    at: 1794899770,
+  },
   { path: 'arbitrate', what: 'Pays the party the arbiter chose.', who: 'Arbiter verdict', txid: null, at: null },
   {
     path: 'refund',
