@@ -171,6 +171,15 @@ export async function loadWalletCoins(provider: NetworkProvider, keys: CoinKeys,
   return (await scanWalletCoins(provider, keys, signal)).coins;
 }
 
+/**
+ * The first receive address the scan found unused (the one after the last used), for showing where to send coins.
+ * One address per use: showing a used one would invite reusing it. Null until a scan has read the receive path.
+ */
+export function freshReceiveAddress(scan: WalletScan | null, receiveXpub: string): string | null {
+  const path = scan?.paths.find((p) => p.name === 'receive');
+  return path ? entry('receive', receiveXpub, path.lastUsed + 1).address : null;
+}
+
 /** The plain BCH the wallet can spend (coins that carry no token), in satoshis. */
 export function spendableBch(coins: WalletSpendableUtxo[]): bigint {
   return coins.filter((c) => !c.token).reduce((sum, c) => sum + c.satoshis, 0n);

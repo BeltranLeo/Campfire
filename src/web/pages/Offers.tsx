@@ -1,21 +1,21 @@
 import { useState } from 'react';
 import { useSearchParams } from 'react-router';
-import { ApiError, apiGet, type Offer, type PriceQuote, type Reputation } from '../api';
+import { ApiError, apiGet, type Offer } from '../api';
 import { assetInfo } from '../assets';
 import { Button } from '../components/Button';
 import { OfferHead, OfferRow, OfferRowSkeleton } from '../components/OfferRow';
 import { EmptyState, Notice } from '../components/States';
 import { useConfig } from '../config';
 import {
-  applyMargin,
   describeMargin,
   formatClock,
-  formatDayMonth,
   formatFiat,
   formatPaymentWindow,
   formatRange,
 } from '../format';
 import { usePoll } from '../hooks/usePoll';
+import { usePrefs } from '../prefs';
+import { describeReputation, loadQuotes, loadReputations, priceOf, unique } from '../offerData';
 
 // The offer list (Offers-* screens). The visitor starts from an intention: "I want to buy" lists
 // sell offers, "I want to sell" lists buy offers. The choice lives in the URL (?side=sell) so the
@@ -25,7 +25,10 @@ const QUOTE_INTERVAL_MS = 30_000;
 
 export function Offers() {
   const [params, setParams] = useSearchParams();
-  const intent = params.get('side') === 'sell' ? 'sell' : 'buy';
+  // The link decides; without one, what the person said at onboarding does.
+  const prefs = usePrefs();
+  const sideParam = params.get('side');
+  const intent = sideParam === 'sell' || (sideParam === null && prefs?.intent === 'sell') ? 'sell' : 'buy';
   // Buying means taking someone's sell offer, and the other way round.
   const offerSide = intent === 'buy' ? 'sell' : 'buy';
   const config = useConfig();
@@ -40,8 +43,9 @@ export function Offers() {
   const identities = unique(all.map((o) => o.sellerIdentity));
   const reputations = usePoll(() => loadReputations(identities), identities.join(','));
 
-  const [coin, setCoin] = useState('');
-  const [fiat, setFiat] = useState('');
+  // The filters start from the onboarding answers when they name exactly one coin or currency.
+  const [coin, setCoin] = useState(prefs?.assets.length === 1 ? prefs.assets[0] : '');
+  const [fiat, setFiat] = useState(prefs?.fiat.length === 1 ? prefs.fiat[0] : '');
   const [method, setMethod] = useState('');
   const clearFilters = () => {
     setCoin('');
@@ -52,7 +56,7 @@ export function Offers() {
   const switchTo = (next: 'buy' | 'sell') => {
     if (next === intent) return;
     clearFilters();
-    setParams(next === 'sell' ? { side: 'sell' } : {});
+    setParams({ side: next });
   };
 
   const sideOffers = all.filter((o) => o.document.side === offerSide);
@@ -221,44 +225,4 @@ function LoadError({ error }: { error: unknown }) {
       {serverMessage ?? 'The server did not answer. Offers are published on-chain, so nothing is lost.'}
     </Notice>
   );
-}
-
-function priceOf(offer: Offer, quotes: Map<string, PriceQuote> | undefined): number | null {
-  const price = offer.document.price;
-  if (price.type === 'fixed') return Number(price.value);
-  const quote = quotes?.get(price.pair);
-  return quote ? applyMargin(quote.price, price.marginBps) : null;
-}
-
-// The count for the role the person has on this offer: sellers on sell offers, buyers on buy offers.
-function describeReputation(rep: Reputation, offerSide: 'sell' | 'buy'): string {
-  const count = offerSide === 'sell' ? rep.completedAsSeller : rep.completedAsBuyer;
-  if (count === 0 || rep.firstCompletedAt === null) return `0 completed · new ${offerSide === 'sell' ? 'seller' : 'buyer'}`;
-  return `${count} completed · since ${formatDayMonth(rep.firstCompletedAt)}`;
-}
-
-async function loadQuotes(pairs: string[]): Promise<{ byPair: Map<string, PriceQuote>; updatedAt: Date | null }> {
-  const results = await Promise.allSettled(
-    pairs.map((pair) => apiGet<{ quote: PriceQuote }>(`/api/oracle/quote?pair=${encodeURIComponent(pair)}`)),
-  );
-  const byPair = new Map<string, PriceQuote>();
-  results.forEach((result, i) => {
-    if (result.status === 'fulfilled') byPair.set(pairs[i], result.value.quote);
-  });
-  // "Prices updated" tells when the oracle observed the oldest price shown, not when this page fetched it.
-  const oldest = Math.min(...[...byPair.values()].map((q) => q.timestamp));
-  return { byPair, updatedAt: byPair.size ? new Date(oldest * 1000) : null };
-}
-
-async function loadReputations(identities: string[]): Promise<Map<string, Reputation>> {
-  const results = await Promise.allSettled(identities.map((id) => apiGet<Reputation>(`/api/identities/${id}/reputation`)));
-  const map = new Map<string, Reputation>();
-  results.forEach((result, i) => {
-    if (result.status === 'fulfilled') map.set(identities[i], result.value);
-  });
-  return map;
-}
-
-function unique(values: string[]): string[] {
-  return [...new Set(values)].sort();
 }

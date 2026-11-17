@@ -5,21 +5,41 @@ import { Arbiter } from './pages/Arbiter';
 import { ArbiterList } from './pages/ArbiterList';
 import { CreateOffer } from './pages/CreateOffer';
 import { DevComponents } from './pages/DevComponents';
+import { Home } from './pages/Home';
 import { Landing } from './pages/Landing';
 import { MyTrades } from './pages/MyTrades';
 import { NotBuilt } from './pages/NotBuilt';
 import { Offers } from './pages/Offers';
 import { Take } from './pages/Take';
 import { TradePage } from './pages/TradePage';
+import { Welcome } from './pages/Welcome';
 import { Transparency } from './pages/Transparency';
+import { Skeleton } from './components/States';
+import { useWallet } from './wallet';
+
+// "/" is the front page for a visitor and Home for a connected wallet. While a saved wallet reconnects, neither
+// is drawn, so a returning person does not see the front page for a moment first.
+function Front() {
+  const { status } = useWallet();
+  if (status === 'connected') return <Home />;
+  if (status === 'connecting') {
+    return (
+      <main className="s-main" aria-busy="true">
+        <Skeleton width="40%" height={28} />
+        <Skeleton height={120} />
+      </main>
+    );
+  }
+  return <Landing />;
+}
 
 // Every route from the design handoff. Pages that are not built yet say so instead of showing a mock-up.
 export function App() {
   return (
     <Routes>
       <Route element={<Shell />}>
-        <Route index element={<Landing />} />
-        <Route path="welcome" element={<NotBuilt title="Welcome" />} />
+        <Route index element={<Front />} />
+        <Route path="welcome" element={<Welcome />} />
         <Route path="offers" element={<Offers />} />
         <Route path="offers/new" element={<CreateOffer />} />
         <Route path="offers/:offerTxid" element={<Take />} />
