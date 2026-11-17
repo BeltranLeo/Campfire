@@ -19,3 +19,7 @@ html, body { margin: 0; min-height: 100%; background: var(--bg); }
 
 /* A coin logo fills the design's 24px coin circle instead of the text glyph. */
 img.s-coin { display: block; flex: none; background: none; object-fit: cover; }
+
+/* The balance sits in the identity pill; on a phone the pill keeps the balance and drops the identity, which is in the menu. */
+.cf-wallet__bal { white-space: nowrap; }
+@media (max-width: 559px) { .cf-wallet__id { display: none; } }

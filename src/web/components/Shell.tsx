@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { Link, NavLink, Outlet } from 'react-router';
 import { BANNER_LINKS, PROTOCOL_SPEC_URL, REPO_URL, VOTING_ADDRESS } from '../links';
 import { getThemePref, setThemePref, type ThemePref } from '../theme';
+import { useWalletCoinsSync } from '../walletCoins';
 import { useWallet } from '../wallet';
 import { CopyButton } from './CopyButton';
 import { BottomNav, WalletButton, WalletError } from './Wallet';
@@ -23,6 +24,8 @@ const APP_NAV = [
 
 export function Shell() {
   const connected = useWallet().status === 'connected';
+  // One read of the wallet's coins feeds the balance in the header and the pages that need the coins.
+  useWalletCoinsSync();
   const nav = connected ? APP_NAV : PUBLIC_NAV;
 
   return (

@@ -176,6 +176,12 @@ export function spendableBch(coins: WalletSpendableUtxo[]): bigint {
   return coins.filter((c) => !c.token).reduce((sum, c) => sum + c.satoshis, 0n);
 }
 
+/** The amount of one fungible token the wallet holds, in the token's base units. */
+export function tokenBalance(coins: WalletSpendableUtxo[], category: string): bigint {
+  const wanted = category.toLowerCase();
+  return coins.reduce((sum, c) => (c.token && c.token.category.toLowerCase() === wanted ? sum + c.token.amount : sum), 0n);
+}
+
 /** One sentence on where the scan looked, to show when the balance is not what the person expects. */
 export function describeScan(scan: WalletScan): string {
   const looked = [...scan.paths]

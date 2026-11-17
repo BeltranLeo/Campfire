@@ -11,6 +11,13 @@ export function fromBaseUnits(units: string | bigint, decimals: number): string 
   return `${negative ? '-' : ''}${groupThousands(whole)}${fraction}`;
 }
 
+/** A BCH balance from sats, without trailing zeros: 4120000 → "0.0412", 5516 → "0.00005516", 150000000 → "1.5", 0 → "0". */
+export function formatBchBalance(sats: bigint): string {
+  const [whole, fraction = ''] = fromBaseUnits(sats, 8).split('.');
+  const trimmed = fraction.replace(/0+$/, '');
+  return trimmed ? `${whole}.${trimmed}` : whole;
+}
+
 function groupThousands(digits: string): string {
   return digits.replace(/\B(?=(\d{3})+(?!\d))/g, ',');
 }

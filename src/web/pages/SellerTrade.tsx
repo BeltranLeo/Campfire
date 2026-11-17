@@ -8,7 +8,7 @@ import { DisputeForm } from '../components/DisputeForm';
 import { HashLink, ProvenanceTag } from '../components/Provenance';
 import { Notice, Skeleton } from '../components/States';
 import { Countdown } from '../components/Timeline';
-import { describeScan, loadWalletCoins, scanWalletCoins, spendableBch } from '../coins';
+import { describeScan, loadWalletCoins, spendableBch } from '../coins';
 import { keptElectrum } from '../electrum';
 import { applyMargin, describeMargin, formatAmount, formatDate, formatDateTime, formatFiat } from '../format';
 import { usePoll } from '../hooks/usePoll';
@@ -29,6 +29,7 @@ import {
 } from '../seller';
 import { browserStore, commitSession, generateSessionKeyPair, loadPendingSession, payoutAddress, readSessionKey, savePendingSession } from '../take';
 import { TradeActionError, disputeKeyHex, signedPayoutPkh } from '../trade';
+import { refreshWalletCoins, useWalletCoins } from '../walletCoins';
 import { WalletDeclined, useWallet } from '../wallet';
 
 // The seller's side of one trade (Sell-Accept-*, Trade-Seller-* screens): accept a request and deposit into the
@@ -59,12 +60,8 @@ export function SellerAction(props: { trade: Trade; amount: string; fiat: string
   // Keys and coins are looked up while a request waits, so the buttons are ready when the seller decides.
   const preparing = trade.status === 'Requested' || trade.status === 'Accepted';
   const prep = usePoll(() => (preparing && identity && xpubs ? prepareIndices(identity, xpubs, 'seller') : Promise.resolve(null)), `${identity}:${trade.id}:${preparing}`);
-  const coins = usePoll(
-    () => (preparing && xpubs ? keptElectrum().then((p) => scanWalletCoins(p, xpubs)) : Promise.resolve(null)),
-    `${identity}:${preparing}`,
-    // Read again every few seconds: BCH sent while the page is open shows up without reloading.
-    preparing ? 15_000 : undefined,
-  );
+  // The shared scan of the wallet's coins, asked for again every few seconds while a deposit is due.
+  const coins = useWalletCoins(preparing ? 15_000 : undefined);
 
   const isBch = trade.asset === 'BCH';
   const deposit = isBch ? formatAmount(expectedEscrowFunding(trade).satoshis, BCH) : null;
@@ -136,6 +133,7 @@ export function SellerAction(props: { trade: Trade; amount: string; fiat: string
     if (store) saveDeposit(store, t.id, signedTxHex);
     const recorded = await record(signedTxHex);
     if (store) clearSavedDeposit(store, t.id);
+    void refreshWalletCoins();
     return recorded;
   }
 

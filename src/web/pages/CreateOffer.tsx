@@ -12,6 +12,7 @@ import { useConfig } from '../config';
 import { findUnusedReceiveIndex, keptElectrum } from '../electrum';
 import { applyMargin, formatFiat, formatFiatAmount } from '../format';
 import { usePoll } from '../hooks/usePoll';
+import { refreshWalletCoins, useWalletCoins } from '../walletCoins';
 import {
   EXPIRIES_SEC,
   PAYMENT_WINDOWS_SEC,
@@ -77,8 +78,9 @@ export function CreateOffer() {
     return { markerIndex, changeIndex };
   }, identity ?? 'none');
 
-  // The wallet's coins, read again every few seconds: BCH sent while the page is open shows up without reloading.
-  const scan = usePoll(async () => (identity && xpubs ? scanWalletCoins(await keptElectrum(), xpubs) : null), identity ?? 'none', COINS_REFRESH_MS);
+  // The wallet's coins, from the scan shared with the header and read again every few seconds: BCH sent while the
+  // page is open shows up without reloading.
+  const scan = useWalletCoins(COINS_REFRESH_MS);
 
   const quote = usePoll(
     () => apiGet<{ quote: PriceQuote }>(`/api/oracle/quote?pair=${encodeURIComponent(`BCH/${form.fiat}`)}`).then((r) => r.quote),
@@ -137,6 +139,7 @@ export function CreateOffer() {
         markerReceiveIndex: prep.data.markerIndex,
       });
       setPublished(offer);
+      void refreshWalletCoins();
     } catch (err) {
       if (err instanceof WalletDeclined) setDeclined(true);
       else setFailure(err instanceof ApiError ? err.message : err instanceof Error ? err.message : 'Something went wrong. Try again.');

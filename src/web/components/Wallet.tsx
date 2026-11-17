@@ -1,6 +1,10 @@
 import { useCallback, useEffect, useId, useRef, useState } from 'react';
 import { Link, NavLink } from 'react-router';
 import QRCode from 'qrcode';
+import { spendableBch, tokenBalance } from '../coins';
+import { useConfig } from '../config';
+import { formatBchBalance, fromBaseUnits } from '../format';
+import { refreshWalletCoins, useWalletCoins } from '../walletCoins';
 import { useWallet } from '../wallet';
 import { CopyButton } from './CopyButton';
 import { Icon, type IconName } from './Icon';
@@ -33,7 +37,6 @@ export function WalletButton() {
     );
   }
 
-  const completed = wallet.reputation ? wallet.reputation.completedAsBuyer + wallet.reputation.completedAsSeller : null;
   return (
     <div className="s-walletanchor">
       <button
@@ -42,15 +45,73 @@ export function WalletButton() {
         aria-haspopup="menu"
         aria-expanded={menuOpen}
         onClick={() => {
-          if (!menuOpen) void wallet.refreshActiveTrades();
+          if (!menuOpen) {
+            void wallet.refreshActiveTrades();
+            void refreshWalletCoins();
+          }
           setMenuOpen(!menuOpen);
         }}
       >
         <span className="cf-wallet__dot" aria-hidden="true" />
-        <span className="cf-mono">{shorten(wallet.identity)}</span>
-        {completed !== null && <span className="cf-subtle">· {plural(completed, 'trade')}</span>}
+        <span className="cf-mono cf-wallet__id">{shorten(wallet.identity)}</span>
+        <PillBalance />
       </button>
       {menuOpen && <WalletMenu onClose={closeMenu} />}
+    </div>
+  );
+}
+
+/** The wallet's BCH and PUSD as the shared scan reads them: "0.0412 BCH · 12.50 PUSD". */
+function useBalanceText() {
+  const coins = useWalletCoins();
+  const config = useConfig();
+  if (!coins.data) return { bch: null, pusd: null, sats: null, failed: coins.error !== null, loading: coins.loading };
+  const sats = spendableBch(coins.data.coins);
+  const pusd = config ? fromBaseUnits(tokenBalance(coins.data.coins, config.pusdCategory), config.pusdDecimals) : null;
+  return { bch: formatBchBalance(sats), pusd, sats, failed: false, loading: false };
+}
+
+function PillBalance() {
+  const { bch, pusd, failed } = useBalanceText();
+  if (bch === null) {
+    // Without a balance the wallet still works: the dash says it could not be read, the bar says it is loading.
+    return failed ? <span className="cf-subtle cf-wallet__bal">— BCH</span> : <Skeleton width={84} height={12} style={{ display: 'inline-block' }} />;
+  }
+  return (
+    <span className="cf-wallet__bal">
+      {bch} BCH{pusd !== null && <span className="cf-subtle"> · {pusd} PUSD</span>}
+    </span>
+  );
+}
+
+function MenuBalance() {
+  const { bch, pusd, sats, failed } = useBalanceText();
+  return (
+    <div className="cf-stack" data-gap="1">
+      <span className="cf-label">Your wallet</span>
+      {bch === null ? (
+        failed ? (
+          <>
+            <strong className="cf-muted">— BCH</strong>
+            <span className="cf-small cf-muted">We could not read your balance from the network. Trading still works.</span>
+            <span>
+              <button type="button" className="cf-copy" onClick={() => void refreshWalletCoins()}>
+                Try again
+              </button>
+            </span>
+          </>
+        ) : (
+          <Skeleton width={120} height={18} />
+        )
+      ) : (
+        <>
+          <strong>{bch} BCH</strong>
+          <span className="cf-small cf-muted">
+            {sats?.toLocaleString('en-US')} sats{pusd !== null && ` · ${pusd} PUSD`}
+          </span>
+          <span className="cf-small cf-subtle">Read from the network with your wallet's public key. Campfire never sees your private keys.</span>
+        </>
+      )}
     </div>
   );
 }
@@ -87,6 +148,7 @@ function WalletMenu({ onClose }: { onClose: () => void }) {
           <CopyButton value={wallet.identity} />
         </span>
       </div>
+      <MenuBalance />
       {rep && (
         <div className="cf-stack" data-gap="1">
           <span className="cf-small">
@@ -253,7 +315,6 @@ export function BottomNav() {
   );
 }
 
-const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? '' : 's'}`;
 
 // "15 Nov 2026", as in the design. The service counts time in seconds.
 const formatDate = (seconds: number) =>
