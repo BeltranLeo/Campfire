@@ -7,7 +7,7 @@ import { Button, WALLET_DECLINED } from '../components/Button';
 import { Details } from '../components/Details';
 import { HashLink, ProvenanceTag } from '../components/Provenance';
 import { Notice, Skeleton } from '../components/States';
-import { loadWalletCoins, spendableBch } from '../coins';
+import { describeScan, scanWalletCoins, spendableBch } from '../coins';
 import { useConfig } from '../config';
 import { findUnusedReceiveIndex, keptElectrum } from '../electrum';
 import { applyMargin, formatFiat, formatFiatAmount } from '../format';
@@ -31,6 +31,7 @@ import { WalletDeclined, useWallet } from '../wallet';
 // hash in an OP_RETURN and a 1,000-sat marker the seller gets back by closing the offer. No coins are locked.
 
 const QUOTE_INTERVAL_MS = 30_000;
+const COINS_REFRESH_MS = 15_000;
 /** A rough fee for the publication: one input, three outputs and an OP_RETURN. */
 const FEE_ESTIMATE_SATS = 600n;
 
@@ -65,18 +66,19 @@ export function CreateOffer() {
   const identity = wallet.status === 'connected' ? wallet.identity : null;
   const xpubs = wallet.xpubs;
 
-  // The wallet's coins and the addresses the publication will use. A fresh marker address keeps the offer's
-  // coin apart from anything the wallet shared; the change goes to a fresh change address when there is one.
+  // The addresses the publication will use. A fresh marker address keeps the offer's coin apart from anything the
+  // wallet shared; the change goes to a fresh change address when there is one.
   const prep = usePoll(async () => {
     if (!identity || !xpubs) return null;
-    const provider = await keptElectrum();
-    const [coins, markerIndex, changeIndex] = await Promise.all([
-      loadWalletCoins(provider, xpubs),
+    const [markerIndex, changeIndex] = await Promise.all([
       findUnusedReceiveIndex(xpubs.receive, 0).catch(() => null),
       xpubs.change ? findUnusedReceiveIndex(xpubs.change, 0).catch(() => null) : Promise.resolve(null),
     ]);
-    return { coins, markerIndex, changeIndex };
+    return { markerIndex, changeIndex };
   }, identity ?? 'none');
+
+  // The wallet's coins, read again every few seconds: BCH sent while the page is open shows up without reloading.
+  const scan = usePoll(async () => (identity && xpubs ? scanWalletCoins(await keptElectrum(), xpubs) : null), identity ?? 'none', COINS_REFRESH_MS);
 
   const quote = usePoll(
     () => apiGet<{ quote: PriceQuote }>(`/api/oracle/quote?pair=${encodeURIComponent(`BCH/${form.fiat}`)}`).then((r) => r.quote),
@@ -102,12 +104,12 @@ export function CreateOffer() {
   const errors: FormErrors = built && !built.ok ? built.errors : {};
   const shown = (field: FormField) => (touched.has(field) ? errors[field] : undefined);
 
-  const bch = prep.data ? spendableBch(prep.data.coins) : null;
+  const bch = scan.data ? spendableBch(scan.data.coins) : null;
   const needed = MARKER_SATOSHIS + FEE_ESTIMATE_SATS;
   const short = bch !== null && bch < needed;
 
   async function publish() {
-    if (!built?.ok || !identity || !xpubs || !prep.data || prep.data.markerIndex === null) {
+    if (!built?.ok || !identity || !xpubs || !prep.data || !scan.data || prep.data.markerIndex === null) {
       setTouched(new Set(['margin', 'fixedPrice', 'min', 'max', 'methods']));
       return;
     }
@@ -117,11 +119,13 @@ export function CreateOffer() {
     try {
       const markerAddress = payoutAddress(xpubs.receive, prep.data.markerIndex, false);
       const changeAddress = xpubs.change && prep.data.changeIndex !== null ? payoutAddress(xpubs.change, prep.data.changeIndex, false) : markerAddress;
+      // The coins are read again now, so a coin spent since the last refresh is never used.
+      const provider = await keptElectrum();
       const tx = buildPublishOfferTransaction({
-        provider: await keptElectrum(),
+        provider,
         document: built.document,
         offerJson: built.json,
-        utxos: prep.data.coins,
+        utxos: (await scanWalletCoins(provider, xpubs)).coins,
         markerAddress,
         changeAddress,
       });
@@ -137,7 +141,7 @@ export function CreateOffer() {
       if (err instanceof WalletDeclined) setDeclined(true);
       else setFailure(err instanceof ApiError ? err.message : err instanceof Error ? err.message : 'Something went wrong. Try again.');
       setPublishing(false);
-      prep.reload();
+      scan.reload();
     }
   }
 
@@ -351,18 +355,21 @@ export function CreateOffer() {
             network fee. You lock coins only when you accept a buyer.
           </Notice>
 
-          {Boolean(prep.error) && !prep.data && (
+          {Boolean(scan.error) && !scan.data && (
             <Notice tone="danger" title="We could not read your wallet's coins">
               The network did not answer.{' '}
-              <button type="button" className="cf-copy" onClick={prep.reload}>
+              <button type="button" className="cf-copy" onClick={scan.reload}>
                 Try again
               </button>
             </Notice>
           )}
-          {short && (
+          {short && scan.data && (
             <Notice tone="warn" title="Your wallet does not have enough BCH">
               Publishing needs about {needed.toLocaleString('en-US')} sats for the marker and the fee. This wallet has {bch?.toLocaleString('en-US')} sats
-              that Campfire can see. Send some BCH to it and try again.
+              that Campfire can see. {describeScan(scan.data)} Send some BCH to it: this page checks again every few seconds.{' '}
+              <button type="button" className="cf-copy" onClick={scan.reload}>
+                Check again
+              </button>
             </Notice>
           )}
           {prep.data && prep.data.markerIndex === null && (
@@ -394,7 +401,7 @@ export function CreateOffer() {
                 variant="primary"
                 signs
                 busy={publishing}
-                disabled={!config || !prep.data || prep.data.markerIndex === null || short}
+                disabled={!config || !prep.data || !scan.data || prep.data.markerIndex === null || short}
                 onClick={publish}
               >
                 Publish offer

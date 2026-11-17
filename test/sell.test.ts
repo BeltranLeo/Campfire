@@ -3,7 +3,7 @@ import { binToHex, deriveHdPath, deriveHdPrivateNodeFromSeed, deriveHdPublicNode
 import { describe, expect, it } from 'vitest';
 import { buildPublishOfferTransaction, decodeOfferOpReturn, validateOfferDocument, verifyOfferAgainstOpReturn } from '../src/protocol/offers.js';
 import { derivePayoutPkhFromXpub, pkhToCashAddress } from '../src/protocol/keys.js';
-import { loadWalletCoins, spendableBch } from '../src/web/coins.js';
+import { describeScan, loadWalletCoins, scanWalletCoins, spendableBch } from '../src/web/coins.js';
 import {
   MIN_TRADE_SATS,
   buildCloseOffer,
@@ -138,6 +138,90 @@ describe('the wallet coins and the publication transaction', () => {
     const tagged = coins.map((c) => `${c.pathName}/${c.keyIndex}:${c.satoshis}`).sort();
     expect(tagged).toEqual(['change/3:7000', 'receive/0:5000']);
     expect(spendableBch(coins)).toBe(12_000n);
+  });
+
+  it('keeps looking while it finds used addresses, so a long-used wallet is read to its end', async () => {
+    const long = new MockNetworkProvider();
+    long.network = Network.MAINNET;
+    // Each coin is within 20 addresses of the last, so the scan follows them all the way out.
+    for (const [i, sats] of [[10, 1_000n], [28, 2_000n], [47, 4_000n], [66, 8_000n]] as const) {
+      long.addUtxo(address(keys.receive, i), { txid: String(i).padStart(2, '0').repeat(32), vout: 0, satoshis: sats });
+    }
+    // This one is far past the last, where a wallet would have stopped looking too.
+    long.addUtxo(address(keys.receive, 5000), { txid: 'ee'.repeat(32), vout: 0, satoshis: 16_000n });
+    const found = await loadWalletCoins(long, keys);
+    expect(spendableBch(found)).toBe(15_000n);
+  });
+
+  /** A provider with Electrum's history call, backed by a set of used addresses; `asked` records every lookup. */
+  function withHistory(base: MockNetworkProvider, usedAddresses: Set<string>) {
+    const asked: string[] = [];
+    const provider = Object.assign(Object.create(base), {
+      getUtxos: (a: string) => base.getUtxos(a),
+      performRequest: async (_method: string, a: string) => {
+        asked.push(a);
+        return usedAddresses.has(a) ? [{ tx_hash: 'x', height: 1 }] : [];
+      },
+    });
+    return { provider, asked };
+  }
+
+  it('counts an address as used when it has history, even if every coin on it was spent', async () => {
+    const base = new MockNetworkProvider();
+    base.network = Network.MAINNET;
+    // Addresses 0, 15 and 30 were used and emptied; 45 holds the coins. With no history the scan would stop at 20.
+    base.addUtxo(address(keys.change, 45), { txid: '45'.repeat(32), vout: 0, satoshis: 9_000n });
+    const used = new Set([0, 15, 30, 45].map((i) => address(keys.change, i)));
+    const { provider } = withHistory(base, used);
+    const scan = await scanWalletCoins(provider, keys);
+    expect(spendableBch(scan.coins)).toBe(9_000n);
+    const change = scan.paths.find((p) => p.name === 'change')!;
+    expect(change.lastUsed).toBe(45);
+    // Read up to the last used address and the 20 after it, no further.
+    expect(change.scanned).toBe(45 + 1 + 20);
+  });
+
+  it('finds the last used address of a long history by bisection, without reading past its reach', async () => {
+    const base = new MockNetworkProvider();
+    base.network = Network.MAINNET;
+    // A used address every 10 from 0 to 1,000 on the receive path, and the only coin on the last one.
+    const usedIndices = Array.from({ length: 101 }, (_, i) => i * 10);
+    base.addUtxo(address(keys.receive, 1000), { txid: 'aa'.repeat(32), vout: 0, satoshis: 12_345n });
+    const { provider, asked } = withHistory(base, new Set(usedIndices.map((i) => address(keys.receive, i))));
+    const scan = await scanWalletCoins(provider, { receive: keys.receive });
+    expect(scan.paths[0].lastUsed).toBe(1000);
+    expect(spendableBch(scan.coins)).toBe(12_345n);
+    // Nothing past the doubling overshoot (2 × last) was asked, and almost every address was asked about once.
+    const indexOf = new Map(Array.from({ length: 2100 }, (_, i) => [address(keys.receive, i), i] as const));
+    expect(Math.max(...asked.map((a) => indexOf.get(a)!))).toBeLessThan(2 * 1000 + 20);
+    // Only the 20 addresses past the boundary are asked twice: their first answer is dropped and read again at the end.
+    expect(asked.length - new Set(asked).size).toBeLessThanOrEqual(20);
+  }, 30_000);
+
+  it('reads an unused path in one window and stops', async () => {
+    const { provider, asked } = withHistory(new MockNetworkProvider(), new Set());
+    const scan = await scanWalletCoins(provider, { receive: keys.receive });
+    expect(scan.paths[0]).toEqual({ name: 'receive', scanned: 20, lastUsed: -1 });
+    expect(asked).toHaveLength(20);
+  });
+
+  it('gives up with a sentence when a server says every address is used', async () => {
+    const everything = Object.assign(new MockNetworkProvider(), { performRequest: async () => [{ tx_hash: 'x', height: 1 }] });
+    await expect(scanWalletCoins(everything, { receive: keys.receive })).rejects.toThrow(/more than 20,000 used addresses/);
+  }, 60_000);
+
+  it('stops when it is cancelled', async () => {
+    const controller = new AbortController();
+    controller.abort();
+    await expect(scanWalletCoins(provider, keys, controller.signal)).rejects.toThrow();
+  });
+
+  it('says where it looked, and when the wallet shares no change path', async () => {
+    const scan = await scanWalletCoins(provider, keys);
+    expect(describeScan(scan)).toMatch(/looked at \d+ change addresses and \d+ receive addresses\./);
+    const noChange = await scanWalletCoins(provider, { receive: keys.receive });
+    expect(noChange.noChangePath).toBe(true);
+    expect(describeScan(noChange)).toMatch(/did not share its change addresses/);
   });
 
   it('does not count token coins as plain BCH', async () => {

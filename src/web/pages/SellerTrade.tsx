@@ -8,7 +8,7 @@ import { DisputeForm } from '../components/DisputeForm';
 import { HashLink, ProvenanceTag } from '../components/Provenance';
 import { Notice, Skeleton } from '../components/States';
 import { Countdown } from '../components/Timeline';
-import { loadWalletCoins, spendableBch } from '../coins';
+import { describeScan, loadWalletCoins, scanWalletCoins, spendableBch } from '../coins';
 import { keptElectrum } from '../electrum';
 import { applyMargin, describeMargin, formatAmount, formatDate, formatDateTime, formatFiat } from '../format';
 import { usePoll } from '../hooks/usePoll';
@@ -60,13 +60,15 @@ export function SellerAction(props: { trade: Trade; amount: string; fiat: string
   const preparing = trade.status === 'Requested' || trade.status === 'Accepted';
   const prep = usePoll(() => (preparing && identity && xpubs ? prepareIndices(identity, xpubs, 'seller') : Promise.resolve(null)), `${identity}:${trade.id}:${preparing}`);
   const coins = usePoll(
-    () => (preparing && xpubs ? keptElectrum().then((p) => loadWalletCoins(p, xpubs)) : Promise.resolve(null)),
+    () => (preparing && xpubs ? keptElectrum().then((p) => scanWalletCoins(p, xpubs)) : Promise.resolve(null)),
     `${identity}:${preparing}`,
+    // Read again every few seconds: BCH sent while the page is open shows up without reloading.
+    preparing ? 15_000 : undefined,
   );
 
   const isBch = trade.asset === 'BCH';
   const deposit = isBch ? formatAmount(expectedEscrowFunding(trade).satoshis, BCH) : null;
-  const short = preparing && isBch && coins.data ? spendableBch(coins.data) < depositNeeds(trade) : false;
+  const short = preparing && isBch && coins.data ? spendableBch(coins.data.coins) < depositNeeds(trade) : false;
   const expired = trade.status === 'Requested' && trade.quoteExpiresAt !== undefined && now / 1000 >= trade.quoteExpiresAt;
 
   /** Asks the service to accept: the wallet must already cover the deposit, because accepting starts the funding window. */
@@ -192,10 +194,14 @@ export function SellerAction(props: { trade: Trade; amount: string; fiat: string
   );
   const walletNotices = (
     <>
-      {short && (
+      {short && coins.data && (
         <Notice tone="warn" title="Your wallet does not have enough BCH">
           The deposit needs about {depositNeeds(trade).toLocaleString('en-US')} sats and Campfire can see{' '}
-          {coins.data ? spendableBch(coins.data).toLocaleString('en-US') : 0} in this wallet. Send some BCH to it first.
+          {spendableBch(coins.data.coins).toLocaleString('en-US')} in this wallet. {describeScan(coins.data)} Send some BCH to it: this page checks
+          again every few seconds.{' '}
+          <button type="button" className="cf-copy" onClick={coins.reload}>
+            Check again
+          </button>
         </Notice>
       )}
       {Boolean(coins.error) && !coins.data && (
