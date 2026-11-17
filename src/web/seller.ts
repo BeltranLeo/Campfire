@@ -24,6 +24,7 @@ import {
 import { computeTradeId, type TradeTerms } from '../protocol/trades.js';
 import type { OfferDocument, Trade } from './api';
 import { spendableBch } from './coins';
+import { formatBch } from './format';
 import type { SessionStore } from './take';
 import { TradeActionError, checkForArbiter } from './trade';
 
@@ -105,7 +106,7 @@ export function assertCanDeposit(trade: Pick<Trade, 'asset' | 'amount'>, coins: 
   const need = depositNeeds(trade);
   if (have < need) {
     throw new TradeActionError(
-      `The deposit needs about ${need.toLocaleString('en-US')} sats and Campfire can see ${have.toLocaleString('en-US')} in this wallet. Send some BCH to it and try again.`,
+      `The deposit needs about ${formatBch(need)} and Campfire can see ${formatBch(have)} in this wallet. Send some BCH to it and try again.`,
     );
   }
 }

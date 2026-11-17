@@ -10,7 +10,7 @@ import { Notice, Skeleton } from '../components/States';
 import { describeScan, scanWalletCoins, spendableBch } from '../coins';
 import { useConfig } from '../config';
 import { findUnusedReceiveIndex, keptElectrum } from '../electrum';
-import { applyMargin, formatDateTime, formatFiat, formatFiatAmount } from '../format';
+import { applyMargin, formatBch, formatDateTime, formatFiat, formatFiatAmount } from '../format';
 import { usePoll } from '../hooks/usePoll';
 import { refreshWalletCoins, useWalletCoins } from '../walletCoins';
 import {
@@ -43,8 +43,8 @@ const INITIAL: Omit<OfferForm, 'side'> = {
   priceType: 'market',
   margin: '2.5',
   fixedPrice: '',
-  min: '100,000',
-  max: '2,000,000',
+  min: '0.001',
+  max: '0.02',
   methods: '',
   paymentWindowSec: 3600,
   expirySec: 7 * 86_400,
@@ -111,8 +111,8 @@ export function CreateOffer() {
   const unitPrice = form.priceType === 'fixed' ? parseFixedPrice(form.fixedPrice) : verifiedQuote?.price ?? null;
   const effectiveMargin = form.priceType === 'market' ? marginBps ?? 0 : 0;
   const fiatInfo = SELL_FIATS.find((f) => f.code === form.fiat) ?? SELL_FIATS[0];
-  const approx = (sats: string) => {
-    const amount = parseAmount(sats, 8, true);
+  const approx = (typed: string) => {
+    const amount = parseAmount(typed, 8);
     if (!unitPrice || amount === null || amount <= 0n || (form.priceType === 'market' && marginBps === null)) return null;
     return formatFiatAmount(computeFiatAmount({ amount, assetDecimals: 8, unitPrice, marginBps: effectiveMargin }), form.fiat);
   };
@@ -332,12 +332,12 @@ export function CreateOffer() {
                   id="min"
                   className="cf-input"
                   data-mono
-                  inputMode="numeric"
+                  inputMode="decimal"
                   value={form.min}
                   aria-invalid={shown('min') ? true : undefined}
                   onChange={(e) => edit('min', { min: e.target.value })}
                 />
-                <span className="cf-addon">sats</span>
+                <span className="cf-addon">BCH</span>
               </div>
               <span className="cf-hint">{shown('min') ?? (approx(form.min) ? `≈ ${approx(form.min)}` : ' ')}</span>
             </div>
@@ -348,12 +348,12 @@ export function CreateOffer() {
                   id="max"
                   className="cf-input"
                   data-mono
-                  inputMode="numeric"
+                  inputMode="decimal"
                   value={form.max}
                   aria-invalid={shown('max') ? true : undefined}
                   onChange={(e) => edit('max', { max: e.target.value })}
                 />
-                <span className="cf-addon">sats</span>
+                <span className="cf-addon">BCH</span>
               </div>
               <span className="cf-hint">{shown('max') ?? (approx(form.max) ? `≈ ${approx(form.max)}` : ' ')}</span>
             </div>
@@ -376,7 +376,7 @@ export function CreateOffer() {
                 <>
                   {' '}
                   To try it with the demo seller, add <span className="cf-mono">simulated</span> and keep the smallest trade at{' '}
-                  {Number(demoMax).toLocaleString('en-US')} sats or less: it answers right away, and no money moves.
+                  {formatBch(demoMax)} or less: it answers right away, and no money moves.
                 </>
               )}
             </span>
@@ -448,7 +448,7 @@ export function CreateOffer() {
             )
           ) : (
             <Notice title="Publishing locks no coins.">
-              The offer is a mainnet transaction with a {MARKER_SATOSHIS.toLocaleString('en-US')}-sat marker you get back when you close it, plus the
+              The offer is a mainnet transaction with a {formatBch(MARKER_SATOSHIS)} marker you get back when you close it, plus the
               network fee. You lock coins only when you accept a buyer.
             </Notice>
           )}
@@ -463,7 +463,7 @@ export function CreateOffer() {
           )}
           {short && scan.data && (
             <Notice tone="warn" title="Your wallet does not have enough BCH">
-              Publishing needs about {needed.toLocaleString('en-US')} sats for the marker and the fee. This wallet has {bch?.toLocaleString('en-US')} sats
+              Publishing needs about {formatBch(needed)} for the marker and the fee. This wallet has {bch !== null && formatBch(bch)}
               that Campfire can see. {describeScan(scan.data)} Send some BCH to it: this page checks again every few seconds.{' '}
               <button type="button" className="cf-copy" onClick={scan.reload}>
                 Check again

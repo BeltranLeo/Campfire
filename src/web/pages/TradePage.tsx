@@ -21,6 +21,7 @@ import {
   applyMargin,
   describeMargin,
   formatAmount,
+  formatBch,
   formatClock,
   formatDate,
   formatDateTime,
@@ -852,7 +853,7 @@ function OnChainDetails(props: {
               <dd>
                 <span className="cf-mono">
                   {holds}
-                  {!expected.token && <span className="cf-subtle"> ({props.amount.replace(' sats', '')} + 1,000 fee budget)</span>}
+                  {!expected.token && <span className="cf-subtle"> ({props.amount} + {formatBch(1000n)} fee budget)</span>}
                 </span>
               </dd>
               {trade.fundingTxid && (

@@ -9,7 +9,7 @@ import { StatusPill } from '../components/StatusPill';
 import { Countdown } from '../components/Timeline';
 import { useConfig } from '../config';
 import { keptElectrum } from '../electrum';
-import { formatAmount, formatDayMonth, formatFiatAmount, formatRange } from '../format';
+import { formatAmount, formatBch, formatDayMonth, formatFiatAmount, formatRange } from '../format';
 import { useNow } from '../hooks/useNow';
 import { usePoll } from '../hooks/usePoll';
 import { historyNote, isActive, myOffers, nextStep, rowTitle, sortActive, sortHistory, tradesPerOffer } from '../mytrades';
@@ -306,7 +306,7 @@ function OffersTab({ identity, trades }: { identity: string; trades: Trade[] }) 
                 {offer.sponsored && <span className="cf-small cf-subtle">Publishing fee paid by Campfire</span>}
                 {offer.status === 'Expired' && (
                   <span className="cf-small cf-subtle">
-                    It no longer shows to {buying ? 'sellers' : 'buyers'}. Close it to get the 1,000-sat marker back.
+                    It no longer shows to {buying ? 'sellers' : 'buyers'}. Close it to get the {formatBch(1000n)} marker back.
                   </span>
                 )}
               </div>

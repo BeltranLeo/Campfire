@@ -10,7 +10,7 @@ import { Notice, Skeleton } from '../components/States';
 import { Countdown } from '../components/Timeline';
 import { describeScan, loadWalletCoins, spendableBch } from '../coins';
 import { keptElectrum } from '../electrum';
-import { applyMargin, describeMargin, formatAmount, formatDate, formatDateTime, formatFiat } from '../format';
+import { applyMargin, describeMargin, formatAmount, formatBch, formatDate, formatDateTime, formatFiat } from '../format';
 import { usePoll } from '../hooks/usePoll';
 import { useNow } from '../hooks/useNow';
 import { useTradeAction } from '../hooks/useTradeAction';
@@ -222,8 +222,8 @@ export function SellerAction(props: { trade: Trade; amount: string; fiat: string
     <>
       {short && coins.data && (
         <Notice tone="warn" title="Your wallet does not have enough BCH">
-          The deposit needs about {depositNeeds(trade).toLocaleString('en-US')} sats and Campfire can see{' '}
-          {spendableBch(coins.data.coins).toLocaleString('en-US')} in this wallet. {describeScan(coins.data)} Send some BCH to it: this page checks
+          The deposit needs about {formatBch(depositNeeds(trade))} and Campfire can see{' '}
+          {formatBch(spendableBch(coins.data.coins))} in this wallet. {describeScan(coins.data)} Send some BCH to it: this page checks
           again every few seconds.{' '}
           <button type="button" className="cf-copy" onClick={coins.reload}>
             Check again
@@ -303,7 +303,7 @@ export function SellerAction(props: { trade: Trade; amount: string; fiat: string
         </div>
         {deposit && (
           <p className="cf-small cf-muted">
-            You lock {deposit}: {formatAmount(trade.amount, BCH)} for the buyer plus a 1,000-sat fee budget for the closing transaction.
+            You lock {deposit}: {formatAmount(trade.amount, BCH)} for the buyer plus a {formatBch(1000n)} fee budget for the closing transaction.
           </p>
         )}
         {walletNotices}
@@ -356,7 +356,7 @@ export function SellerAction(props: { trade: Trade; amount: string; fiat: string
             </div>
             {deposit && (
               <Notice title={`You will deposit ${deposit}.`}>
-                {formatAmount(trade.amount, BCH)} for the buyer plus a 1,000-sat fee budget for the closing transaction. The contract can only pay the
+                {formatAmount(trade.amount, BCH)} for the buyer plus a {formatBch(1000n)} fee budget for the closing transaction. The contract can only pay the
                 buyer or return to you.
               </Notice>
             )}
@@ -402,7 +402,7 @@ export function SellerAction(props: { trade: Trade; amount: string; fiat: string
           }
         >
           <p className="cf-muted">
-            {formatAmount(trade.amount, BCH)} for the buyer plus a 1,000-sat fee budget for the closing transaction. Your payment details are shown to the
+            {formatAmount(trade.amount, BCH)} for the buyer plus a {formatBch(1000n)} fee budget for the closing transaction. Your payment details are shown to the
             buyer once this deposit is seen on the network.
           </p>
           {walletNotices}

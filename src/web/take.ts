@@ -115,12 +115,21 @@ export function buildBuyerAcceptBody(params: {
 export { generateSessionKeyPair };
 
 /**
- * Parses what the person typed into base units: whole sats for BCH (thousands separators allowed),
- * or a decimal with at most `decimals` places for a token. Null when it is not a valid amount.
+ * Parses what the person typed into base units: a decimal with at most `decimals` places (8 for BCH,
+ * so "0.001" is 100,000 sats). Null when it is not a valid amount.
+ *
+ * A lone comma with no dot is the decimal mark ("0,001" in Argentina, and the comma key on a Spanish
+ * phone keypad). Read as a thousands separator it would turn 0.001 BCH into 1 BCH. Commas are thousands
+ * separators only next to a dot ("1,000.5") or when there are several ("1,000,000").
  */
-export function parseAmount(input: string, decimals: number, isBch: boolean): bigint | null {
-  const clean = input.replace(/[,\s]/g, '');
-  if (isBch || decimals === 0) return /^\d+$/.test(clean) ? BigInt(clean) : null;
+export function parseAmount(input: string, decimals: number): bigint | null {
+  const compact = input.replace(/\s/g, '');
+  const commas = compact.split(',').length - 1;
+  const decimalComma = decimals > 0 && commas === 1 && !compact.includes('.');
+  // Thousands separators must group the whole part by three; anything else is a typo, not a number.
+  if (commas > 0 && !decimalComma && !/^\d{1,3}(,\d{3})+(\.\d*)?$/.test(compact)) return null;
+  const clean = decimalComma ? compact.replace(',', '.') : compact.replace(/,/g, '');
+  if (decimals === 0) return /^\d+$/.test(clean) ? BigInt(clean) : null;
   const match = clean.match(/^(\d*)(?:\.(\d*))?$/);
   if (!match || (match[1] === '' && !match[2]) || (match[2]?.length ?? 0) > decimals) return null;
   return BigInt((match[1] || '0') + (match[2] ?? '').padEnd(decimals, '0'));

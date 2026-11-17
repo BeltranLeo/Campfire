@@ -7,6 +7,7 @@ import type { NetworkProvider } from 'cashscript';
 import { buildCloseOfferTransaction, isPositiveDecimalString, validateOfferDocument, type OfferDocument } from '../protocol/offers.js';
 import { cashAddressToPkh, derivePayoutPkhFromXpub, pkhToLockingBytecode, type WalletSpendableUtxo, type WalletTransactionRequest } from '../protocol/keys.js';
 import type { Offer as ListedOffer, OfferDocument as ListedOfferDocument } from './api';
+import { formatBch } from './format';
 import { parseAmount } from './take';
 import { TradeActionError } from './trade';
 
@@ -22,7 +23,7 @@ export interface OfferForm {
   margin: string;
   /** Fiat per whole coin, for a fixed price. */
   fixedPrice: string;
-  /** Smallest and largest trade in sats. */
+  /** Smallest and largest trade in BCH, as typed ("0.001"). */
   min: string;
   max: string;
   /** Payment method names separated by commas. */
@@ -100,10 +101,10 @@ export function buildOfferDocument(params: {
     else price = { type: 'fixed', value };
   }
 
-  const min = parseAmount(form.min, 8, true);
-  const max = parseAmount(form.max, 8, true);
-  if (min === null || min < MIN_TRADE_SATS) errors.min = `The smallest trade must be at least ${MIN_TRADE_SATS.toLocaleString('en-US')} sats.`;
-  if (max === null || max <= 0n) errors.max = 'Enter the largest trade in sats.';
+  const min = parseAmount(form.min, 8);
+  const max = parseAmount(form.max, 8);
+  if (min === null || min < MIN_TRADE_SATS) errors.min = `The smallest trade must be at least ${formatBch(MIN_TRADE_SATS)}.`;
+  if (max === null || max <= 0n) errors.max = 'Enter the largest trade in BCH, for example 0.02.';
   else if (min !== null && max < min) errors.max = 'The largest trade cannot be below the smallest.';
 
   const methods = parseMethods(form.methods);

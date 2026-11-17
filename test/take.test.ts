@@ -64,14 +64,25 @@ describe('taking an offer (web)', () => {
   });
 
   it('parses amounts into base units', () => {
-    expect(parseAmount('15,000', 8, true)).toBe(15000n);
-    expect(parseAmount('15.5', 8, true)).toBeNull();
-    expect(parseAmount('0.05', 2, false)).toBe(5n);
-    expect(parseAmount('1', 2, false)).toBe(100n);
-    expect(parseAmount('.5', 2, false)).toBe(50n);
-    expect(parseAmount('0.005', 2, false)).toBeNull();
-    expect(parseAmount('', 2, false)).toBeNull();
-    expect(parseAmount('abc', 8, true)).toBeNull();
+    // BCH is typed in BCH, with up to 8 decimals.
+    expect(parseAmount('0.0001', 8)).toBe(10_000n);
+    expect(parseAmount('1', 8)).toBe(100_000_000n);
+    expect(parseAmount('0.00000001', 8)).toBe(1n);
+    expect(parseAmount('0.000000001', 8)).toBeNull();
+    expect(parseAmount('1,000.5', 8)).toBe(100_050_000_000n);
+    // A lone comma is a decimal mark, never a thousands separator: "0,001" must not become 1 BCH.
+    expect(parseAmount('0,001', 8)).toBe(100_000n);
+    expect(parseAmount('0,0153', 8)).toBe(1_530_000n);
+    expect(parseAmount('0,05', 2)).toBe(5n);
+    expect(parseAmount('1,000,000', 0)).toBe(1_000_000n);
+    expect(parseAmount('0,1,2', 8)).toBeNull();
+    expect(parseAmount('abc', 8)).toBeNull();
+    expect(parseAmount('0.05', 2)).toBe(5n);
+    expect(parseAmount('1', 2)).toBe(100n);
+    expect(parseAmount('.5', 2)).toBe(50n);
+    expect(parseAmount('0.005', 2)).toBeNull();
+    expect(parseAmount('', 2)).toBeNull();
+    expect(parseAmount('15.5', 0)).toBeNull();
   });
 
   it('recognises the demo seller limits by the server wording', () => {

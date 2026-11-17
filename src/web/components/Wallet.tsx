@@ -85,7 +85,7 @@ function PillBalance() {
 }
 
 function MenuBalance() {
-  const { bch, pusd, sats, failed } = useBalanceText();
+  const { bch, pusd, failed } = useBalanceText();
   return (
     <div className="cf-stack" data-gap="1">
       <span className="cf-label">Your wallet</span>
@@ -106,9 +106,7 @@ function MenuBalance() {
       ) : (
         <>
           <strong>{bch} BCH</strong>
-          <span className="cf-small cf-muted">
-            {sats?.toLocaleString('en-US')} sats{pusd !== null && ` · ${pusd} PUSD`}
-          </span>
+          {pusd !== null && <span className="cf-small cf-muted">{pusd} PUSD</span>}
           <span className="cf-small cf-subtle">Read from the network with your wallet's public key. Campfire never sees your private keys.</span>
         </>
       )}

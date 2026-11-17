@@ -1,5 +1,5 @@
-// Number and date formats used across pages, copied from the design screens. No DOM here,
-// so the unit tests in test/format.test.ts can run them under Node.
+// Number and date formats used across pages. BCH amounts are always shown in BCH, never in sats.
+// No DOM here, so the unit tests in test/format.test.ts can run them under Node.
 
 /** Base units (sats, token base units) to a decimal string with exactly `decimals` digits. Exact: no floats. */
 export function fromBaseUnits(units: string | bigint, decimals: number): string {
@@ -22,15 +22,28 @@ function groupThousands(digits: string): string {
   return digits.replace(/\B(?=(\d{3})+(?!\d))/g, ',');
 }
 
-/** "5,000 sats" for BCH; "0.10 PUSD" for a token with its decimals. */
-export function formatAmount(units: string | bigint, asset: { symbol: string; decimals: number; isBch: boolean }): string {
-  return asset.isBch ? `${groupThousands(BigInt(units).toString())} sats` : `${fromBaseUnits(units, asset.decimals)} ${asset.symbol}`;
+/** A BCH amount from sats, for people: 5000 → "0.00005 BCH". The interface never shows sats. */
+export function formatBch(sats: string | bigint): string {
+  return `${formatBchBalance(BigInt(sats))} BCH`;
 }
 
-/** "5,000 – 20,000 sats", "0.01 – 0.10 PUSD". */
+/** "0.00005 BCH" for BCH; "0.10 PUSD" for a token with its decimals. */
+export function formatAmount(units: string | bigint, asset: { symbol: string; decimals: number; isBch: boolean }): string {
+  return asset.isBch ? formatBch(units) : `${fromBaseUnits(units, asset.decimals)} ${asset.symbol}`;
+}
+
+/** "0.00005 – 0.0002 BCH", "0.01 – 0.10 PUSD". */
 export function formatRange(min: string, max: string, asset: { symbol: string; decimals: number; isBch: boolean }): string {
-  if (asset.isBch) return `${groupThousands(BigInt(min).toString())} – ${groupThousands(BigInt(max).toString())} sats`;
+  if (asset.isBch) return `${formatBchBalance(BigInt(min))} – ${formatBchBalance(BigInt(max))} BCH`;
   return `${fromBaseUnits(min, asset.decimals)} – ${fromBaseUnits(max, asset.decimals)} ${asset.symbol}`;
+}
+
+/**
+ * Base units as the text an amount field starts with: "0.001" for 100000 sats, "0.10" for 10 PUSD cents.
+ * Ungrouped, so a field never starts with a comma the person could mistake for a decimal mark.
+ */
+export function toAmountInput(units: string | bigint, asset: { decimals: number; isBch: boolean }): string {
+  return (asset.isBch ? formatBchBalance(BigInt(units)) : fromBaseUnits(units, asset.decimals)).replace(/,/g, '');
 }
 
 /** A fiat price with two decimals and the currency after it: "493,824.00 ARS". */

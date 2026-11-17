@@ -5,7 +5,6 @@ import { buildPublishOfferTransaction, decodeOfferOpReturn, validateOfferDocumen
 import { derivePayoutPkhFromXpub, pkhToCashAddress } from '../src/protocol/keys.js';
 import { describeScan, loadWalletCoins, scanWalletCoins, spendableBch } from '../src/web/coins.js';
 import {
-  MIN_TRADE_SATS,
   buildCloseOffer,
   buildOfferDocument,
   marginRange,
@@ -36,8 +35,8 @@ const form: OfferForm = {
   priceType: 'market',
   margin: '2.5',
   fixedPrice: '',
-  min: '100,000',
-  max: '2,000,000',
+  min: '0.001',
+  max: '0.02',
   methods: 'bank-transfer, mercadopago',
   paymentWindowSec: 3600,
   expirySec: 7 * 86_400,
@@ -100,12 +99,12 @@ describe('the offer form', () => {
   it('says which field is wrong', () => {
     expect(build({ margin: '999' })).toMatchObject({ ok: false, errors: { margin: expect.any(String) } });
     expect(build({ priceType: 'fixed', fixedPrice: '' })).toMatchObject({ ok: false, errors: { fixedPrice: expect.any(String) } });
-    expect(build({ min: String(MIN_TRADE_SATS - 1n) })).toMatchObject({ ok: false, errors: { min: expect.any(String) } });
-    expect(build({ min: '500,000', max: '400,000' })).toMatchObject({ ok: false, errors: { max: expect.any(String) } });
+    expect(build({ min: '0.00009999' })).toMatchObject({ ok: false, errors: { min: expect.any(String) } });
+    expect(build({ min: '0.005', max: '0.004' })).toMatchObject({ ok: false, errors: { max: expect.any(String) } });
     expect(build({ max: '' })).toMatchObject({ ok: false, errors: { max: expect.any(String) } });
     expect(build({ methods: '' })).toMatchObject({ ok: false, errors: { methods: expect.any(String) } });
     // Several mistakes are all reported together.
-    const many = build({ margin: 'x', min: '1', methods: '' });
+    const many = build({ margin: 'x', min: '0.00000001', methods: '' });
     expect(many.ok).toBe(false);
     if (!many.ok) expect(Object.keys(many.errors).sort()).toEqual(['margin', 'methods', 'min']);
   });

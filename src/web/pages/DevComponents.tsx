@@ -76,7 +76,7 @@ export function DevComponents() {
         </div>
         <div className="s-actions">
           <Button variant="primary" signs busy>
-            Release 20,000 sats to buyer
+            Release 0.0002 BCH to buyer
           </Button>
           <Button variant="ghost">Ghost</Button>
           <Button size="sm">Small</Button>

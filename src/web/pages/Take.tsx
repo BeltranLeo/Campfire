@@ -8,7 +8,7 @@ import { CoinIcon } from '../components/CoinIcon';
 import { HashLink, ProvenanceTag } from '../components/Provenance';
 import { EmptyState, Notice, Skeleton } from '../components/States';
 import { useConfig } from '../config';
-import { applyMargin, describeMargin, formatAmount, formatClock, formatFiat, formatFiatAmount, formatPaymentWindow, formatRange, fromBaseUnits } from '../format';
+import { applyMargin, describeMargin, formatAmount, formatBch, formatClock, formatFiat, formatFiatAmount, formatPaymentWindow, formatRange, toAmountInput } from '../format';
 import { prepareIndices } from '../indices';
 import { depositNeeds } from '../seller';
 import { spendableBch } from '../coins';
@@ -98,12 +98,10 @@ function TakeOffer({ offer }: { offer: Offer }) {
   const demo = usePoll(() => (offer.isDemo ? apiGet<DemoInfo>('/api/demo') : Promise.resolve(null)), String(offer.isDemo));
 
   // --- Amount ---
-  const [input, setInput] = useState(() => (asset.isBch ? fromBaseUnits(doc.min, 0) : fromBaseUnits(doc.min, doc.assetDecimals)));
-  const amount = parseAmount(input, doc.assetDecimals, asset.isBch);
+  const [input, setInput] = useState(() => toAmountInput(doc.min, asset));
+  const amount = parseAmount(input, doc.assetDecimals);
   const inRange = amount !== null && amount >= BigInt(doc.min) && amount <= BigInt(doc.max);
-  const range = asset.isBch
-    ? `${fromBaseUnits(doc.min, 0)} and ${fromBaseUnits(doc.max, 0)} sats`
-    : `${fromBaseUnits(doc.min, doc.assetDecimals)} and ${fromBaseUnits(doc.max, doc.assetDecimals)} ${asset.symbol}`;
+  const range = `${toAmountInput(doc.min, asset)} and ${formatAmount(doc.max, asset)}`;
 
   // --- Indicative quote, verified against the offer's oracle key ---
   const price = doc.price;
@@ -254,12 +252,12 @@ function TakeOffer({ offer }: { offer: Offer }) {
                   id="amount"
                   className="cf-input"
                   data-mono
-                  inputMode={asset.isBch ? 'numeric' : 'decimal'}
+                  inputMode="decimal"
                   value={input}
                   aria-invalid={!inRange || undefined}
                   onChange={(e) => setInput(e.target.value)}
                 />
-                <span className="cf-addon">{asset.isBch ? 'sats' : asset.symbol}</span>
+                <span className="cf-addon">{asset.symbol}</span>
               </div>
               <span className="cf-hint">{inRange ? `Between ${range}.` : `Enter an amount between ${range}.`}</span>
             </div>
@@ -379,12 +377,10 @@ function TakeBuyOffer({ offer }: { offer: Offer }) {
   const navigate = useNavigate();
   const reputation = usePoll(() => apiGet<Reputation>(`/api/identities/${offer.sellerIdentity}/reputation`), offer.sellerIdentity);
 
-  const [input, setInput] = useState(() => fromBaseUnits(doc.min, asset.isBch ? 0 : doc.assetDecimals));
-  const amount = parseAmount(input, doc.assetDecimals, asset.isBch);
+  const [input, setInput] = useState(() => toAmountInput(doc.min, asset));
+  const amount = parseAmount(input, doc.assetDecimals);
   const inRange = amount !== null && amount >= BigInt(doc.min) && amount <= BigInt(doc.max);
-  const range = asset.isBch
-    ? `${fromBaseUnits(doc.min, 0)} and ${fromBaseUnits(doc.max, 0)} sats`
-    : `${fromBaseUnits(doc.min, doc.assetDecimals)} and ${fromBaseUnits(doc.max, doc.assetDecimals)} ${asset.symbol}`;
+  const range = `${toAmountInput(doc.min, asset)} and ${formatAmount(doc.max, asset)}`;
 
   const price = doc.price;
   const quote = usePoll(
@@ -530,16 +526,16 @@ function TakeBuyOffer({ offer }: { offer: Offer }) {
                   id="amount"
                   className="cf-input"
                   data-mono
-                  inputMode={asset.isBch ? 'numeric' : 'decimal'}
+                  inputMode="decimal"
                   value={input}
                   aria-invalid={!inRange || undefined}
                   onChange={(e) => setInput(e.target.value)}
                 />
-                <span className="cf-addon">{asset.isBch ? 'sats' : asset.symbol}</span>
+                <span className="cf-addon">{asset.symbol}</span>
               </div>
               <span className="cf-hint">
                 {inRange ? `Between ${range}.` : `Enter an amount between ${range}.`}
-                {have !== null && ` Your wallet has ${have.toLocaleString('en-US')} sats.`}
+                {have !== null && ` Your wallet has ${formatBch(have)}.`}
               </span>
             </div>
 
@@ -583,8 +579,8 @@ function TakeBuyOffer({ offer }: { offer: Offer }) {
             {short && (
               // Invented copy: the design does not show a seller without enough BCH here.
               <Notice tone="warn" title="Your wallet does not have enough BCH">
-                Locking this amount needs about {deposit?.toLocaleString('en-US')} sats with the network fee, and Campfire can see{' '}
-                {have?.toLocaleString('en-US')}. The buyer would accept and wait for coins you cannot lock.
+                Locking this amount needs about {deposit !== null && formatBch(deposit)} with the network fee, and Campfire can see{' '}
+                {have !== null && formatBch(have)}. The buyer would accept and wait for coins you cannot lock.
               </Notice>
             )}
             {prep.error && !prep.data ? (
