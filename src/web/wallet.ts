@@ -6,7 +6,8 @@
 
 import { useSyncExternalStore } from 'react';
 import { DappConnectionManager, clearSession, loadSession } from '@wizardconnect/dapp';
-import { initiateDappRelay, type DappRelayResult, type SignTransactionRequest } from '@wizardconnect/core';
+import type { DappRelayResult, SignTransactionRequest } from '@wizardconnect/core';
+import { initiateDappRelay } from './dappRelay';
 import { ApiError, apiGet, apiPost, isFinalState, type RegisteredIdentity, type Reputation, type TradeSummary } from './api';
 
 const SESSION_KEY = 'campfire.wallet';
@@ -108,6 +109,11 @@ class WalletController {
     this.close();
     const relay = this.open();
     this.set({ ...INITIAL, status: 'pairing', pairing: { uri: relay.uri, qrUri: relay.qrUri } });
+    this.startPairingTimer();
+  }
+
+  private startPairingTimer() {
+    clearTimeout(this.pairingTimer);
     this.pairingTimer = setTimeout(() => {
       this.disconnect();
       this.set({
@@ -169,12 +175,15 @@ class WalletController {
         manager.updateConnection(payload.client, payload.status);
         if (payload.status.status === 'session_deleted') this.endedByWallet();
       },
-      existing ? { existingCredentials: existing } : {},
+      existing,
     );
     this.relay = relay;
     manager.attachRelay(relay);
     manager.on('walletready', () => {
       if (this.manager !== manager) return;
+      // The wallet answered. A hidden page may have kept the timer running, so give the
+      // rest of the pairing (Selene's second wallet_ready, with the keys) a fresh two minutes.
+      if (this.state.status === 'pairing') this.startPairingTimer();
       this.set({ walletName: manager.walletName });
       void this.register();
     });

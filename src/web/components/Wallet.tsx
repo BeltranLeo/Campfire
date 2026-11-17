@@ -214,7 +214,11 @@ function PairingDialog({ uri, qrUri, onClose }: { uri: string; qrUri: string; on
         </div>
         {onPhone ? (
           <>
-            <p className="cf-small cf-muted">Open Selene or Paytaca on this phone to pair.</p>
+            {/* The phone may pause this page while the wallet is open; coming back lets it finish the pairing. */}
+            <p className="cf-small cf-muted">
+              Open Selene or Paytaca on this phone to pair. If the wallet keeps saying it is connecting, come back to
+              this tab.
+            </p>
             <a className="cf-btn" data-variant="primary" data-block href={uri}>
               Open in wallet
             </a>
