@@ -8,7 +8,7 @@ import { CoinIcon } from '../components/CoinIcon';
 import { HashLink, ProvenanceTag } from '../components/Provenance';
 import { EmptyState, Notice, Skeleton } from '../components/States';
 import { useConfig } from '../config';
-import { applyMargin, describeMargin, formatAmount, formatBch, formatClock, formatFiat, formatFiatAmount, formatPaymentWindow, formatRange, toAmountInput } from '../format';
+import { applyMargin, describeMargin, formatAmount, formatBch, formatClock, formatFiat, formatFiatAmount, formatPaymentWindow, formatRange, paymentMethodLabel, toAmountInput } from '../format';
 import { prepareIndices } from '../indices';
 import { depositNeeds } from '../seller';
 import { spendableBch } from '../coins';
@@ -209,7 +209,7 @@ function TakeOffer({ offer }: { offer: Offer }) {
               <dd>
                 {doc.paymentMethods.map((method) => (
                   <span key={method} className="s-chip">
-                    {method}
+                    {paymentMethodLabel(method)}
                   </span>
                 ))}{' '}
                 · {formatPaymentWindow(doc.paymentWindowSec)}
@@ -481,7 +481,7 @@ function TakeBuyOffer({ offer }: { offer: Offer }) {
               <dd>
                 {doc.paymentMethods.map((method) => (
                   <span key={method} className="s-chip">
-                    {method}
+                    {paymentMethodLabel(method)}
                   </span>
                 ))}{' '}
                 · within {formatPaymentWindow(doc.paymentWindowSec).replace(' to pay', '')}

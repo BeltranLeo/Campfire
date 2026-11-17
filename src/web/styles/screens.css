@@ -65,8 +65,10 @@
 .s-tabs > a { padding: var(--space-3) var(--space-3); color: var(--ink-muted) !important; text-decoration: none; font: 600 15px/22px var(--font-sans); border-bottom: 2px solid transparent; margin-bottom: -1px; display: inline-flex; gap: var(--space-2); align-items: center; white-space: nowrap; }
 .s-tabs > a[aria-current="page"] { color: var(--ink) !important; border-bottom-color: var(--accent); }
 .s-onboard { width: 100%; max-width: 480px; margin: 0 auto; display: flex; flex-direction: column; gap: var(--space-5); padding-top: var(--space-5); }
-.s-filters { display: flex; gap: var(--space-2); flex-wrap: wrap; }
-.s-filters .cf-select { width: auto; min-height: 36px; padding: 6px var(--space-3); font-size: 13px; }
+.s-intent { max-width: 640px; }
+.s-filters { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: var(--space-2); max-width: 640px; }
+.s-filters .cf-field > label { display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: var(--ink-muted); }
+.s-filters .cf-select { width: 100%; min-height: 36px; padding: 6px var(--space-3); font-size: 13px; }
 .s-faq > details { border-top: 1px solid var(--line); padding: var(--space-3) 0; }
 .s-faq > details:first-child { border-top: 0; }
 .s-faq summary { cursor: pointer; font: 600 15px/22px var(--font-sans); }
@@ -87,6 +89,8 @@
   .cf-banner { justify-content: flex-start; }
   .cf-display { font-size: 24px; line-height: 30px; }
   .s-offerhead { display: none; }
+  .s-filters { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
+  .s-filters > :last-child { grid-column: 1 / -1; }
   .s-offer { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: var(--space-3); }
   .s-offer > .s-cell:first-child { grid-column: 1 / -1; }
   .s-offer > .s-cta { grid-column: 1 / -1; }

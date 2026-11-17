@@ -69,6 +69,14 @@ export function describeMargin(marginBps: number): string {
   return `Market price ${marginBps > 0 ? '+' : '−'} ${percent}%`;
 }
 
+/**
+ * A payment method as people read it. Offers store the names their author typed; the demo's "simulated"
+ * would read like an error on its own.
+ */
+export function paymentMethodLabel(method: string): string {
+  return method === 'simulated' ? 'Simulated payment' : method;
+}
+
 /** "5 min to pay": the payment window is always given in minutes. */
 export function formatPaymentWindow(seconds: number): string {
   return `${Math.round(seconds / 60)} min to pay`;

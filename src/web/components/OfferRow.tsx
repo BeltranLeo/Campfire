@@ -1,4 +1,5 @@
 import type { ReactNode } from 'react';
+import { paymentMethodLabel } from '../format';
 import { CoinIcon } from './CoinIcon';
 import { HashLink, ProvenanceTag } from './Provenance';
 import { Skeleton } from './States';
@@ -10,11 +11,15 @@ export interface OfferRowProps {
   coin: string;
   logo?: string;
   symbol: string;
-  /** The price as text, or null when the quote is not available (no number is shown then). */
+  /** The price of one whole coin as text ("208.59 USD"), or null when the quote is not available (no number is shown then). */
   price: string | null;
   priceNote: string;
   isDemo: boolean;
   range: string;
+  /** What the range means for the visitor: "You get" when buying, "You give" when selling. */
+  rangeLabel: string;
+  /** The range in fiat ("≈ 0.01 – 0.04 USD"), or null without a price. */
+  rangeFiat: string | null;
   paymentMethods: string[];
   paymentWindow: string;
   /** "Seller" on sell offers, "Buyer" on buy offers. */
@@ -35,7 +40,10 @@ export function OfferRow(props: OfferRowProps) {
           <CoinIcon asset={{ coin: props.coin, logo: props.logo }} />
           {props.symbol}
         </span>
-        <span className="cf-mono">{props.price ?? '—'}</span>
+        <span className="cf-mono">
+          {props.price ?? '—'}
+          {props.price && <span className="cf-muted">/{props.symbol}</span>}
+        </span>
         <span className="cf-small cf-muted">{props.priceNote}</span>
         {props.isDemo && (
           <div>
@@ -44,15 +52,16 @@ export function OfferRow(props: OfferRowProps) {
         )}
       </div>
       <div className="s-cell">
-        <span className="cf-label">Range</span>
+        <span className="cf-label">{props.rangeLabel}</span>
         <span className="cf-mono">{props.range}</span>
+        {props.rangeFiat && <span className="cf-small cf-muted">{props.rangeFiat}</span>}
       </div>
       <div className="s-cell">
         <span className="cf-label">Payment</span>
         <span className="s-chips">
           {props.paymentMethods.map((method) => (
             <span key={method} className="s-chip">
-              {method}
+              {paymentMethodLabel(method)}
             </span>
           ))}
         </span>
@@ -95,13 +104,13 @@ export function OfferRowSkeleton() {
 }
 
 /** Column titles above the rows, shown only on wide screens. */
-export function OfferHead({ first, party }: { first: string; party: string }) {
+export function OfferHead({ rangeLabel, party }: { rangeLabel: string; party: string }) {
   return (
     <div className="s-offerhead">
-      <span className="cf-label">{first}</span>
-      <span className="cf-label">Range</span>
+      <span className="cf-label">Coin and price</span>
+      <span className="cf-label">{rangeLabel}</span>
       <span className="cf-label">Payment</span>
-      <span className="cf-label">{party}, arbiter, offer</span>
+      <span className="cf-label">{party}</span>
       <span />
     </div>
   );

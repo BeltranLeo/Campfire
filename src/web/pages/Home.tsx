@@ -10,7 +10,7 @@ import { StatusPill } from '../components/StatusPill';
 import { Countdown } from '../components/Timeline';
 import { freshReceiveAddress, spendableBch, tokenBalance } from '../coins';
 import { useConfig } from '../config';
-import { formatAmount, formatBchBalance, formatDate, formatFiat, formatFiatAmount, formatRange, fromBaseUnits } from '../format';
+import { formatAmount, formatBchBalance, formatDate, formatFiat, formatFiatAmount, formatRange, fromBaseUnits, paymentMethodLabel } from '../format';
 import { useNow } from '../hooks/useNow';
 import { usePoll } from '../hooks/usePoll';
 import { isActive, nextStep, rowTitle, sortActive, sortHistory, historyNote } from '../mytrades';
@@ -270,7 +270,7 @@ function ForYou() {
                   <span className="cf-mono">{price === null ? doc.fiat : formatFiat(price, doc.fiat)}</span>
                 </span>
                 <span className="cf-small cf-muted">
-                  {formatRange(doc.min, doc.max, asset)} · {doc.paymentMethods.join(', ')}
+                  {formatRange(doc.min, doc.max, asset)} · {doc.paymentMethods.map(paymentMethodLabel).join(', ')}
                   {rep && ` · ${describeReputation(rep, doc.side)}`}
                 </span>
                 {offer.isDemo && (

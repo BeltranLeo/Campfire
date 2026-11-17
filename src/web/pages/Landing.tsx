@@ -8,7 +8,7 @@ import { ProvenanceTag, SimBox } from '../components/Provenance';
 import { Skeleton } from '../components/States';
 import { useConfig } from '../config';
 import { DSPROOF_WATCH_SEC } from '../dsproof';
-import { formatRange, fromBaseUnits } from '../format';
+import { formatRange, fromBaseUnits, paymentMethodLabel } from '../format';
 import { usePoll } from '../hooks/usePoll';
 
 // The front page (Landing-* screens): the two intentions, how a trade works, why nobody waits for blocks
@@ -113,7 +113,7 @@ export function Landing() {
                     {offer.isDemo && ' · demo'}
                   </span>
                   <span className="cf-small cf-muted">
-                    {formatRange(doc.min, doc.max, asset)} · {doc.paymentMethods.join(', ')}
+                    {formatRange(doc.min, doc.max, asset)} · {doc.paymentMethods.map(paymentMethodLabel).join(', ')}
                   </span>
                 </span>
                 <span className="cf-btn" data-size="sm">

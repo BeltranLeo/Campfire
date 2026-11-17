@@ -12,6 +12,7 @@ import {
   formatFiat,
   formatPaymentWindow,
   formatRange,
+  paymentMethodLabel,
 } from '../format';
 import { usePoll } from '../hooks/usePoll';
 import { usePrefs } from '../prefs';
@@ -44,9 +45,9 @@ export function Offers() {
   const reputations = usePoll(() => loadReputations(identities), identities.join(','));
 
   // The filters start from the onboarding answers when they name exactly one coin or currency.
-  const [coin, setCoin] = useState(prefs?.assets.length === 1 ? prefs.assets[0] : '');
-  const [fiat, setFiat] = useState(prefs?.fiat.length === 1 ? prefs.fiat[0] : '');
-  const [method, setMethod] = useState('');
+  const [chosenCoin, setCoin] = useState(prefs?.assets.length === 1 ? prefs.assets[0] : '');
+  const [chosenFiat, setFiat] = useState(prefs?.fiat.length === 1 ? prefs.fiat[0] : '');
+  const [chosenMethod, setMethod] = useState('');
   const clearFilters = () => {
     setCoin('');
     setFiat('');
@@ -60,6 +61,17 @@ export function Offers() {
   };
 
   const sideOffers = all.filter((o) => o.document.side === offerSide);
+
+  // Filter choices come from the offers on this side, not from a fixed list.
+  const coinOptions = unique(sideOffers.map((o) => assetInfo(o.document.asset, o.document.assetDecimals, config).symbol));
+  const fiatOptions = unique(sideOffers.map((o) => o.document.fiat));
+  const methodOptions = unique(sideOffers.flatMap((o) => o.document.paymentMethods));
+  // A choice counts only while it is one of the options. Otherwise the select would show "Any …" while a
+  // value left over from the other side (the back button, an onboarding answer) silently hid every offer.
+  const coin = coinOptions.includes(chosenCoin) ? chosenCoin : '';
+  const fiat = fiatOptions.includes(chosenFiat) ? chosenFiat : '';
+  const method = methodOptions.includes(chosenMethod) ? chosenMethod : '';
+
   const rows = sideOffers
     .map((offer) => ({ offer, asset: assetInfo(offer.document.asset, offer.document.assetDecimals, config) }))
     .filter(
@@ -71,11 +83,6 @@ export function Offers() {
     // Demo offers first (the way in for a first visit), then BCH before tokens; otherwise the service's order.
     .sort((a, b) => Number(b.offer.isDemo) - Number(a.offer.isDemo) || Number(b.asset.isBch) - Number(a.asset.isBch));
 
-  // Filter choices come from the offers on this side, not from a fixed list.
-  const coinOptions = unique(sideOffers.map((o) => assetInfo(o.document.asset, o.document.assetDecimals, config).symbol));
-  const fiatOptions = unique(sideOffers.map((o) => o.document.fiat));
-  const methodOptions = unique(sideOffers.flatMap((o) => o.document.paymentMethods));
-
   const showSkeleton = offers.loading && !offers.data;
   const failed = !offers.data && Boolean(offers.error);
   const updated = quotes.data?.updatedAt ? ` · Prices updated ${formatClock(quotes.data.updatedAt)}` : '';
@@ -86,6 +93,7 @@ export function Offers() {
       : `${rows.length} open ${rows.length === 1 ? 'offer' : 'offers'}`;
 
   const party = offerSide === 'sell' ? 'Seller' : 'Buyer';
+  const rangeLabel = intent === 'buy' ? 'You get' : 'You give';
 
   return (
     <main className="s-main">
@@ -102,11 +110,37 @@ export function Offers() {
             I want to sell
           </button>
         </div>
-        <div className="s-filters">
-          <Filter label="Coin" any="Any coin" value={coin} options={coinOptions} onChange={setCoin} />
-          <Filter label="Currency" any="Any currency" value={fiat} options={fiatOptions} onChange={setFiat} />
-          <Filter label="Payment method" any="Any payment method" value={method} options={methodOptions} onChange={setMethod} />
-        </div>
+      </div>
+      {/* What the choice means in one sentence: who sends what, and what keeps the visitor safe on that side. */}
+      <p className="s-intent">
+        {intent === 'buy'
+          ? `You send ${fiat || 'money'} directly to the seller. Their ${coin || 'coins'} ${coin ? 'is' : 'are'} locked in a contract before you pay, and ${coin ? 'goes' : 'go'} to your wallet when they confirm your payment.`
+          : `The buyer sends you ${fiat || 'money'} directly. You lock your ${coin || 'coins'} in a contract only after you accept their request, and release ${coin ? 'it' : 'them'} when the payment arrives.`}
+      </p>
+      {/* Each filter says which side of the trade it describes, in the same words as the columns below. */}
+      <div className="s-filters">
+        <Filter
+          label={intent === 'buy' ? 'You get' : 'You give'}
+          any="Any coin"
+          value={coin}
+          options={coinOptions}
+          onChange={setCoin}
+        />
+        <Filter
+          label={intent === 'buy' ? 'You pay in' : 'You get paid in'}
+          any="Any currency"
+          value={fiat}
+          options={fiatOptions}
+          onChange={setFiat}
+        />
+        <Filter
+          label={intent === 'buy' ? 'You pay by' : 'You get paid by'}
+          any="Any method"
+          value={method}
+          options={methodOptions}
+          optionLabel={paymentMethodLabel}
+          onChange={setMethod}
+        />
       </div>
       <span className="cf-small cf-muted">
         {status}
@@ -140,7 +174,7 @@ export function Offers() {
         </section>
       ) : (
         <section className="cf-card" data-flush>
-          <OfferHead first={offerSide === 'sell' ? 'Asset and price' : 'They want and pay'} party={party} />
+          <OfferHead rangeLabel={rangeLabel} party={party} />
           {rows.map(({ offer, asset }) => {
             const doc = offer.document;
             const price = priceOf(offer, quotes.data?.byPair);
@@ -155,6 +189,8 @@ export function Offers() {
                 priceNote={doc.price.type === 'fixed' ? 'Fixed price' : describeMargin(doc.price.marginBps)}
                 isDemo={offer.isDemo}
                 range={formatRange(doc.min, doc.max, asset)}
+                rangeLabel={rangeLabel}
+                rangeFiat={price === null ? null : fiatRange(doc.min, doc.max, asset.decimals, price, doc.fiat)}
                 paymentMethods={doc.paymentMethods}
                 paymentWindow={formatPaymentWindow(doc.paymentWindowSec)}
                 partyLabel={party}
@@ -165,7 +201,7 @@ export function Offers() {
                 action={
                   // The demo offers are the one-click way in for the jury, so they carry the primary button.
                   <Button variant={offer.isDemo ? 'primary' : undefined} to={`/offers/${offer.offerTxid}`}>
-                    {intent === 'buy' ? 'Buy' : 'Sell'}
+                    {intent === 'buy' ? 'Buy' : 'Sell'} {asset.symbol}
                   </Button>
                 }
               />
@@ -174,9 +210,6 @@ export function Offers() {
         </section>
       )}
 
-      {intent === 'sell' && rows.length > 0 && (
-        <p className="cf-small cf-muted">These people want to buy. You lock the coins only after they accept your request.</p>
-      )}
       <p className="cf-small cf-subtle">
         Completed trades are counted by Campfire. The number cannot be verified on-chain and can be inflated with a
         second wallet.
@@ -185,16 +218,36 @@ export function Offers() {
   );
 }
 
-function Filter(props: { label: string; any: string; value: string; options: string[]; onChange: (value: string) => void }) {
+/** "≈ 0.01 – 0.04 USD": what the range is worth at this price. Approximate; the trade fixes the exact amount. */
+function fiatRange(min: string, max: string, decimals: number, price: number, fiat: string): string {
+  const worth = (units: string) =>
+    ((Number(units) / 10 ** decimals) * price).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  return `≈ ${worth(min)} – ${worth(max)} ${fiat}`;
+}
+
+function Filter(props: {
+  label: string;
+  any: string;
+  value: string;
+  options: string[];
+  /** The text shown for an option; its value stays as the offers store it, so filtering keeps working. */
+  optionLabel?: (option: string) => string;
+  onChange: (value: string) => void;
+}) {
   return (
-    <select className="cf-select" aria-label={props.label} value={props.value} onChange={(e) => props.onChange(e.target.value)}>
-      <option value="">{props.any}</option>
-      {props.options.map((option) => (
-        <option key={option} value={option}>
-          {option}
-        </option>
-      ))}
-    </select>
+    <div className="cf-field">
+      <label>
+        {props.label}
+        <select className="cf-select" value={props.value} onChange={(e) => props.onChange(e.target.value)}>
+          <option value="">{props.any}</option>
+          {props.options.map((option) => (
+            <option key={option} value={option}>
+              {props.optionLabel ? props.optionLabel(option) : option}
+            </option>
+          ))}
+        </select>
+      </label>
+    </div>
   );
 }
 

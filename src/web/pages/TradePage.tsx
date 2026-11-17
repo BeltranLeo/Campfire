@@ -28,6 +28,7 @@ import {
   formatFiat,
   formatFiatAmount,
   formatHourMinute,
+  paymentMethodLabel,
 } from '../format';
 import { usePoll } from '../hooks/usePoll';
 import { useTradeAction } from '../hooks/useTradeAction';
@@ -408,7 +409,7 @@ function BuyRequest(props: { trade: Trade; amount: string; fiat: string; onUpdat
   const offer = usePoll(() => apiGet<{ offer: Offer }>(`/api/offers/${trade.offerTxid}`).then((r) => r.offer.document), trade.offerTxid);
   const prep = usePoll(() => (identity && xpubs ? prepareIndices(identity, xpubs, 'buyer') : Promise.resolve(null)), `${identity}:${trade.id}`);
   const problem = offer.data ? checkBuyRequest(trade, offer.data) : null;
-  const methods = offer.data?.paymentMethods.join(' or ');
+  const methods = offer.data?.paymentMethods.map(paymentMethodLabel).join(' or ');
 
   const accept = () =>
     run('accept', 'The request was not accepted', async () => {
