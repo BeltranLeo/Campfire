@@ -195,6 +195,17 @@ export function signedTerms(trade: Trade): Pick<TradeTerms, 'amount' | 'fiatAmou
   return trade;
 }
 
+/** Where the buyer's or the seller's coins go, from the signed terms (the service's copy is only a fallback). */
+export function signedPayoutPkh(trade: Trade, party: 'buyer' | 'seller'): string | undefined {
+  let terms: Partial<TradeTerms> = {};
+  try {
+    if (trade.termsJson) terms = JSON.parse(trade.termsJson) as TradeTerms;
+  } catch {
+    // Damaged terms: fall back to the record; the escrow check reports the mismatch.
+  }
+  return party === 'buyer' ? (terms.buyerPayoutPkh ?? trade.buyerPayoutPkh) : (terms.sellerPayoutPkh ?? trade.sellerPayoutPkh);
+}
+
 export interface ArbiterChecks {
   /**
    * The oracle's signature on the quote, and whether that oracle is the one the offer names.

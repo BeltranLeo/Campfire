@@ -15,12 +15,16 @@ export class ApiError extends Error {
 // offer waits for the demo seller's on-chain deposit.
 const TIMEOUT_MS = { GET: 20_000, POST: 60_000 };
 
-async function request<T>(method: 'GET' | 'POST', path: string, body?: unknown): Promise<T> {
+async function request<T>(method: 'GET' | 'POST', path: string, body?: unknown, token?: string): Promise<T> {
   let res: Response;
+  // The arbiter's admin token travels only in this header, never in a URL (it would end up in logs and history).
+  const headers: Record<string, string> = {};
+  if (body !== undefined) headers['content-type'] = 'application/json';
+  if (token) headers.authorization = `Bearer ${token}`;
   try {
     res = await fetch(path, {
       method,
-      headers: body === undefined ? undefined : { 'content-type': 'application/json' },
+      headers: Object.keys(headers).length > 0 ? headers : undefined,
       body: body === undefined ? undefined : JSON.stringify(body),
       signal: AbortSignal.timeout(TIMEOUT_MS[method]),
     });
@@ -41,8 +45,8 @@ async function request<T>(method: 'GET' | 'POST', path: string, body?: unknown):
   return data as T;
 }
 
-export const apiGet = <T>(path: string) => request<T>('GET', path);
-export const apiPost = <T>(path: string, body: unknown) => request<T>('POST', path, body);
+export const apiGet = <T>(path: string, token?: string) => request<T>('GET', path, undefined, token);
+export const apiPost = <T>(path: string, body: unknown, token?: string) => request<T>('POST', path, body, token);
 
 // --- Shapes used by the web app (see src/server/http.ts and src/server/service.ts) ---
 

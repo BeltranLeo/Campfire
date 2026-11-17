@@ -2,6 +2,7 @@ import { Navigate, Route, Routes } from 'react-router';
 import { Shell } from './components/Shell';
 import { About } from './pages/About';
 import { Arbiter } from './pages/Arbiter';
+import { ArbiterList } from './pages/ArbiterList';
 import { DevComponents } from './pages/DevComponents';
 import { Landing } from './pages/Landing';
 import { NotBuilt } from './pages/NotBuilt';
@@ -22,6 +23,7 @@ export function App() {
         <Route path="offers/:offerTxid" element={<Take />} />
         <Route path="trade/:id" element={<TradePage />} />
         <Route path="trade/:id/arbiter" element={<Arbiter />} />
+        <Route path="arbiter" element={<ArbiterList />} />
         <Route path="trades" element={<NotBuilt title="My trades" />} />
         <Route path="chats" element={<NotBuilt title="Chats" />} />
         <Route path="about" element={<About />} />
