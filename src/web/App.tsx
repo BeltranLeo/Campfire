@@ -6,6 +6,7 @@ import { ArbiterList } from './pages/ArbiterList';
 import { CreateOffer } from './pages/CreateOffer';
 import { DevComponents } from './pages/DevComponents';
 import { Landing } from './pages/Landing';
+import { MyTrades } from './pages/MyTrades';
 import { NotBuilt } from './pages/NotBuilt';
 import { Offers } from './pages/Offers';
 import { Take } from './pages/Take';
@@ -25,7 +26,7 @@ export function App() {
         <Route path="trade/:id" element={<TradePage />} />
         <Route path="trade/:id/arbiter" element={<Arbiter />} />
         <Route path="arbiter" element={<ArbiterList />} />
-        <Route path="trades" element={<NotBuilt title="My trades" />} />
+        <Route path="trades" element={<MyTrades />} />
         <Route path="chats" element={<NotBuilt title="Chats" />} />
         <Route path="about" element={<About />} />
         {/* The design's Help FAQ lives at the end of About. */}

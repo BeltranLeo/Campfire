@@ -6,6 +6,7 @@ import { derivePayoutPkhFromXpub, pkhToCashAddress } from '../src/protocol/keys.
 import { loadWalletCoins, spendableBch } from '../src/web/coins.js';
 import {
   MIN_TRADE_SATS,
+  buildCloseOffer,
   buildOfferDocument,
   marginRange,
   parseFixedPrice,
@@ -168,5 +169,38 @@ describe('the wallet coins and the publication transaction', () => {
     const record = decodeOfferOpReturn(outputs[0].to as Uint8Array);
     expect(record.arbiterPk).toBe(arbiter);
     expect(() => verifyOfferAgainstOpReturn(built.json, outputs[0].to as Uint8Array)).not.toThrow();
+  });
+});
+
+describe('closing an offer', () => {
+  const keys = wallet('seller-close');
+  const markerAddress = pkhToCashAddress(derivePayoutPkhFromXpub(keys.receive, 7));
+  const offerTxid = 'ab'.repeat(32);
+
+  function chain() {
+    const p = new MockNetworkProvider();
+    p.network = Network.MAINNET;
+    p.addUtxo(markerAddress, { txid: offerTxid, vout: 1, satoshis: 1000n });
+    return p;
+  }
+
+  it('spends the marker back to its own address with the path and index the wallet needs to sign it', async () => {
+    const tx = await buildCloseOffer({ offer: { offerTxid, markerAddress, markerVout: 1 }, provider: chain(), receiveXpub: keys.receive });
+    expect(tx.inputPaths).toEqual([[0, 'receive', 7]]);
+    const outputs = (tx.builder as unknown as { outputs: { to: string; amount: bigint }[] }).outputs;
+    expect(outputs).toHaveLength(1);
+    expect(outputs[0].to).toBe(markerAddress);
+    // The marker pays its own fee and leaves more than the dust limit.
+    expect(outputs[0].amount).toBeGreaterThan(546n);
+    expect(outputs[0].amount).toBeLessThan(1000n);
+  });
+
+  it('refuses a wallet that did not publish the offer, an offer without a marker and a marker already spent', async () => {
+    const other = wallet('someone-else');
+    await expect(buildCloseOffer({ offer: { offerTxid, markerAddress, markerVout: 1 }, provider: chain(), receiveXpub: other.receive })).rejects.toThrow(/does not belong/);
+    await expect(buildCloseOffer({ offer: { offerTxid, markerAddress: undefined, markerVout: 1 }, provider: chain(), receiveXpub: keys.receive })).rejects.toThrow(/no marker/);
+    const empty = new MockNetworkProvider();
+    empty.network = Network.MAINNET;
+    await expect(buildCloseOffer({ offer: { offerTxid, markerAddress, markerVout: 1 }, provider: empty, receiveXpub: keys.receive })).rejects.toThrow(/already spent/);
   });
 });

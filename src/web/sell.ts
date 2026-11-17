@@ -1,9 +1,13 @@
 // Publishing a sell offer: the form's rules and the offer document they produce (docs/protocol.md,
 // section 2.2). No DOM here, so test/sell.test.ts can check what ends up in the offer.
 
-import { isPositiveDecimalString, validateOfferDocument, type OfferDocument } from '../protocol/offers.js';
-import type { OfferDocument as ListedOfferDocument } from './api';
+import { binToHex } from '@bitauth/libauth';
+import type { NetworkProvider } from 'cashscript';
+import { buildCloseOfferTransaction, isPositiveDecimalString, validateOfferDocument, type OfferDocument } from '../protocol/offers.js';
+import { cashAddressToPkh, derivePayoutPkhFromXpub, pkhToLockingBytecode, type WalletSpendableUtxo, type WalletTransactionRequest } from '../protocol/keys.js';
+import type { Offer as ListedOffer, OfferDocument as ListedOfferDocument } from './api';
 import { parseAmount } from './take';
+import { TradeActionError } from './trade';
 
 export type PriceType = 'market' | 'fixed';
 
@@ -136,4 +140,41 @@ export function marginRange(offers: { document: ListedOfferDocument }[], fiat: s
     .filter((o) => o.document.side === 'sell' && o.document.asset === 'BCH' && o.document.fiat === fiat && o.document.price.type === 'floating')
     .map((o) => (o.document.price.type === 'floating' ? o.document.price.marginBps : 0));
   return margins.length === 0 ? null : { low: Math.min(...margins), high: Math.max(...margins) };
+}
+
+// --- Closing an offer ---
+
+/** How far into the receive path to look for the address that holds an offer's marker. */
+const MARKER_SEARCH_LIMIT = 200;
+
+/**
+ * The transaction that closes an offer: it spends the 1,000-sat marker back to the same address (minus the network
+ * fee), and the service sees the marker gone. The marker sits on a `receive` address of this wallet, found by
+ * deriving the path, because the service does not keep the index. Anything that does not fit stops here with a
+ * sentence, before the wallet is asked to sign.
+ */
+export async function buildCloseOffer(params: {
+  offer: Pick<ListedOffer, 'offerTxid' | 'markerAddress' | 'markerVout'>;
+  provider: NetworkProvider;
+  receiveXpub: string;
+}): Promise<WalletTransactionRequest> {
+  const { offer } = params;
+  if (!offer.markerAddress) throw new TradeActionError('This offer has no marker to spend.');
+  const wanted = binToHex(cashAddressToPkh(offer.markerAddress));
+  let index = -1;
+  for (let i = 0; i < MARKER_SEARCH_LIMIT && index < 0; i++) {
+    if (binToHex(derivePayoutPkhFromXpub(params.receiveXpub, i)) === wanted) index = i;
+  }
+  if (index < 0) throw new TradeActionError("This offer's marker does not belong to the connected wallet. Connect the wallet that published it.");
+  const utxos = await params.provider.getUtxos(offer.markerAddress);
+  const marker = utxos.find((u) => u.txid === offer.offerTxid && u.vout === (offer.markerVout ?? 1));
+  if (!marker) throw new TradeActionError('The marker of this offer is already spent. Reload the page to see its state.');
+  const markerUtxo = {
+    ...marker,
+    lockingBytecode: binToHex(pkhToLockingBytecode(wanted)),
+    pathName: 'receive',
+    keyIndex: index,
+    address: offer.markerAddress,
+  } as WalletSpendableUtxo;
+  return buildCloseOfferTransaction({ provider: params.provider, markerUtxo, destinationAddress: offer.markerAddress });
 }

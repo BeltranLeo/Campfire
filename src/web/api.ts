@@ -125,6 +125,10 @@ export interface Offer {
   /** Set by the service for offers of its demo seller; never decided by the client. */
   isDemo: boolean;
   document: OfferDocument;
+  /** The 1,000-sat marker output that keeps the offer open; spending it closes the offer. */
+  markerAddress?: string;
+  markerVout?: number;
+  closeTxid?: string;
   createdAt: number;
 }
 
