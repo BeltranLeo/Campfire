@@ -11,7 +11,7 @@ import {
 } from '../protocol/index.js';
 import { DemoLimitError, type DemoAsset, type DemoSeller } from './demo.js';
 import type { OracleService } from './oracle.js';
-import type { CampfireService } from './service.js';
+import { SponsorshipLimitError, type CampfireService } from './service.js';
 import type { StoredTrade } from './storage.js';
 
 class HttpError extends Error {
@@ -152,6 +152,29 @@ export function createApiHandler(deps: {
         }
       }
 
+      // GET /api/offers/sponsored?identity=: how much of the paid-publication allowance is left.
+      if (method === 'GET' && path === '/api/offers/sponsored') {
+        if (!demo) {
+          return jsonResponse({ enabled: false });
+        }
+        const identity = url.searchParams.get('identity') ?? undefined;
+        return jsonResponse({ enabled: true, ...(await service.sponsorshipStatus(identity)) });
+      }
+
+      // POST /api/offers/sponsored: Campfire builds, pays for and publishes a buy offer for the buyer. No signature.
+      if (method === 'POST' && path === '/api/offers/sponsored') {
+        if (!demo) {
+          throw new HttpError(404, 'Paid publication of buy offers is not enabled');
+        }
+        const body = await readJson<{ buyerIdentity: string; offerJson: string; markerReceiveIndex: number }>(req);
+        const result = await demo.publishSponsored({
+          buyerIdentity: body.buyerIdentity,
+          offerJson: body.offerJson,
+          markerReceiveIndex: body.markerReceiveIndex,
+        });
+        return jsonResponse(result, 201);
+      }
+
       // GET /api/offers/:offerTxid
       const offerMatch = path.match(/^\/api\/offers\/([0-9a-f]{64})$/i);
       if (method === 'GET' && offerMatch) {
@@ -185,23 +208,56 @@ export function createApiHandler(deps: {
         if (method === 'POST') {
           const body = await readJson<{
             offerTxid: string;
-            buyerIdentity: string;
             amount: string;
+            buyerIdentity: string;
             buyerPk: string;
             buyerDefiIndex: number;
             buyerPayoutPkh: string;
             buyerReceiveIndex: number;
             buyerSessionPk: string;
+            sellerIdentity: string;
+            sellerPk: string;
+            sellerDefiIndex: number;
+            sellerPayoutPkh: string;
+            sellerReceiveIndex: number;
+            sellerSessionPk: string;
           }>(req);
           const offer = await service.getOffer(body.offerTxid);
-          const isDemoOffer = demo !== undefined && offer?.sellerIdentity === demo.identity;
-          if (isDemoOffer) {
-            await demo.assertCanTake();
-          }
-          let trade = await service.requestTrade(body);
-          if (isDemoOffer) {
-            // The bot accepts and funds a real escrow within this request.
-            trade = await demo.acceptAndFund(trade.id);
+          let trade: StoredTrade;
+          if (offer?.document.side === 'buy') {
+            if (!body.sellerIdentity && body.buyerIdentity) {
+              throw new HttpError(400, 'This is a buy offer: a seller takes it, not a buyer');
+            }
+            // A seller takes a buy offer. The fields are copied one by one: the record id is the demo seller's alone.
+            trade = await service.requestBuyOfferTrade({
+              offerTxid: body.offerTxid,
+              amount: body.amount,
+              sellerIdentity: body.sellerIdentity,
+              sellerPk: body.sellerPk,
+              sellerDefiIndex: body.sellerDefiIndex,
+              sellerPayoutPkh: body.sellerPayoutPkh,
+              sellerReceiveIndex: body.sellerReceiveIndex,
+              sellerSessionPk: body.sellerSessionPk,
+            });
+          } else {
+            const isDemoOffer = demo !== undefined && offer?.sellerIdentity === demo.identity;
+            if (isDemoOffer) {
+              await demo.assertCanTake();
+            }
+            trade = await service.requestTrade({
+              offerTxid: body.offerTxid,
+              amount: body.amount,
+              buyerIdentity: body.buyerIdentity,
+              buyerPk: body.buyerPk,
+              buyerDefiIndex: body.buyerDefiIndex,
+              buyerPayoutPkh: body.buyerPayoutPkh,
+              buyerReceiveIndex: body.buyerReceiveIndex,
+              buyerSessionPk: body.buyerSessionPk,
+            });
+            if (isDemoOffer) {
+              // The bot accepts and funds a real escrow within this request.
+              trade = await demo.acceptAndFund(trade.id);
+            }
           }
           return jsonResponse({ trade }, 201);
         }
@@ -256,6 +312,30 @@ export function createApiHandler(deps: {
 
         if (method === 'POST') {
           if (action === 'accept') {
+            const existing = await service.getTrade(id);
+            if (existing?.side === 'buy') {
+              // The buyer who published a buy offer accepts with their own keys.
+              const body = await readJson<{
+                buyerIdentity: string;
+                buyerPk: string;
+                buyerDefiIndex: number;
+                buyerPayoutPkh: string;
+                buyerReceiveIndex: number;
+                buyerSessionPk: string;
+                refundTime?: number;
+                nonce?: string;
+              }>(req);
+              let trade = await service.acceptBuyOfferTrade({ ...body, tradeRecordId: id });
+              if (demo && service.isDemoTrade(trade)) {
+                // The demo seller deposits within this request. If that fails, the next read of the trade retries.
+                try {
+                  trade = await demo.acceptAndFund(trade.id);
+                } catch {
+                  // The accepted trade is still returned.
+                }
+              }
+              return jsonResponse({ trade });
+            }
             const body = await readJson<{
               sellerIdentity: string;
               sellerPk: string;
@@ -267,20 +347,26 @@ export function createApiHandler(deps: {
               refundTime?: number;
               nonce?: string;
             }>(req);
-            const trade = await service.acceptTrade({ tradeRecordId: id, ...body });
+            const trade = await service.acceptTrade({ ...body, tradeRecordId: id });
             return jsonResponse({ trade });
           }
           if (action === 'decline') {
-            const body = await readJson<{ sellerIdentity: string }>(req);
+            // The one who published the offer declines: the seller of a sell offer, the buyer of a buy offer.
+            const body = await readJson<{ identity?: string; sellerIdentity?: string; buyerIdentity?: string }>(req);
             const trade = await service.declineTrade({
               tradeRecordId: id,
-              sellerIdentity: body.sellerIdentity,
+              identity: body.identity ?? body.sellerIdentity ?? body.buyerIdentity ?? '',
             });
             return jsonResponse({ trade });
           }
           if (action === 'funding') {
-            const body = await readJson<{ fundingTxHex?: string; confirmations?: number }>(req);
-            const trade = await service.confirmFunding({ idOrTradeId: id, ...body });
+            const body = await readJson<{
+              fundingTxHex?: string;
+              confirmations?: number;
+              encryptedPaymentDetails?: string;
+              paymentDetailsSignature?: string;
+            }>(req);
+            const trade = await service.confirmFunding({ ...body, idOrTradeId: id });
             return jsonResponse({ trade });
           }
           if (action === 'paid') {
@@ -301,7 +387,7 @@ export function createApiHandler(deps: {
               reason?: string;
               sharedTradeKeyHex?: string;
             }>(req);
-            const trade = await service.openDispute({ idOrTradeId: id, ...body });
+            const trade = await service.openDispute({ ...body, idOrTradeId: id });
             return jsonResponse({ trade });
           }
           if (action === 'verdict') {
@@ -311,7 +397,7 @@ export function createApiHandler(deps: {
               reason?: string;
               broadcastOnChain?: boolean;
             }>(req);
-            const trade = await service.issueArbiterVerdict({ idOrTradeId: id, ...body });
+            const trade = await service.issueArbiterVerdict({ ...body, idOrTradeId: id });
             return jsonResponse({ trade });
           }
           if (action === 'settle') {
@@ -319,12 +405,12 @@ export function createApiHandler(deps: {
               path: 'release' | 'cancel' | 'arbitrate' | 'refund';
               signedTxHex?: string;
             }>(req);
-            const trade = await service.settleEscrow({ idOrTradeId: id, ...body });
+            const trade = await service.settleEscrow({ ...body, idOrTradeId: id });
             return jsonResponse({ trade });
           }
           if (action === 'chat') {
             const body = await readJson<{ senderIdentity: string; ciphertext: string }>(req);
-            const message = await service.postChatMessage({ idOrTradeId: id, ...body });
+            const message = await service.postChatMessage({ ...body, idOrTradeId: id });
             return jsonResponse({ message }, 201);
           }
         }
@@ -393,7 +479,7 @@ export function createApiHandler(deps: {
       if (err instanceof HttpError) {
         return jsonResponse({ error: message }, err.status);
       }
-      if (err instanceof DemoLimitError) {
+      if (err instanceof DemoLimitError || err instanceof SponsorshipLimitError) {
         return jsonResponse({ error: message }, 429);
       }
       return jsonResponse({ error: message }, 400);

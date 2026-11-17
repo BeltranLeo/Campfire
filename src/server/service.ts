@@ -12,6 +12,7 @@ import type { NetworkProvider } from 'cashscript';
 import {
   BCH_ASSET,
   MARKER_SATOSHIS,
+  PUSD_CATEGORY,
   VERDICT_BUYER,
   VERDICT_SELLER,
   buildArbitrateSpend,
@@ -32,6 +33,7 @@ import {
   verifyDerivedPayoutPkh,
   verifyDerivedPubkey,
   verifyOfferAgainstOpReturn,
+  verifyPaymentDetailsSignature,
   verifyPriceQuote,
   verifySignedContractSpend,
   type OfferDocument,
@@ -51,6 +53,37 @@ import type {
 export const QUOTE_VALIDITY_SEC = 600; // 10 minutes (protocol section 2.2)
 export const FUNDING_WINDOW_SEC = 1800; // 30 minutes (protocol section 2.2)
 export const DEFAULT_REFUND_DELAY_SEC = 14 * 86_400; // 14 days (protocol section 2.2)
+export const MIN_REFUND_DELAY_SEC = 7 * 86_400;
+export const MAX_REFUND_DELAY_SEC = 30 * 86_400;
+
+// What the service pays for when it publishes a buy offer on the buyer's behalf (section 2.2). Identities are
+// hashes of a presented key with no proof of possession, so the limit per identity is easy to get around with a
+// fresh wallet; the daily limit across everyone is the one that bounds what the service can spend.
+export interface SponsorshipLimits {
+  /** Paid publications in any 24 hours, across all identities. */
+  dailyOffers: number;
+  /** Paid offers one identity may have open at once. */
+  openOffersPerIdentity: number;
+  /** The longest an offer paid for by the service may stay open, in seconds. */
+  maxExpirySec: number;
+}
+export const DEFAULT_SPONSORSHIP_LIMITS: SponsorshipLimits = {
+  dailyOffers: 100,
+  openOffersPerIdentity: 3,
+  maxExpirySec: 7 * 86_400,
+};
+
+/** A limit on paid publications was reached; the HTTP layer answers 429. */
+export class SponsorshipLimitError extends Error {}
+
+export interface SponsorshipStatus extends SponsorshipLimits {
+  usedToday: number;
+  remainingToday: number;
+  /** Unix seconds when the next daily slot frees up; null while there is room. */
+  nextSlotAt: number | null;
+  /** Paid offers the given identity has open now (0 when no identity was asked about). */
+  openNow: number;
+}
 
 export const REPUTATION_HONESTY_NOTICE =
   'Computed and attested by the service. It cannot be recomputed from the chain by a third party, and a user can inflate it by trading with a second wallet of their own.';
@@ -69,6 +102,7 @@ export interface OfferView extends Omit<StoredOffer, 'status'> {
 
 export class CampfireService {
   readonly arbiterPublicKeyHex: string;
+  readonly sponsorshipLimits: SponsorshipLimits;
   private readonly arbiterPrivateKey: Uint8Array;
   private readonly nowSeconds: () => number;
 
@@ -83,6 +117,7 @@ export class CampfireService {
       demoSellerIdentity?: string;
       // Delay between escrow lookups after broadcasting a funding transaction (the indexer may lag the mempool).
       fundingLookupDelayMs?: number;
+      sponsorshipLimits?: Partial<SponsorshipLimits>;
     },
   ) {
     this.arbiterPrivateKey = toBytes(options.arbiterPrivateKey, 'arbiterPrivateKey');
@@ -95,6 +130,7 @@ export class CampfireService {
     }
     this.arbiterPublicKeyHex = binToHex(pub).toLowerCase();
     this.nowSeconds = options.nowSeconds ?? (() => Math.floor(Date.now() / 1000));
+    this.sponsorshipLimits = { ...DEFAULT_SPONSORSHIP_LIMITS, ...options.sponsorshipLimits };
   }
 
   get oraclePublicKeyHex(): string {
@@ -135,6 +171,10 @@ export class CampfireService {
     };
     await this.options.storage.saveIdentity(record);
     return record;
+  }
+
+  async getIdentityRecord(identity: string): Promise<UserIdentityRecord | null> {
+    return this.options.storage.getIdentity(identity);
   }
 
   async getReputation(identity: string): Promise<ReputationSummary> {
@@ -193,6 +233,8 @@ export class CampfireService {
     offerTxHex: string;
     markerReceiveIndex: number;
     broadcast?: boolean;
+    // Set only by the service's own paid publication of a buy offer, never from a request.
+    sponsored?: boolean;
   }): Promise<OfferView> {
     const seller = await this.options.storage.getIdentity(params.sellerIdentity);
     if (!seller) {
@@ -214,6 +256,10 @@ export class CampfireService {
     }
 
     const verified = verifyOfferAgainstOpReturn(params.offerJson, opReturnOut.lockingBytecode);
+    // Buy offers are built and paid for by the service, which applies the limits (see publishSponsoredOffer).
+    if (verified.document.side === 'buy' && !params.sponsored) {
+      throw new Error('Buy offers are published through the sponsored route, which Campfire pays for');
+    }
 
     // Check that the marker output pays the seller's receive/<markerReceiveIndex> address.
     const markerLockHex = binToHex(markerOut.lockingBytecode);
@@ -223,6 +269,11 @@ export class CampfireService {
     const markerPkhHex = markerLockHex.slice(6, 46);
     if (!verifyDerivedPayoutPkh(seller.receiveXpub, params.markerReceiveIndex, markerPkhHex)) {
       throw new Error('Offer marker output does not belong to the seller receive path at the stated index');
+    }
+
+    // Checked before broadcasting, so the publisher never pays for an offer the service then refuses to list.
+    if (this.nowSeconds() >= verified.document.expiresAt) {
+      throw new Error('Offer expiresAt is already in the past');
     }
 
     let offerTxid: string;
@@ -235,10 +286,6 @@ export class CampfireService {
     }
 
     const now = this.nowSeconds();
-    if (now >= verified.document.expiresAt) {
-      throw new Error('Offer expiresAt is already in the past');
-    }
-
     const stored: StoredOffer = {
       offerTxid,
       sellerIdentity: params.sellerIdentity,
@@ -250,11 +297,75 @@ export class CampfireService {
       markerAddress: pkhToCashAddress(markerPkhHex),
       status: 'Published',
       isDemo: this.isDemoTrade({ sellerIdentity: params.sellerIdentity }),
+      ...(params.sponsored ? { sponsored: true } : {}),
       createdAt: now,
       updatedAt: now,
     };
     await this.options.storage.saveOffer(stored);
     return this.toOfferView(stored);
+  }
+
+  // How much of the paid-publication allowance is used, for the screen that offers it and for the check itself.
+  async sponsorshipStatus(identity?: string): Promise<SponsorshipStatus> {
+    const now = this.nowSeconds();
+    const sponsored = (await this.options.storage.listOffers()).filter((o) => o.sponsored);
+    const recent = sponsored.filter((o) => o.createdAt > now - 86_400).sort((a, b) => a.createdAt - b.createdAt);
+    const limits = this.sponsorshipLimits;
+    const full = recent.length >= limits.dailyOffers;
+    return {
+      ...limits,
+      usedToday: recent.length,
+      remainingToday: Math.max(0, limits.dailyOffers - recent.length),
+      // The slot that frees up first belongs to the oldest publication still inside the 24 hours.
+      nextSlotAt: full ? recent[recent.length - limits.dailyOffers].createdAt + 86_400 : null,
+      openNow: identity
+        ? sponsored.filter((o) => o.sellerIdentity === identity && this.toOfferView(o).status === 'Published').length
+        : 0,
+    };
+  }
+
+  // Throws SponsorshipLimitError, or a plain Error for an offer that cannot be paid for, before anything is spent.
+  // The caller holds the lock that serialises paid publications, so two requests cannot both take the last slot.
+  async assertCanSponsor(identity: string, document: OfferDocument): Promise<void> {
+    if (document.side !== 'buy') {
+      throw new Error('Campfire only pays for buy offers');
+    }
+    const now = this.nowSeconds();
+    if (document.expiresAt <= now) {
+      throw new Error('Offer expiresAt is already in the past');
+    }
+    // The service pays only for offers it can serve: its own arbiter (which also issues the verdict when a payment
+    // window ends) and, for a market price, its own oracle and a pair it signs. Any other choice would leave a
+    // paid offer that cannot be taken or whose disputes cannot be settled.
+    if (document.arbiter.toLowerCase() !== this.arbiterPublicKeyHex) {
+      throw new Error('Offers that Campfire pays for use the Campfire arbiter');
+    }
+    if (document.price.type === 'floating') {
+      if (document.oracle?.toLowerCase() !== this.oraclePublicKeyHex.toLowerCase()) {
+        throw new Error('Offers that Campfire pays for use the Campfire price oracle');
+      }
+      const coin = document.asset === BCH_ASSET ? 'BCH' : document.asset.toLowerCase() === PUSD_CATEGORY ? 'PUSD' : null;
+      if (!coin || document.price.pair !== `${coin}/${document.fiat}`) {
+        throw new Error(`A market price for this offer must use the pair ${coin ?? 'BCH or PUSD'}/${document.fiat}`);
+      }
+      // Throws if the oracle does not sign this pair.
+      await this.options.oracle.createQuote(document.price.pair);
+    }
+    const maxExpirySec = this.sponsorshipLimits.maxExpirySec;
+    if (document.expiresAt - now > maxExpirySec) {
+      throw new Error(`Offers that Campfire pays for stay open ${Math.round(maxExpirySec / 86_400)} days at most`);
+    }
+    const status = await this.sponsorshipStatus(identity);
+    if (status.remainingToday <= 0) {
+      throw new SponsorshipLimitError(
+        `Today's free offers are used up. Campfire pays the network fee for ${status.dailyOffers} buy offers per day across all users. Please try again later.`,
+      );
+    }
+    if (status.openNow >= status.openOffersPerIdentity) {
+      throw new SponsorshipLimitError(
+        `You already have ${status.openOffersPerIdentity} open offers paid for by Campfire. Close one to publish another.`,
+      );
+    }
   }
 
   async closeOffer(params: {
@@ -424,6 +535,71 @@ export class CampfireService {
     }
   }
 
+  // Checks that a party's keys derive from the xpubs it registered, so nobody can name keys it does not control.
+  private async verifyParty(
+    role: 'buyer' | 'seller',
+    keys: { identity: string; pk: string; defiIndex: number; payoutPkh: string; receiveIndex: number; sessionPk: string },
+  ): Promise<void> {
+    const Role = role === 'buyer' ? 'Buyer' : 'Seller';
+    const record = await this.options.storage.getIdentity(keys.identity);
+    if (!record) {
+      throw new Error(`${Role} identity is not registered`);
+    }
+    if (!verifyDerivedPubkey(record.defiXpub, keys.defiIndex, keys.pk)) {
+      throw new Error(`${role}Pk does not match ${role} defi xpub at ${role}DefiIndex`);
+    }
+    if (!verifyDerivedPayoutPkh(record.receiveXpub, keys.receiveIndex, keys.payoutPkh)) {
+      throw new Error(`${role}PayoutPkh does not match ${role} receive xpub at ${role}ReceiveIndex`);
+    }
+    if (!isCompressedPubkeyHex(keys.sessionPk)) {
+      throw new Error(`Invalid ${role}SessionPk`);
+    }
+  }
+
+  // The open offer a trade is requested from, with the amount checked against its range.
+  private async offerToTake(offerTxid: string, side: 'sell' | 'buy', amount: string): Promise<OfferView> {
+    const offerView = await this.getOffer(offerTxid);
+    if (!offerView) {
+      throw new Error('Offer not found');
+    }
+    if (offerView.status !== 'Published') {
+      throw new Error(`Offer is not open (status: ${offerView.status})`);
+    }
+    if (offerView.document.side !== side) {
+      throw new Error(
+        side === 'sell'
+          ? 'This is a buy offer: a seller takes it, not a buyer'
+          : 'This is a sell offer: a buyer takes it, not a seller',
+      );
+    }
+    const amountBig = BigInt(amount);
+    if (amountBig < BigInt(offerView.document.min) || amountBig > BigInt(offerView.document.max)) {
+      throw new Error(`Requested amount ${amount} is outside offer range [${offerView.document.min}, ${offerView.document.max}]`);
+    }
+    return offerView;
+  }
+
+  // The price of the trade: signed quote and margin for a floating offer, the fixed price otherwise.
+  private async priceRequest(doc: OfferDocument, amount: string, now: number) {
+    if (doc.price.type === 'floating') {
+      const quote = await this.options.oracle.createQuote(doc.price.pair);
+      const marginBps = doc.price.marginBps;
+      return {
+        quote,
+        marginBps,
+        quoteExpiresAt: now + QUOTE_VALIDITY_SEC,
+        fiatAmount: computeFiatAmount({ amount, assetDecimals: doc.assetDecimals, unitPrice: quote.price, marginBps }),
+      };
+    }
+    return {
+      quote: undefined,
+      marginBps: undefined,
+      quoteExpiresAt: undefined,
+      fiatAmount: computeFiatAmount({ amount, assetDecimals: doc.assetDecimals, unitPrice: doc.price.value }),
+    };
+  }
+
+  // A buyer takes a sell offer: the trade starts with the buyer's keys and waits for the seller to accept.
   async requestTrade(params: {
     offerTxid: string;
     buyerIdentity: string;
@@ -434,63 +610,22 @@ export class CampfireService {
     buyerReceiveIndex: number;
     buyerSessionPk: string;
   }): Promise<StoredTrade> {
-    const offerView = await this.getOffer(params.offerTxid);
-    if (!offerView) {
-      throw new Error('Offer not found');
-    }
-    if (offerView.status !== 'Published') {
-      throw new Error(`Offer is not open (status: ${offerView.status})`);
-    }
-
-    const buyer = await this.options.storage.getIdentity(params.buyerIdentity);
-    if (!buyer) {
-      throw new Error('Buyer identity is not registered');
-    }
-
-    // Verify that buyerPk and buyerPayoutPkh derive from the buyer's registered xpubs.
-    if (!verifyDerivedPubkey(buyer.defiXpub, params.buyerDefiIndex, params.buyerPk)) {
-      throw new Error('buyerPk does not match buyer defi xpub at buyerDefiIndex');
-    }
-    if (!verifyDerivedPayoutPkh(buyer.receiveXpub, params.buyerReceiveIndex, params.buyerPayoutPkh)) {
-      throw new Error('buyerPayoutPkh does not match buyer receive xpub at buyerReceiveIndex');
-    }
-    if (!isCompressedPubkeyHex(params.buyerSessionPk)) {
-      throw new Error('Invalid buyerSessionPk');
-    }
-
-    const amountBig = BigInt(params.amount);
-    if (amountBig < BigInt(offerView.document.min) || amountBig > BigInt(offerView.document.max)) {
-      throw new Error(`Requested amount ${params.amount} is outside offer range [${offerView.document.min}, ${offerView.document.max}]`);
-    }
+    const offerView = await this.offerToTake(params.offerTxid, 'sell', params.amount);
+    await this.verifyParty('buyer', {
+      identity: params.buyerIdentity,
+      pk: params.buyerPk,
+      defiIndex: params.buyerDefiIndex,
+      payoutPkh: params.buyerPayoutPkh,
+      receiveIndex: params.buyerReceiveIndex,
+      sessionPk: params.buyerSessionPk,
+    });
 
     const now = this.nowSeconds();
     const doc = offerView.document;
-    let quote: StoredTrade['quote'];
-    let marginBps: number | undefined;
-    let quoteExpiresAt: number | undefined;
-    let fiatAmount: string;
-
-    if (doc.price.type === 'floating') {
-      quote = await this.options.oracle.createQuote(doc.price.pair);
-      marginBps = doc.price.marginBps;
-      quoteExpiresAt = now + QUOTE_VALIDITY_SEC;
-      fiatAmount = computeFiatAmount({
-        amount: params.amount,
-        assetDecimals: doc.assetDecimals,
-        unitPrice: quote.price,
-        marginBps,
-      });
-    } else {
-      fiatAmount = computeFiatAmount({
-        amount: params.amount,
-        assetDecimals: doc.assetDecimals,
-        unitPrice: doc.price.value,
-      });
-    }
-
     const trade: StoredTrade = {
       id: binToHex(randomBytes(16)),
       offerTxid: offerView.offerTxid,
+      side: 'sell',
       sellerIdentity: offerView.sellerIdentity,
       buyerIdentity: params.buyerIdentity,
       status: 'Requested',
@@ -498,10 +633,7 @@ export class CampfireService {
       assetDecimals: doc.assetDecimals,
       amount: params.amount,
       fiat: doc.fiat,
-      fiatAmount,
-      quote,
-      marginBps,
-      quoteExpiresAt,
+      ...(await this.priceRequest(doc, params.amount, now)),
       buyerPk: params.buyerPk.toLowerCase(),
       buyerDefiIndex: params.buyerDefiIndex,
       buyerPayoutPkh: params.buyerPayoutPkh.toLowerCase(),
@@ -509,7 +641,7 @@ export class CampfireService {
       buyerSessionPk: params.buyerSessionPk.toLowerCase(),
       arbiterPk: doc.arbiter.toLowerCase(),
       oraclePk: doc.oracle?.toLowerCase(),
-      isDemo: offerView.isDemo,
+      isDemo: this.isDemoTrade({ sellerIdentity: offerView.sellerIdentity }),
       createdAt: now,
       updatedAt: now,
     };
@@ -518,6 +650,135 @@ export class CampfireService {
     return this.sanitizeTrade(trade, params.buyerIdentity);
   }
 
+  // A seller takes a buy offer and chooses the amount. The trade starts with the seller's keys; the buyer who
+  // published the offer accepts with their own, and only then is there an escrow to deposit into.
+  async requestBuyOfferTrade(params: {
+    offerTxid: string;
+    sellerIdentity: string;
+    amount: string;
+    sellerPk: string;
+    sellerDefiIndex: number;
+    sellerPayoutPkh: string;
+    sellerReceiveIndex: number;
+    sellerSessionPk: string;
+    // Only for the service's own demo seller, which derives its session key from the record id.
+    recordId?: string;
+  }): Promise<StoredTrade> {
+    const offerView = await this.offerToTake(params.offerTxid, 'buy', params.amount);
+    await this.verifyParty('seller', {
+      identity: params.sellerIdentity,
+      pk: params.sellerPk,
+      defiIndex: params.sellerDefiIndex,
+      payoutPkh: params.sellerPayoutPkh,
+      receiveIndex: params.sellerReceiveIndex,
+      sessionPk: params.sellerSessionPk,
+    });
+
+    const now = this.nowSeconds();
+    const doc = offerView.document;
+    const trade: StoredTrade = {
+      id: params.recordId ?? binToHex(randomBytes(16)),
+      offerTxid: offerView.offerTxid,
+      side: 'buy',
+      // The publisher of a buy offer is the buyer.
+      buyerIdentity: offerView.sellerIdentity,
+      sellerIdentity: params.sellerIdentity,
+      status: 'Requested',
+      asset: doc.asset,
+      assetDecimals: doc.assetDecimals,
+      amount: params.amount,
+      fiat: doc.fiat,
+      ...(await this.priceRequest(doc, params.amount, now)),
+      sellerPk: params.sellerPk.toLowerCase(),
+      sellerDefiIndex: params.sellerDefiIndex,
+      sellerPayoutPkh: params.sellerPayoutPkh.toLowerCase(),
+      sellerReceiveIndex: params.sellerReceiveIndex,
+      sellerSessionPk: params.sellerSessionPk.toLowerCase(),
+      arbiterPk: doc.arbiter.toLowerCase(),
+      oraclePk: doc.oracle?.toLowerCase(),
+      isDemo: this.isDemoTrade({ sellerIdentity: params.sellerIdentity }),
+      createdAt: now,
+      updatedAt: now,
+    };
+
+    await this.options.storage.saveTrade(trade);
+    return this.sanitizeTrade(trade, params.sellerIdentity);
+  }
+
+  // Fixes the terms once both sets of keys are known, and so the trade id and the escrow address. The same
+  // code serves both kinds of offer, so what is hashed cannot drift between them.
+  private async settleTerms(
+    trade: StoredTrade,
+    seller: { pk: string; defiIndex: number; payoutPkh: string; receiveIndex: number; sessionPk: string },
+    buyer: { pk: string; defiIndex: number; payoutPkh: string; receiveIndex: number; sessionPk: string },
+    options: { refundTime?: number; nonce?: string; encryptedPaymentDetails?: string },
+  ): Promise<StoredTrade> {
+    const now = this.nowSeconds();
+    // The party who accepts may set refundTime. Too soon and `refund` would hand the seller the coins back after the
+    // buyer paid; too late and the seller's coins stay locked for years if the arbiter disappears.
+    if (
+      options.refundTime !== undefined &&
+      (!Number.isInteger(options.refundTime) ||
+        options.refundTime < now + MIN_REFUND_DELAY_SEC ||
+        options.refundTime > now + MAX_REFUND_DELAY_SEC)
+    ) {
+      throw new Error('refundTime must be between 7 and 30 days after acceptance');
+    }
+    const refundTime = options.refundTime ?? now + DEFAULT_REFUND_DELAY_SEC;
+    const nonce = options.nonce ?? binToHex(randomBytes(8));
+
+    const terms: TradeTerms = {
+      v: 1,
+      offerTxid: trade.offerTxid,
+      asset: trade.asset,
+      amount: trade.amount,
+      fiat: trade.fiat,
+      fiatAmount: trade.fiatAmount,
+      ...(trade.quote ? { quote: trade.quote, marginBps: trade.marginBps, oraclePk: trade.oraclePk } : {}),
+      sellerPk: seller.pk.toLowerCase(),
+      buyerPk: buyer.pk.toLowerCase(),
+      arbiterPk: trade.arbiterPk,
+      sellerPayoutPkh: seller.payoutPkh.toLowerCase(),
+      buyerPayoutPkh: buyer.payoutPkh.toLowerCase(),
+      sellerSessionPk: seller.sessionPk.toLowerCase(),
+      buyerSessionPk: buyer.sessionPk.toLowerCase(),
+      refundTime,
+      nonce,
+    };
+
+    const termsJson = JSON.stringify(terms);
+    const tradeId = binToHex(computeTradeId(termsJson)).toLowerCase();
+    const contract = createEscrowContract(terms, tradeId, this.options.provider);
+
+    trade.tradeId = tradeId;
+    trade.status = 'Accepted';
+    trade.sellerPk = terms.sellerPk;
+    trade.sellerDefiIndex = seller.defiIndex;
+    trade.sellerPayoutPkh = terms.sellerPayoutPkh;
+    trade.sellerReceiveIndex = seller.receiveIndex;
+    trade.sellerSessionPk = terms.sellerSessionPk;
+    trade.buyerPk = terms.buyerPk;
+    trade.buyerDefiIndex = buyer.defiIndex;
+    trade.buyerPayoutPkh = terms.buyerPayoutPkh;
+    trade.buyerReceiveIndex = buyer.receiveIndex;
+    trade.buyerSessionPk = terms.buyerSessionPk;
+    trade.refundTime = refundTime;
+    trade.nonce = nonce;
+    trade.terms = terms;
+    trade.termsJson = termsJson;
+    trade.escrowAddress = contract.address;
+    trade.escrowTokenAddress = contract.tokenAddress;
+    if (options.encryptedPaymentDetails) {
+      trade.encryptedPaymentDetails = options.encryptedPaymentDetails;
+    }
+    trade.fundingDeadline = now + FUNDING_WINDOW_SEC;
+    trade.updatedAt = now;
+
+    await this.options.storage.saveTrade(trade);
+    return trade;
+  }
+
+  // The seller of a sell offer accepts a buyer's request, with the payment details for that buyer.
   async acceptTrade(params: {
     tradeRecordId: string;
     sellerIdentity: string;
@@ -538,84 +799,98 @@ export class CampfireService {
     if (trade.status !== 'Requested') {
       throw new Error(`Trade cannot be accepted in state "${trade.status}"`);
     }
+    if (trade.side === 'buy') {
+      throw new Error('The request on a buy offer is accepted by the buyer who published it');
+    }
     if (trade.sellerIdentity !== params.sellerIdentity) {
       throw new Error('Only the offer seller can accept this trade');
     }
     if (!params.encryptedPaymentDetails || params.encryptedPaymentDetails.trim().length === 0) {
       throw new Error('Seller must provide encryptedPaymentDetails on acceptance');
     }
-
-    const seller = await this.options.storage.getIdentity(params.sellerIdentity);
-    if (!seller) {
-      throw new Error('Seller identity is not registered');
-    }
-    if (!verifyDerivedPubkey(seller.defiXpub, params.sellerDefiIndex, params.sellerPk)) {
-      throw new Error('sellerPk does not match seller defi xpub at sellerDefiIndex');
-    }
-    if (!verifyDerivedPayoutPkh(seller.receiveXpub, params.sellerReceiveIndex, params.sellerPayoutPkh)) {
-      throw new Error('sellerPayoutPkh does not match seller receive xpub at sellerReceiveIndex');
-    }
-    if (!isCompressedPubkeyHex(params.sellerSessionPk)) {
-      throw new Error('Invalid sellerSessionPk');
+    await this.verifyParty('seller', {
+      identity: params.sellerIdentity,
+      pk: params.sellerPk,
+      defiIndex: params.sellerDefiIndex,
+      payoutPkh: params.sellerPayoutPkh,
+      receiveIndex: params.sellerReceiveIndex,
+      sessionPk: params.sellerSessionPk,
+    });
+    if (!trade.buyerPk || trade.buyerDefiIndex === undefined || !trade.buyerPayoutPkh || trade.buyerReceiveIndex === undefined || !trade.buyerSessionPk) {
+      throw new Error('The buyer keys of this trade are missing');
     }
 
-    const now = this.nowSeconds();
-    const refundTime = params.refundTime ?? now + DEFAULT_REFUND_DELAY_SEC;
-    const nonce = params.nonce ?? binToHex(randomBytes(8));
-
-    const terms: TradeTerms = {
-      v: 1,
-      offerTxid: trade.offerTxid,
-      asset: trade.asset,
-      amount: trade.amount,
-      fiat: trade.fiat,
-      fiatAmount: trade.fiatAmount,
-      ...(trade.quote ? { quote: trade.quote, marginBps: trade.marginBps, oraclePk: trade.oraclePk } : {}),
-      sellerPk: params.sellerPk.toLowerCase(),
-      buyerPk: trade.buyerPk,
-      arbiterPk: trade.arbiterPk,
-      sellerPayoutPkh: params.sellerPayoutPkh.toLowerCase(),
-      buyerPayoutPkh: trade.buyerPayoutPkh,
-      sellerSessionPk: params.sellerSessionPk.toLowerCase(),
-      buyerSessionPk: trade.buyerSessionPk,
-      refundTime,
-      nonce,
-    };
-
-    const termsJson = JSON.stringify(terms);
-    const tradeId = binToHex(computeTradeId(termsJson)).toLowerCase();
-    const contract = createEscrowContract(terms, tradeId, this.options.provider);
-
-    trade.tradeId = tradeId;
-    trade.status = 'Accepted';
-    trade.sellerPk = terms.sellerPk;
-    trade.sellerDefiIndex = params.sellerDefiIndex;
-    trade.sellerPayoutPkh = terms.sellerPayoutPkh;
-    trade.sellerReceiveIndex = params.sellerReceiveIndex;
-    trade.sellerSessionPk = terms.sellerSessionPk;
-    trade.refundTime = refundTime;
-    trade.nonce = nonce;
-    trade.terms = terms;
-    trade.termsJson = termsJson;
-    trade.escrowAddress = contract.address;
-    trade.escrowTokenAddress = contract.tokenAddress;
-    trade.encryptedPaymentDetails = params.encryptedPaymentDetails;
-    trade.fundingDeadline = now + FUNDING_WINDOW_SEC;
-    trade.updatedAt = now;
-
-    await this.options.storage.saveTrade(trade);
-    return this.sanitizeTrade(trade, params.sellerIdentity);
+    const settled = await this.settleTerms(
+      trade,
+      { pk: params.sellerPk, defiIndex: params.sellerDefiIndex, payoutPkh: params.sellerPayoutPkh, receiveIndex: params.sellerReceiveIndex, sessionPk: params.sellerSessionPk },
+      { pk: trade.buyerPk, defiIndex: trade.buyerDefiIndex, payoutPkh: trade.buyerPayoutPkh, receiveIndex: trade.buyerReceiveIndex, sessionPk: trade.buyerSessionPk },
+      { refundTime: params.refundTime, nonce: params.nonce, encryptedPaymentDetails: params.encryptedPaymentDetails },
+    );
+    return this.sanitizeTrade(settled, params.sellerIdentity);
   }
 
+  // The buyer who published a buy offer accepts a seller's request with their own keys. The payment details
+  // come later, with the seller's deposit, because only then does the seller know who they are paying.
+  async acceptBuyOfferTrade(params: {
+    tradeRecordId: string;
+    buyerIdentity: string;
+    buyerPk: string;
+    buyerDefiIndex: number;
+    buyerPayoutPkh: string;
+    buyerReceiveIndex: number;
+    buyerSessionPk: string;
+    refundTime?: number;
+    nonce?: string;
+  }): Promise<StoredTrade> {
+    let trade = await this.options.storage.getTrade(params.tradeRecordId);
+    if (!trade) {
+      throw new Error('Trade not found');
+    }
+    trade = await this.evaluateDeadlines(trade);
+    if (trade.status !== 'Requested') {
+      throw new Error(`Trade cannot be accepted in state "${trade.status}"`);
+    }
+    if (trade.side !== 'buy') {
+      throw new Error('The request on a sell offer is accepted by the seller who published it');
+    }
+    if (trade.buyerIdentity !== params.buyerIdentity) {
+      throw new Error('Only the buyer who published this offer can accept the request');
+    }
+    await this.verifyParty('buyer', {
+      identity: params.buyerIdentity,
+      pk: params.buyerPk,
+      defiIndex: params.buyerDefiIndex,
+      payoutPkh: params.buyerPayoutPkh,
+      receiveIndex: params.buyerReceiveIndex,
+      sessionPk: params.buyerSessionPk,
+    });
+    if (!trade.sellerPk || trade.sellerDefiIndex === undefined || !trade.sellerPayoutPkh || trade.sellerReceiveIndex === undefined || !trade.sellerSessionPk) {
+      throw new Error('The seller keys of this trade are missing');
+    }
+
+    const settled = await this.settleTerms(
+      trade,
+      { pk: trade.sellerPk, defiIndex: trade.sellerDefiIndex, payoutPkh: trade.sellerPayoutPkh, receiveIndex: trade.sellerReceiveIndex, sessionPk: trade.sellerSessionPk },
+      { pk: params.buyerPk, defiIndex: params.buyerDefiIndex, payoutPkh: params.buyerPayoutPkh, receiveIndex: params.buyerReceiveIndex, sessionPk: params.buyerSessionPk },
+      { refundTime: params.refundTime, nonce: params.nonce },
+    );
+    return this.sanitizeTrade(settled, params.buyerIdentity);
+  }
+
+  // The publisher of the offer turns a request down: the seller on a sell offer, the buyer on a buy offer.
   async declineTrade(params: {
     tradeRecordId: string;
-    sellerIdentity: string;
+    identity: string;
   }): Promise<StoredTrade> {
     const trade = await this.options.storage.getTrade(params.tradeRecordId);
     if (!trade) {
       throw new Error('Trade not found');
     }
-    if (trade.sellerIdentity !== params.sellerIdentity) {
+    if (trade.side === 'buy') {
+      if (trade.buyerIdentity !== params.identity) {
+        throw new Error('Only the buyer who published this offer can decline this trade');
+      }
+    } else if (trade.sellerIdentity !== params.identity) {
       throw new Error('Only the seller can decline this trade');
     }
     if (trade.status !== 'Requested') {
@@ -624,7 +899,7 @@ export class CampfireService {
     trade.status = 'Dropped';
     trade.updatedAt = this.nowSeconds();
     await this.options.storage.saveTrade(trade);
-    return this.sanitizeTrade(trade, params.sellerIdentity);
+    return this.sanitizeTrade(trade, params.identity);
   }
 
   // Stores the signed funding transaction before it is broadcast, so any later attempt (from this
@@ -646,6 +921,10 @@ export class CampfireService {
     idOrTradeId: string;
     fundingTxHex?: string;
     confirmations?: number;
+    // Buy offers: the seller sends the payment details, encrypted for the buyer and signed with the seller's
+    // session key, along with the deposit.
+    encryptedPaymentDetails?: string;
+    paymentDetailsSignature?: string;
   }): Promise<StoredTrade> {
     let trade = await this.options.storage.getTrade(params.idOrTradeId);
     if (!trade) {
@@ -657,6 +936,29 @@ export class CampfireService {
     }
     if (!trade.terms || !trade.tradeId) {
       throw new Error('Trade terms are incomplete');
+    }
+
+    // The payment details of a buy offer travel with the deposit. Every check on them comes before anything
+    // is broadcast, so a rejected request never leaves a deposit on the network without details to go with it.
+    // Identities are not proven (section 1), and the buyer can encrypt with the same key as the seller, so only the
+    // signature by the seller's session key, committed in the terms, shows that the seller wrote them. Without it the
+    // buyer could swap in an account of their own and show it to an arbiter as the one they paid.
+    const details = params.encryptedPaymentDetails?.trim();
+    if (details) {
+      if (trade.side !== 'buy') {
+        throw new Error('The payment details of a sell offer are sent when the seller accepts');
+      }
+      if (
+        !trade.sellerSessionPk ||
+        !params.paymentDetailsSignature ||
+        !verifyPaymentDetailsSignature(trade.sellerSessionPk, trade.tradeId, details, params.paymentDetailsSignature)
+      ) {
+        throw new Error("The payment details must be signed with the seller's session key");
+      }
+    }
+    const needsDetails = trade.side === 'buy' && trade.status === 'Accepted' && !trade.encryptedPaymentDetails && !details;
+    if (needsDetails && params.fundingTxHex) {
+      throw new Error('The seller must send the encrypted payment details with the deposit');
     }
 
     if (params.fundingTxHex) {
@@ -678,11 +980,20 @@ export class CampfireService {
     if (!matchingUtxo) {
       throw new Error('No UTXO at the escrow address matches the required value and token terms');
     }
+    if (needsDetails) {
+      // The deposit is already on the network (it was not sent through this request): the seller sends the
+      // details with a second call, and the trade stays Accepted until they arrive.
+      throw new Error('The seller must send the encrypted payment details with the deposit');
+    }
 
     const offer = await this.options.storage.getOffer(trade.offerTxid);
     const paymentWindowSec = offer?.document.paymentWindowSec ?? 3600;
     const now = this.nowSeconds();
 
+    if (details) {
+      trade.encryptedPaymentDetails = details;
+      trade.paymentDetailsSignature = params.paymentDetailsSignature!.toLowerCase();
+    }
     if (trade.status === 'Accepted') {
       trade.status = 'Funded';
       trade.fundingTxid = matchingUtxo.txid;
@@ -867,7 +1178,7 @@ export class CampfireService {
         contract,
         utxo: escrowUtxo,
         sellerPayoutPkh: trade.terms.sellerPayoutPkh,
-        buyerDefiIndex: trade.buyerDefiIndex,
+        buyerDefiIndex: trade.buyerDefiIndex ?? 0,
       });
       const check = verifySignedContractSpend(params.signedTxHex, expected.sourceOutputs);
       if (!check.valid) {

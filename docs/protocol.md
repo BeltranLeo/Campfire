@@ -1,6 +1,6 @@
 # Campfire protocol
 
-Status: **approved design; escrow contract and demo seller implemented** · Format version: `1` · Last updated: 2026-11-16
+Status: **approved design; escrow contract and demo seller implemented** · Format version: `1` · Last updated: 2026-11-17
 
 Campfire is a non-custodial peer-to-peer exchange of BCH and CashTokens (PUSD first) for fiat money. This document specifies the offer format, the trade process and the escrow contract.
 
@@ -10,11 +10,11 @@ Everything described here targets Bitcoin Cash **mainnet**. The escrow contract 
 
 | Actor | Role | Keys | Can move escrowed funds? |
 | --- | --- | --- | --- |
-| **Seller** | Publishes an offer, locks BCH or tokens in escrow, receives fiat off-chain, releases. | Wallet keys (via WizardConnect) | Only to the buyer (`release`) |
-| **Buyer** | Takes an offer, pays fiat off-chain, receives the escrowed funds. | Wallet keys (via WizardConnect) | Only back to the seller (`cancel`) |
+| **Seller** | Publishes a sell offer or takes a buy offer, locks BCH or tokens in escrow, receives fiat off-chain, releases. | Wallet keys (via WizardConnect) | Only to the buyer (`release`) |
+| **Buyer** | Takes a sell offer or publishes a buy offer, pays fiat off-chain, receives the escrowed funds. | Wallet keys (via WizardConnect) | Only back to the seller (`cancel`) |
 | **Arbiter** | Decides disputes. Signs a verdict, never a transaction. Named in the offer by public key. | One signing key | Only by choosing buyer or seller (`arbitrate`) |
 | **Price oracle** | Signs exchange-rate quotes used by floating-price offers. Named in the offer by public key. | One signing key | No |
-| **Service** | Web interface, API and database. Stores offers and trades created through the interface, relays chat, holds unsigned pending transactions. | None that control user funds | No |
+| **Service** | Web interface, API and database. Stores offers and trades created through the interface, relays chat, holds unsigned pending transactions. Publishes buy offers on the buyer's behalf and pays their network fee (section 2.1). | None that control user funds | No |
 
 For the hackathon the service also acts as the default arbiter and the default price oracle. These are separate roles identified by separate public keys, so a future offer can name any other arbiter or oracle.
 
@@ -48,7 +48,10 @@ A buyer starts with an empty wallet. Nothing in the protocol requires the buyer 
 
 - taking an offer, marking a trade as paid and opening a dispute are off-chain;
 - `cancel` is the only transaction a buyer signs, and its miner fee comes from the escrow's fee budget (section 5), not from the buyer;
-- receiving the funds requires no action from the buyer's wallet.
+- receiving the funds requires no action from the buyer's wallet;
+- publishing a buy offer needs no signature and no BCH either: the service builds the transaction and pays its fee (section 2.1).
+
+Whoever sells is always the one who locks the funds, whichever side published the offer. The rule for both kinds of offer is: **the party that published the offer is the one who accepts a request, and the seller is always the one who deposits.**
 
 ## 2. Lifecycle
 
@@ -69,15 +72,28 @@ stateDiagram-v2
 | Published → Closed | Seller | On-chain transaction spending the marker output | Any time |
 | Published → Expired | Nobody | None; clients compare `expiresAt` with the current time | `expiresAt` |
 
-Publishing an offer locks no funds. An offer with a `min`–`max` range can be taken many times, each time for an amount the buyer chooses within the range, until the seller closes it.
+Publishing an offer locks no funds. An offer with a `min`–`max` range can be taken many times, each time for an amount the taker chooses within the range, until the publisher closes it.
+
+**Buy offers.** A buyer who publishes an offer signs nothing and owns no BCH. The buyer's client sends the offer document and the index of a fresh `receive` address (`POST /api/offers/sponsored`); the service builds the usual offer transaction, pays its fee from its own wallet and broadcasts it. The 1,000-sat marker output goes to the buyer's `receive` address, not to the service, so the buyer closes the offer with the same transaction as any publisher, without depending on the service. The service stores the publisher in the offer record's `sellerIdentity` field, a name that dates from when only sell offers existed.
+
+The service limits what it pays for. Identities are not proven (section 1), so only the daily limit across everyone bounds its spending; the limit per identity is a courtesy that a fresh wallet gets around.
+
+| Limit | Value | When it is reached |
+| --- | --- | --- |
+| Paid publications in any 24 hours, across all identities | 100 | `429` |
+| Paid offers one identity may have open at once | 3 | `429` |
+| Longest expiry of a paid offer | 7 days | `400` |
+| The service wallet cannot pay | — | `429` |
+
+`GET /api/offers/sponsored?identity=…` returns the limits, what is used and when the next slot frees up, so the interface states the real numbers. The service pays only for offers it can serve: they must name the Campfire arbiter, which also issues the verdict when a payment window ends, and a market price must use the Campfire oracle with the pair of the offer's coin and currency (`BCH/ARS`, `PUSD/USD`…) that the oracle signs. The ordinary `POST /api/offers` accepts sell offers only: a buy offer signed by its own buyer would skip these limits.
 
 ### 2.2 Trade
 
 ```mermaid
 stateDiagram-v2
-    [*] --> Requested: buyer takes offer
-    Requested --> Accepted: seller accepts
-    Requested --> Dropped: seller declines or quote expires
+    [*] --> Requested: taker requests the offer
+    Requested --> Accepted: publisher accepts
+    Requested --> Dropped: publisher declines or quote expires
     Accepted --> Funded: seller funds escrow
     Accepted --> Dropped: funding window ends
     Funded --> Paid: buyer marks fiat as sent
@@ -104,16 +120,33 @@ stateDiagram-v2
 
 | Transition | Triggered by | Operation | Deadline |
 | --- | --- | --- | --- |
-| → Requested | Buyer | Off-chain: buyer sends amount, signing key, payout address and session key. For floating offers the oracle issues a signed quote. | Offer must be Published |
-| Requested → Accepted | Seller | Off-chain: seller adds signing key, payout address and session key. The trade terms are now complete and `tradeId` is fixed (section 3.3). | Quote validity: 10 min |
-| Accepted → Funded | Seller | **On-chain:** wallet pays the escrow address. | Funding window: 30 min |
+| → Requested | Taker: the buyer on a sell offer, the seller on a buy offer | Off-chain: the taker sends amount, signing key, payout address and session key. For floating offers the oracle issues a signed quote. | Offer must be Published |
+| Requested → Accepted | Publisher: the seller on a sell offer, the buyer on a buy offer | Off-chain: the publisher adds signing key, payout address and session key (and, on a sell offer, the encrypted payment details). The trade terms are now complete and `tradeId` is fixed (section 3.3). | Quote validity: 10 min |
+| Accepted → Funded | Seller | **On-chain:** wallet pays the escrow address. On a buy offer the encrypted payment details go with the deposit (section 6). | Funding window: 30 min |
 | Funded → Paid | Buyer | Off-chain: buyer marks the fiat payment as sent. | Payment window from the offer (default 60 min) |
 | Paid → Released | Seller | **On-chain:** `release`, signed by the seller, pays the buyer. | Before `refundTime` |
 | Funded/Paid → Cancelled | Buyer | **On-chain:** `cancel`, signed by the buyer, pays the seller. | Before `refundTime` |
 | Funded → ResolvedSeller | Arbiter | Off-chain verdict for the seller, issued automatically when the payment window ends and the buyer has not marked the trade as paid. **On-chain:** `arbitrate`. | End of payment window |
 | → Disputed | Buyer or seller | Off-chain: the party opens a dispute and hands the chat key to the arbiter. | Any time after Funded |
 | Disputed → Resolved* | Arbiter | Off-chain signed verdict. **On-chain:** `arbitrate`, broadcast by anyone. | Before `refundTime` |
-| → Refunded | Anyone | **On-chain:** `refund` pays the seller. No signature needed. | From `refundTime` (acceptance + 14 days) |
+| → Refunded | Anyone | **On-chain:** `refund` pays the seller. No signature needed. | From `refundTime` (acceptance + 14 days by default; the party who accepts may choose between 7 and 30 days) |
+
+### Buy offers
+
+The states, the escrow contract, the `tradeId` and the windows are the same. Only who does each step changes:
+
+| Step | Sell offer | Buy offer | Signs |
+| --- | --- | --- | --- |
+| Publish | Seller | Buyer; the service builds it and pays the fee | Sell yes, buy no |
+| Take → `Requested` | Buyer chooses the amount | Seller chooses the amount | No |
+| Accept → `Accepted` | Seller, with payment details | Buyer, with their keys only | No |
+| Deposit → `Funded` | Seller | Seller, who now sends the payment details | Yes |
+| Pay → `Paid` | Buyer | Buyer | No |
+| Release → `Released` | Seller | Seller | Yes |
+
+The request on a buy offer already carries the seller's keys, so a `Requested` trade has its `sellerIdentity` and its `buyerIdentity` (the publisher) from the start, and each finds it under their own identity. The trade record keeps the `side` of the offer it came from; records without one are sell trades. The publisher can decline a request (`POST /api/trades/:id/decline`); the taker cannot accept or decline it.
+
+The buyer has to accept within the 10 minutes of the quote, or the request lapses and the seller must take the offer again. This is an accepted risk for the hackathon: a notification, or a longer window, would remove it.
 
 States before Funded exist only in the service database. From Funded onward, the escrow UTXO is the source of truth and the service state is a convenience.
 
@@ -178,7 +211,7 @@ The JSON document carries everything that does not need to be on-chain. Its byte
 | Field | Type | Notes |
 | --- | --- | --- |
 | `v` | integer | Format version. Must equal the on-chain version. |
-| `side` | string | Only `"sell"` in version 1. Reserved for buy offers. |
+| `side` | string | `"sell"`: the publisher sells and deposits. `"buy"`: the publisher buys and a seller takes the offer. The on-chain record is the same for both. |
 | `asset` | string | `"BCH"` or a 64-character token category ID in hex. |
 | `assetDecimals` | integer | 8 for BCH, 2 for PUSD. |
 | `fiat` | string | ISO 4217 currency code. |
@@ -341,7 +374,9 @@ The same contract handles BCH and any CashToken, because the payout rule copies 
 
 - Each party generates a session key pair in the browser when the trade starts. Both public keys are part of the trade terms, so they are committed by `tradeId`.
 - The shared trade key is derived with ECDH from the two session keys and used with an authenticated symmetric cipher (AES-256-GCM).
-- On acceptance, the seller's client encrypts the payment details for this trade and uploads the ciphertext. The service releases it to the buyer when it sees the funding transaction. Payment details are entered per trade and never appear in an offer.
+- On a sell offer, the seller's client encrypts the payment details for this trade when accepting and uploads the ciphertext. The service releases it to the buyer when it sees the funding transaction. Payment details are entered per trade and never appear in an offer.
+- On a buy offer the seller does not know who they are paying until the buyer accepts and their session key becomes part of the terms. The seller therefore sends the ciphertext **with the deposit** (`POST /api/trades/:id/funding`, with `encryptedPaymentDetails` and `paymentDetailsSignature`). The service refuses the deposit without them, before broadcasting anything, so a rejected request never leaves a deposit on the network without details.
+- The buyer can derive the same ECDH key as the seller, so a ciphertext alone does not show who wrote it: a buyer could encrypt an account of their own and later show it to an arbiter as the one they paid. On a buy offer the seller therefore signs the ciphertext with their session key: a Schnorr signature over `SHA-256("CMPF-PAYMENT-DETAILS-SIG-v1:" ‖ tradeId in hex ‖ ":" ‖ ciphertext)`. The session key is committed by `tradeId`, so the service, the buyer and the arbiter can each check the signature. The service stores it next to the ciphertext and accepts a replacement only with a new valid signature.
 - The service relays and stores ciphertext only. It can read a chat only after a party opens a dispute.
 
 ## 7. Sequence diagrams
@@ -419,6 +454,7 @@ Goal: a judge alone completes a real trade on mainnet in a few minutes, from the
   - *Cancel:* the judge cancels and signs; the funds go back to the bot.
   - *Expiry:* demo offers use a 5-minute payment window; if the judge does nothing, the arbiter verdict returns the funds to the bot.
   - *Dispute:* the judge opens a dispute and may then act as arbiter in a demo console that signs the verdict with the service arbiter key. This console only works for trades against the bot.
+- **Buy offers:** a judge with one wallet can also publish a buy offer (the service pays the fee) that names `simulated` among its payment methods. The bot then takes it at once, for the offer's minimum or the bot's own minimum if higher, and only if the amount fits the bot's range and the oracle can price the currency. The judge accepts the request, the bot deposits a real escrow with simulated payment details, and the rest is as above. Offers that do not name `simulated` are left to real sellers, so a real buyer is never handed a simulated trade. The bot takes an offer once, when it is published: if the judge misses the 10-minute quote, they publish again. These trades count against the bot's limits below.
 - **Offers:** the bot sells BCH and PUSD at a floating USD price from the oracle, with no margin, and uses `simulated` as its payment method.
 - **Limits:** at most 20,000 sats or 0.10 PUSD per trade, at most 2 unfinished trades at a time and at most 10 trades funded per day, counted across all visitors. Limits per wallet would not help: a new wallet is a new identity (section 1).
 - **Arbiter access:** the service arbiter key is the default arbiter of every offer, so its views and verdicts require an admin token. The demo console is the only exception: anyone may decide a disputed trade whose seller is the bot.
@@ -431,7 +467,7 @@ Two wallets (or two people) can also trade with each other through the same inte
 - Chain-scanning indexer. The service records only offers and trades created through its own interface. The on-chain format already allows any indexer to rebuild the offer list.
 - Pinning offer documents to public IPFS.
 - Recovery of in-progress trades by a third-party indexer.
-- Buy offers.
+- Notifying a buyer that a seller has taken their offer, or a longer window to accept it.
 - Service or arbiter fees.
 - Buyer deposit against malicious takes.
 - Split verdicts (the arbiter can only choose one party).

@@ -11,6 +11,7 @@ import { toBytes } from './keys.js';
 
 const TRADE_KEY_DOMAIN = 'CMPF-TRADE-KEY-v1';
 const PAYMENT_KEY_DOMAIN = 'CMPF-PAYMENT-DETAILS-v1';
+const PAYMENT_SIG_DOMAIN = 'CMPF-PAYMENT-DETAILS-SIG-v1';
 const IV_BYTES = 12;
 
 export interface SessionKeyPair {
@@ -148,4 +149,46 @@ export async function decryptPaymentDetails(
 ): Promise<string> {
   const key = derivePaymentDetailsKey(buyerSessionPrivateKey, sellerSessionPublicKey);
   return decryptWithKey(key, payload);
+}
+
+// The buyer can compute the same ECDH key as the seller, so encryption alone does not show who wrote the payment
+// details. The seller therefore also signs the ciphertext with their session key, which is committed in the trade
+// terms: the service, the buyer and an arbiter can all check that the details came from the seller.
+function paymentDetailsMessageHash(tradeId: Uint8Array | string, ciphertext: string): Uint8Array {
+  const id = toBytes(tradeId, 'tradeId');
+  if (id.length !== 32) {
+    throw new Error(`Expected 32-byte tradeId, got ${id.length} bytes`);
+  }
+  return sha256.hash(utf8ToBin(`${PAYMENT_SIG_DOMAIN}:${binToHex(id)}:${ciphertext}`));
+}
+
+export function signPaymentDetails(
+  sellerSessionPrivateKey: Uint8Array | string,
+  tradeId: Uint8Array | string,
+  ciphertext: string,
+): string {
+  const sig = secp256k1.signMessageHashSchnorr(
+    toBytes(sellerSessionPrivateKey, 'sellerSessionPrivateKey'),
+    paymentDetailsMessageHash(tradeId, ciphertext),
+  );
+  if (typeof sig === 'string') {
+    throw new Error(`Failed to sign payment details: ${sig}`);
+  }
+  return binToHex(sig);
+}
+
+export function verifyPaymentDetailsSignature(
+  sellerSessionPublicKey: Uint8Array | string,
+  tradeId: Uint8Array | string,
+  ciphertext: string,
+  signature: Uint8Array | string,
+): boolean {
+  try {
+    const sig = toBytes(signature, 'paymentDetailsSignature');
+    const pk = toBytes(sellerSessionPublicKey, 'sellerSessionPublicKey');
+    if (sig.length !== 64 || pk.length !== 33 || !secp256k1.validatePublicKey(pk)) return false;
+    return secp256k1.verifySignatureSchnorr(sig, pk, paymentDetailsMessageHash(tradeId, ciphertext));
+  } catch {
+    return false;
+  }
 }

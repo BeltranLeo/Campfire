@@ -41,9 +41,13 @@ export type OfferPrice =
   | { type: 'fixed'; value: string }
   | { type: 'floating'; pair: string; marginBps: number };
 
+// `sell`: the publisher sells and will lock the coins. `buy`: the publisher buys and a seller takes the offer.
+// Whoever sells is always the one who deposits into the escrow, whichever side published (section 2.2).
+export type OfferSide = 'sell' | 'buy';
+
 export interface OfferDocument {
   v: 1;
-  side: 'sell';
+  side: OfferSide;
   asset: string;
   assetDecimals: number;
   fiat: string;
@@ -82,7 +86,7 @@ export function validateOfferDocument(doc: OfferDocument): void {
   if (doc.v !== FORMAT_VERSION) {
     throw new Error(`Unsupported offer format version: ${String(doc.v)}`);
   }
-  if (doc.side !== 'sell') {
+  if (doc.side !== 'sell' && doc.side !== 'buy') {
     throw new Error(`Unsupported offer side: ${String(doc.side)}`);
   }
   if (doc.asset === BCH_ASSET) {

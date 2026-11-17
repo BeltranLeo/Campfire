@@ -1,6 +1,7 @@
 // Demo seller bot (protocol section 8): a wallet run by the service that sells small amounts of BCH and PUSD
 // on mainnet, so a visitor can complete a real trade without owning funds. Only the fiat payment is simulated.
 
+import { randomBytes } from 'node:crypto';
 import {
   binToHex,
   decodeTransactionUnsafe,
@@ -41,11 +42,13 @@ import {
   matchesEscrowFunding,
   pkhToCashAddress,
   pkhToLockingBytecode,
+  signPaymentDetails,
   toBytes,
+  validateOfferDocument,
   type OfferDocument,
   type WalletSpendableUtxo,
 } from '../protocol/index.js';
-import { FUNDING_WINDOW_SEC, type CampfireService, type OfferView } from './service.js';
+import { FUNDING_WINDOW_SEC, SponsorshipLimitError, type CampfireService, type OfferView } from './service.js';
 import type { StoredTrade, TradeState } from './storage.js';
 
 // Same derivation paths as the test wallets; the `defi` branch holds the contract signing keys.
@@ -429,13 +432,17 @@ export class DemoSeller {
       if (!trade || !service.isDemoTrade(trade)) {
         throw new Error('Not a demo trade');
       }
+      if (trade.side === 'buy') {
+        // A buy offer's request waits for the buyer to accept; the bot only deposits once they have.
+        return trade.status === 'Accepted' ? this.fundAccepted(tradeRecordId) : this.view(tradeRecordId);
+      }
       if (trade.status === 'Requested') {
         try {
           // Re-checked inside the lock: another take may have been accepted in the meantime.
           await this.checkLimits(trade.id);
           await this.checkBalance(trade);
         } catch (err) {
-          await service.declineTrade({ tradeRecordId: trade.id, sellerIdentity: this.identity });
+          await service.declineTrade({ tradeRecordId: trade.id, identity: this.identity });
           throw err;
         }
         await this.accept(trade);
@@ -444,13 +451,11 @@ export class DemoSeller {
     });
   }
 
-  private async accept(trade: StoredTrade): Promise<void> {
-    const wallet = this.options.wallet;
-    const accepted = (await this.botTrades()).filter((t) => t.tradeId !== undefined).length;
-    const defiIndex = accepted;
-    const receiveIndex = DEMO_TRADE_INDEX_BASE + accepted;
-
-    const sessionKey = wallet.sessionPrivateKey(trade.id);
+  // The payment details the bot gives, encrypted for the buyer's session key.
+  private async encryptedDetailsFor(trade: Pick<StoredTrade, 'id' | 'buyerSessionPk'>): Promise<string> {
+    if (!trade.buyerSessionPk) {
+      throw new Error('The buyer session key of this trade is missing');
+    }
     const details = JSON.stringify({
       simulated: true,
       method: DEMO_PAYMENT_METHOD,
@@ -458,11 +463,20 @@ export class DemoSeller {
         'SIMULATED payment details for the Campfire demo. Do not send any money: just mark the trade as paid.',
       reference: `DEMO-${trade.id.slice(0, 8).toUpperCase()}`,
     });
-    const encryptedPaymentDetails = await encryptPaymentDetails(
-      sessionKey,
-      trade.buyerSessionPk,
-      details,
-    );
+    return encryptPaymentDetails(this.options.wallet.sessionPrivateKey(trade.id), trade.buyerSessionPk, details);
+  }
+
+  // The next key positions of the bot: the contract key and the payout address are never reused.
+  private async nextIndices(): Promise<{ defiIndex: number; receiveIndex: number }> {
+    const used = (await this.botTrades()).filter((t) => t.sellerDefiIndex !== undefined).length;
+    return { defiIndex: used, receiveIndex: DEMO_TRADE_INDEX_BASE + used };
+  }
+
+  private async accept(trade: StoredTrade): Promise<void> {
+    const wallet = this.options.wallet;
+    const { defiIndex, receiveIndex } = await this.nextIndices();
+    const sessionKey = wallet.sessionPrivateKey(trade.id);
+    const encryptedPaymentDetails = await this.encryptedDetailsFor(trade);
 
     await this.options.service.acceptTrade({
       tradeRecordId: trade.id,
@@ -487,9 +501,16 @@ export class DemoSeller {
 
     const terms = trade.terms;
     const contract = createEscrowContract(terms, trade.tradeId, this.options.provider);
+    // On a buy offer the payment details go with the deposit; on a sell offer they were sent when accepting.
+    const withDetails = async () => {
+      if (trade.side !== 'buy') return {};
+      const encryptedPaymentDetails = await this.encryptedDetailsFor(trade);
+      const sessionKey = this.options.wallet.sessionPrivateKey(trade.id);
+      return { encryptedPaymentDetails, paymentDetailsSignature: signPaymentDetails(sessionKey, trade.tradeId!, encryptedPaymentDetails) };
+    };
     const alreadyFunded = (await contract.getUtxos()).some((u) => matchesEscrowFunding(u, terms));
     if (alreadyFunded) {
-      await service.confirmFunding({ idOrTradeId: tradeRecordId });
+      await service.confirmFunding({ idOrTradeId: tradeRecordId, ...(await withDetails()) });
       return this.view(tradeRecordId);
     }
 
@@ -502,7 +523,7 @@ export class DemoSeller {
       } catch {
         // Typically "already known"; the lookup below decides.
       }
-      await service.confirmFunding({ idOrTradeId: tradeRecordId });
+      await service.confirmFunding({ idOrTradeId: tradeRecordId, ...(await withDetails()) });
       await this.waitUntilIndexed(previousHex);
       return this.view(tradeRecordId);
     }
@@ -518,7 +539,7 @@ export class DemoSeller {
     });
     await service.recordFundingAttempt(tradeRecordId, tx.hex);
     try {
-      await service.confirmFunding({ idOrTradeId: tradeRecordId, fundingTxHex: tx.hex });
+      await service.confirmFunding({ idOrTradeId: tradeRecordId, fundingTxHex: tx.hex, ...(await withDetails()) });
     } catch (err) {
       throw new Error(
         `Demo seller could not confirm the escrow funding yet: ${err instanceof Error ? err.message : String(err)}`,
@@ -569,12 +590,102 @@ export class DemoSeller {
     });
   }
 
+  // --- Buy offers ---
+
+  // Publishes a buy offer on the buyer's behalf: Campfire builds the transaction and pays its fee, and the 1,000-sat
+  // marker goes to a fresh address of the buyer, who can close the offer without the service. The limits are
+  // checked inside the lock, so two requests cannot both take the last free slot. When the offer names the demo
+  // payment method, the bot takes it right away, so a visitor with one wallet can go through the whole path.
+  async publishSponsored(params: {
+    buyerIdentity: string;
+    offerJson: string;
+    markerReceiveIndex: number;
+  }): Promise<{ offer: OfferView; trade: StoredTrade | null }> {
+    const service = this.options.service;
+    if (!Number.isInteger(params.markerReceiveIndex) || params.markerReceiveIndex < 0 || params.markerReceiveIndex > 100_000) {
+      throw new Error('markerReceiveIndex must be a small non-negative integer');
+    }
+    const offer = await this.exclusive(async () => {
+      const buyer = await service.getIdentityRecord(params.buyerIdentity);
+      if (!buyer) {
+        throw new Error('Buyer identity is not registered');
+      }
+      const document = JSON.parse(params.offerJson) as OfferDocument;
+      validateOfferDocument(document);
+      await service.assertCanSponsor(params.buyerIdentity, document);
+
+      const utxos = await this.spendableUtxos();
+      // A publication costs the marker plus a fee of a few hundred sats; the margin covers the change output.
+      if (utxos.reduce((sum, u) => sum + u.satoshis, 0n) < 3_000n) {
+        throw new SponsorshipLimitError('Campfire cannot pay for new offers right now. Please try again later.');
+      }
+      const tx = buildPublishOfferTransaction({
+        provider: this.options.provider,
+        document,
+        offerJson: params.offerJson,
+        utxos,
+        markerAddress: pkhToCashAddress(derivePayoutPkhFromXpub(buyer.receiveXpub, params.markerReceiveIndex)),
+        changeAddress: this.mainAddress,
+      });
+      const published = await service.publishOffer({
+        sellerIdentity: params.buyerIdentity,
+        offerJson: tx.offerJson,
+        offerTxHex: tx.hex,
+        markerReceiveIndex: params.markerReceiveIndex,
+        broadcast: true,
+        sponsored: true,
+      });
+      await this.waitUntilIndexed(tx.hex);
+      return published;
+    });
+    const trade = offer.document.paymentMethods.includes(DEMO_PAYMENT_METHOD) ? await this.takeBuyOffer(offer) : null;
+    return { offer, trade };
+  }
+
+  // The bot asks to sell to a buy offer, for the smallest amount it can: the offer's minimum, or the bot's own
+  // if that is higher. Returns null when the offer is out of the bot's reach (its coin, its range, its limits).
+  // It never fails the publication that triggered it.
+  private takeBuyOffer(offer: OfferView): Promise<StoredTrade | null> {
+    return this.exclusive(async () => {
+      const doc = offer.document;
+      const isBch = doc.asset === BCH_ASSET;
+      if (!isBch && doc.asset.toLowerCase() !== PUSD_CATEGORY) return null;
+      const botMin = isBch ? this.limits.minBchSats : this.limits.minPusdUnits;
+      const botMax = isBch ? this.limits.maxBchSats : this.limits.maxPusdUnits;
+      const amount = BigInt(doc.min) > botMin ? BigInt(doc.min) : botMin;
+      if (amount > BigInt(doc.max) || amount > botMax) return null;
+      try {
+        await this.checkLimits();
+        await this.checkBalance({ asset: doc.asset, amount: amount.toString() });
+        const wallet = this.options.wallet;
+        const recordId = binToHex(randomBytes(16));
+        const { defiIndex, receiveIndex } = await this.nextIndices();
+        return await this.options.service.requestBuyOfferTrade({
+          offerTxid: offer.offerTxid,
+          sellerIdentity: this.identity,
+          amount: amount.toString(),
+          sellerPk: wallet.defiPubkeyHex(defiIndex),
+          sellerDefiIndex: defiIndex,
+          sellerPayoutPkh: wallet.receivePkhHex(receiveIndex),
+          sellerReceiveIndex: receiveIndex,
+          sellerSessionPk: compressedPublicKeyHex(wallet.sessionPrivateKey(recordId)),
+          recordId,
+        });
+      } catch (err) {
+        if (err instanceof DemoLimitError) return null;
+        // An offer the oracle cannot price (a currency it does not sign) is also out of reach.
+        console.warn(`Demo seller did not take buy offer ${offer.offerTxid}: ${err instanceof Error ? err.message : String(err)}`);
+        return null;
+      }
+    });
+  }
+
   // Finishes any step left behind by a failed request (funding or release). Called on trade reads.
   async reconcile(tradeRecordId: string): Promise<void> {
     const trade = await this.options.service.getTrade(tradeRecordId);
     if (!trade || !this.options.service.isDemoTrade(trade)) return;
     try {
-      if (trade.status === 'Requested' || trade.status === 'Accepted') {
+      if (trade.status === 'Accepted' || (trade.status === 'Requested' && trade.side !== 'buy')) {
         await this.acceptAndFund(tradeRecordId);
       } else if (trade.status === 'Paid') {
         await this.release(tradeRecordId);

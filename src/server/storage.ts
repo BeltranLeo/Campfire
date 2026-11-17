@@ -29,6 +29,8 @@ export interface UserIdentityRecord {
 
 export interface StoredOffer {
   offerTxid: string;
+  // The identity that published the offer: the seller of a sell offer, the buyer of a buy offer. The name dates
+  // from when only sell offers existed; changing it would change the stored records and the public API.
   sellerIdentity: string;
   contentHash: string;
   offerJson: string;
@@ -39,6 +41,8 @@ export interface StoredOffer {
   status: 'Published' | 'Closed';
   closeTxid?: string;
   isDemo?: boolean;
+  // Published and paid for by the service (buy offers only); counted against the daily limit.
+  sponsored?: boolean;
   createdAt: number;
   updatedAt: number;
 }
@@ -47,6 +51,8 @@ export interface StoredTrade {
   id: string;
   tradeId?: string;
   offerTxid: string;
+  // The side of the offer this trade was taken from; records saved before buy offers existed have none (sell).
+  side?: 'sell' | 'buy';
   sellerIdentity: string;
   buyerIdentity: string;
   status: TradeState;
@@ -58,11 +64,13 @@ export interface StoredTrade {
   quote?: PriceQuote;
   marginBps?: number;
   quoteExpiresAt?: number;
-  buyerPk: string;
-  buyerDefiIndex: number;
-  buyerPayoutPkh: string;
-  buyerReceiveIndex: number;
-  buyerSessionPk: string;
+  // Keys of the party that did not take the offer arrive when it accepts: the seller's on a sell offer (already
+  // present on a buy offer's trade) and the buyer's on a buy offer.
+  buyerPk?: string;
+  buyerDefiIndex?: number;
+  buyerPayoutPkh?: string;
+  buyerReceiveIndex?: number;
+  buyerSessionPk?: string;
   sellerPk?: string;
   sellerDefiIndex?: number;
   sellerPayoutPkh?: string;
@@ -77,6 +85,8 @@ export interface StoredTrade {
   escrowAddress?: string;
   escrowTokenAddress?: string;
   encryptedPaymentDetails?: string;
+  // Buy offers: the seller's session-key signature over the ciphertext (protocol section 6).
+  paymentDetailsSignature?: string;
   // Signed funding transaction already broadcast by the demo seller; retries rebroadcast exactly this one.
   pendingFundingTxHex?: string;
   fundingDeadline?: number;
