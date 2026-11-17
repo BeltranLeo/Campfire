@@ -4,7 +4,7 @@
 
 import { binToHex, hexToBin, secp256k1 } from '@bitauth/libauth';
 import type { Contract, NetworkProvider } from 'cashscript';
-import { encryptPaymentDetails, type SessionKeyPair } from '../protocol/crypto.js';
+import { encryptPaymentDetails, signPaymentDetails, type SessionKeyPair } from '../protocol/crypto.js';
 import {
   buildFundEscrowTransaction,
   buildReleaseRequest,
@@ -68,6 +68,29 @@ export async function buildAcceptBody(params: {
     sellerSessionPk: params.session.publicKey,
     encryptedPaymentDetails: await encryptPaymentDetails(params.session.privateKey, params.buyerSessionPk, details),
   };
+}
+
+/** Payment details for a buy offer, sent with the deposit: encrypted for the buyer and signed by this session key. */
+export interface SealedDetails {
+  encryptedPaymentDetails: string;
+  paymentDetailsSignature: string;
+}
+
+/**
+ * On a buy offer the seller learns the buyer's session key only once the buyer accepts, so the details are sealed
+ * at the deposit. The signature by the seller's session key (committed in the terms) shows the service and the
+ * buyer that the seller wrote them; the buyer shares the encryption key and could otherwise write their own.
+ */
+export async function sealPaymentDetails(params: {
+  sessionPrivateKey: string;
+  buyerSessionPk: string;
+  tradeId: string;
+  details: string;
+}): Promise<SealedDetails> {
+  const details = params.details.trim();
+  if (details.length === 0) throw new TradeActionError('Write how the buyer should pay you.');
+  const encryptedPaymentDetails = await encryptPaymentDetails(params.sessionPrivateKey, params.buyerSessionPk, details);
+  return { encryptedPaymentDetails, paymentDetailsSignature: signPaymentDetails(params.sessionPrivateKey, params.tradeId, encryptedPaymentDetails) };
 }
 
 /** The coins the wallet must hold to deposit this trade: the escrow's value plus the deposit's own fee. */
@@ -207,3 +230,18 @@ const fundingKey = (tradeId: string) => `campfire.funding.${tradeId}`;
 export const loadSavedDeposit = (store: SessionStore, tradeId: string) => store.getItem(fundingKey(tradeId));
 export const saveDeposit = (store: SessionStore, tradeId: string, signedTxHex: string) => store.setItem(fundingKey(tradeId), signedTxHex);
 export const clearSavedDeposit = (store: SessionStore, tradeId: string) => store.removeItem(fundingKey(tradeId));
+
+// On a buy offer the sealed details travel with the deposit, and the service refuses the deposit without them. They
+// are kept next to the signed deposit, so a deposit whose answer was lost can still be recorded after a reload.
+const detailsKey = (tradeId: string) => `campfire.details.${tradeId}`;
+
+export function loadSavedDetails(store: SessionStore, tradeId: string): SealedDetails | null {
+  try {
+    const value = JSON.parse(store.getItem(detailsKey(tradeId)) ?? 'null');
+    return value && typeof value.encryptedPaymentDetails === 'string' && typeof value.paymentDetailsSignature === 'string' ? value : null;
+  } catch {
+    return null;
+  }
+}
+export const saveDetails = (store: SessionStore, tradeId: string, sealed: SealedDetails) => store.setItem(detailsKey(tradeId), JSON.stringify(sealed));
+export const clearSavedDetails = (store: SessionStore, tradeId: string) => store.removeItem(detailsKey(tradeId));

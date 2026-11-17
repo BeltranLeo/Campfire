@@ -65,17 +65,54 @@ export function timeline(trade: Trade, role: Role, amount: string): Step[] {
   const funded = trade.fundingTxid !== undefined;
   const paid = trade.paidAt !== undefined;
 
-  const steps: Step[] = [{ state: 'done', title: mine ? 'Buyer took your offer' : `${buyer} took the offer`, at: trade.createdAt, offchain: true }];
+  // On a buy offer the seller takes the offer and the buyer accepts; the deposit is still the seller's (section 2.2).
+  const buyOffer = trade.side === 'buy';
+  const firstTitle = buyOffer
+    ? mine
+      ? 'You answered the buyer’s offer'
+      : you
+        ? 'A seller answered your offer'
+        : 'A seller answered the buy offer'
+    : mine
+      ? 'Buyer took your offer'
+      : `${buyer} took the offer`;
+  const steps: Step[] = [{ state: 'done', title: firstTitle, at: trade.createdAt, offchain: true }];
+  // Accepting opens the 30-minute funding window, so its start is when the trade was accepted.
+  const acceptedAt = trade.fundingDeadline !== undefined ? trade.fundingDeadline - 1800 : undefined;
 
-  // Step 2: the seller accepts and funds the escrow.
+  // Step 2: the trade is accepted and the seller funds the escrow.
   if (funded) {
     steps.push({
       state: 'done',
-      title: mine ? 'You funded the escrow' : 'Seller funded the escrow',
+      title: buyOffer ? (mine ? 'You locked the coins' : 'Seller locked the coins') : mine ? 'You funded the escrow' : 'Seller funded the escrow',
       at: trade.fundedAt,
       txid: trade.fundingTxid,
       confirmations: trade.fundingConfirmations,
     });
+  } else if (buyOffer && s === 'Requested') {
+    steps.push({
+      state: 'current',
+      title: you ? 'You accept, then the seller locks the coins' : mine ? 'Buyer accepts, then you lock the coins' : 'Buyer accepts, then the seller locks the coins',
+      note: 'Up to 10 min to accept, then 30 min to lock',
+    });
+  } else if (buyOffer && s === 'Accepted') {
+    if (mine) {
+      steps.push({ state: 'current', title: 'Buyer accepted. You lock the coins', at: acceptedAt, offchain: true, note: 'Locking window: 30 min' });
+    } else {
+      steps.push({ state: 'done', title: you ? 'You accepted' : 'Buyer accepted', at: acceptedAt, offchain: true });
+      steps.push({ state: 'current', title: 'Seller locks the coins', note: 'Up to 30 min to lock' });
+    }
+  } else if (buyOffer) {
+    // Dropped before any deposit: either the buyer never accepted, or the seller did not lock the coins in time.
+    const title = acceptedAt === undefined
+      ? you
+        ? 'You did not accept the request'
+        : 'The buyer did not accept'
+      : mine
+        ? 'You did not lock the coins in time'
+        : 'The seller did not lock the coins in time';
+    steps.push({ state: 'failed', title, at: trade.updatedAt });
+    return steps;
   } else if (mine && s === 'Accepted') {
     steps.push({ state: 'done', title: 'You accepted', offchain: true, note: 'Payment details encrypted for the buyer' });
     steps.push({ state: 'current', title: 'You fund the escrow', note: 'Funding window: 30 min' });
@@ -280,6 +317,22 @@ export function checkForArbiter(trade: Trade, offer: Pick<OfferDocument, 'price'
   return { quote, fiat };
 }
 
+/**
+ * What the buyer who published a buy offer checks before accepting a seller's request: the request is for this
+ * offer, within its range, with the arbiter it names, and a price signed by its oracle that gives the fiat amount
+ * shown. A sentence for the first problem, or null when there is none.
+ */
+export function checkBuyRequest(trade: Trade, offer: Pick<OfferDocument, 'side' | 'arbiter' | 'price' | 'oracle' | 'min' | 'max'>): string | null {
+  if (offer.side !== 'buy' || trade.side !== 'buy') return 'This request is not for a buy offer.';
+  if (BigInt(trade.amount) < BigInt(offer.min) || BigInt(trade.amount) > BigInt(offer.max)) return 'The amount is outside the range of your offer.';
+  if (trade.arbiterPk.toLowerCase() !== offer.arbiter.toLowerCase()) return 'The request names a different arbiter than your offer.';
+  const checks = checkForArbiter(trade, offer);
+  if (checks.quote === 'wrong-signature' || checks.quote === 'other-oracle') return "The price is not signed by your offer's oracle.";
+  if (offer.price.type === 'floating' && checks.quote === 'none') return 'The request has no signed price.';
+  if (!checks.fiat || !checks.fiat.ok) return 'The amount to pay does not match the price.';
+  return null;
+}
+
 function windowNote(trade: Trade): string | undefined {
   if (trade.paymentDeadline === undefined || trade.fundedAt === undefined) return undefined;
   return `Payment window: ${Math.round((trade.paymentDeadline - trade.fundedAt) / 60)} min`;
@@ -310,7 +363,7 @@ export async function checkEscrow(
   const addressMatch = contract.address === trade.escrowAddress;
   const payoutIsMine =
     buyerReceiveXpub && trade.buyerReceiveIndex !== undefined
-      ? terms.buyerPayoutPkh.toLowerCase() === trade.buyerPayoutPkh.toLowerCase() &&
+      ? terms.buyerPayoutPkh.toLowerCase() === trade.buyerPayoutPkh?.toLowerCase() &&
         verifyDerivedPayoutPkh(buyerReceiveXpub, trade.buyerReceiveIndex, terms.buyerPayoutPkh)
       : undefined;
 

@@ -174,6 +174,9 @@ export function Offers() {
         </section>
       )}
 
+      {intent === 'sell' && rows.length > 0 && (
+        <p className="cf-small cf-muted">These people want to buy. You lock the coins only after they accept your request.</p>
+      )}
       <p className="cf-small cf-subtle">
         Completed trades are counted by Campfire. The number cannot be verified on-chain and can be inflated with a
         second wallet.
@@ -211,7 +214,7 @@ function EmptyOffers({ intent, filtered, onClear }: { intent: 'buy' | 'sell'; fi
     );
   }
   return (
-    <EmptyState title="No open offers right now" action={<Button to="/offers/new">Publish an offer</Button>}>
+    <EmptyState title="No open offers right now" action={<Button to="/offers/new?side=buy">Publish an offer</Button>}>
       Offers appear here as soon as a seller publishes one on-chain.
     </EmptyState>
   );

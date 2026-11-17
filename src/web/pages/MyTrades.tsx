@@ -160,7 +160,7 @@ function ActiveTab({ trades, identity }: { trades: Trade[]; identity: string }) 
                 Your turn
               </span>
             ) : trade.status === 'Disputed' ? (
-              <StatusPill state={trade.status} role={role} />
+              <StatusPill state={trade.status} role={role} side={trade.side} />
             ) : (
               <span className="cf-pill" data-tone="idle">
                 Waiting
@@ -193,7 +193,7 @@ function HistoryTab({ trades, identity }: { trades: Trade[]; identity: string })
               <strong>{title(trade, role)}</strong>
               <span className="cf-small cf-muted">{historyNote(trade, role)}</span>
             </span>
-            <StatusPill state={trade.status} role={role} />
+            <StatusPill state={trade.status} role={role} side={trade.side} />
           </Link>
         );
       })}
@@ -288,13 +288,12 @@ function OffersTab({ identity, trades }: { identity: string; trades: Trade[] }) 
           const doc = offer.document;
           const asset = assetInfo(doc.asset, doc.assetDecimals, config);
           const n = counts.get(offer.offerTxid) ?? 0;
+          const buying = doc.side === 'buy';
           return (
             <div key={offer.offerTxid} className="s-req">
               <div className="s-cell">
                 <span>
-                  <strong>
-                    Selling {asset.symbol} for {doc.fiat}
-                  </strong>{' '}
+                  <strong>{buying ? `Buying ${asset.symbol} with ${doc.fiat}` : `Selling ${asset.symbol} for ${doc.fiat}`}</strong>{' '}
                   · <span className="cf-mono">{formatRange(doc.min, doc.max, asset)}</span>
                 </span>
                 <span className="cf-small cf-muted">
@@ -304,8 +303,11 @@ function OffersTab({ identity, trades }: { identity: string; trades: Trade[] }) 
                   {n} {n === 1 ? 'trade' : 'trades'} · {offer.status === 'Expired' ? 'expired' : 'expires'} {formatDayMonth(doc.expiresAt)} · Offer{' '}
                   <HashLink value={offer.offerTxid} kind="transaction" />
                 </span>
+                {offer.sponsored && <span className="cf-small cf-subtle">Publishing fee paid by Campfire</span>}
                 {offer.status === 'Expired' && (
-                  <span className="cf-small cf-subtle">It no longer shows to buyers. Close it to get the 1,000-sat marker back.</span>
+                  <span className="cf-small cf-subtle">
+                    It no longer shows to {buying ? 'sellers' : 'buyers'}. Close it to get the 1,000-sat marker back.
+                  </span>
                 )}
               </div>
               {offer.status !== 'Closed' && (

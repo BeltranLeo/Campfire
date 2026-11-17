@@ -38,6 +38,8 @@ export interface StoredOffer {
   onChain: OfferOnChainRecord;
   markerVout: number;
   markerAddress: string;
+  // The receive index of the marker's address, so the publisher's wallet finds it without searching.
+  markerReceiveIndex?: number;
   status: 'Published' | 'Closed';
   closeTxid?: string;
   isDemo?: boolean;

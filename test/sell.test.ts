@@ -31,6 +31,7 @@ const arbiter = binToHex(secp256k1.derivePublicKeyCompressed(sha256.hash(utf8ToB
 const oracle = binToHex(secp256k1.derivePublicKeyCompressed(sha256.hash(utf8ToBin('oracle'))) as Uint8Array);
 
 const form: OfferForm = {
+  side: 'sell',
   fiat: 'ARS',
   priceType: 'market',
   margin: '2.5',

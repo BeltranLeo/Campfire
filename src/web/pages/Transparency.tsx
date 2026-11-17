@@ -145,7 +145,7 @@ export function Transparency() {
                     </td>
                     <td className="cf-mono">{formatAmount(t.amount, assetInfo(t.asset, t.assetDecimals, config))}</td>
                     <td>
-                      <StatusPill state={t.status} role="visitor" />
+                      <StatusPill state={t.status} role="visitor" side={t.side} />
                     </td>
                     <td>
                       {t.settlementTxid ? (

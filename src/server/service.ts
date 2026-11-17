@@ -306,6 +306,7 @@ export class CampfireService {
       onChain: verified.onChain,
       markerVout: 1,
       markerAddress: pkhToCashAddress(markerPkhHex),
+      markerReceiveIndex: params.markerReceiveIndex,
       status: 'Published',
       isDemo: this.isDemoTrade({ sellerIdentity: params.sellerIdentity }),
       ...(params.sponsored ? { sponsored: true } : {}),

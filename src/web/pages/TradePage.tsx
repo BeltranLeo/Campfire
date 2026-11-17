@@ -1,10 +1,10 @@
 import { useCallback, useEffect, useState, type ReactNode } from 'react';
 import { Link, useParams } from 'react-router';
 import { expectedEscrowFunding } from '../../protocol/escrow.js';
-import { decryptPaymentDetails } from '../../protocol/crypto.js';
+import { decryptPaymentDetails, verifyPaymentDetailsSignature } from '../../protocol/crypto.js';
 import { pkhToCashAddress } from '../../protocol/keys.js';
 import { verifyPriceQuote } from '../../protocol/trades.js';
-import { ApiError, apiGet, apiPost, type Reputation, type Trade } from '../api';
+import { ApiError, apiGet, apiPost, type Offer, type Reputation, type Trade } from '../api';
 import { assetInfo, type AssetInfo } from '../assets';
 import { ActionCard } from '../components/ActionCard';
 import { Button } from '../components/Button';
@@ -31,9 +31,12 @@ import {
 import { usePoll } from '../hooks/usePoll';
 import { useTradeAction } from '../hooks/useTradeAction';
 import { SellerAction, SellerResult } from './SellerTrade';
-import { readSessionKey } from '../take';
+import { prepareIndices } from '../indices';
+import { browserStore, buildBuyerAcceptBody, commitSession, generateSessionKeyPair, loadPendingSession, readSessionKey, savePendingSession } from '../take';
 import {
+  TradeActionError,
   buildBuyerCancel,
+  checkBuyRequest,
   checkEscrow,
   disputeKeyHex,
   isFinal,
@@ -52,7 +55,8 @@ import { WalletDeclined, useWallet } from '../wallet';
 // One trade, for the buyer or a visitor (Main, Trade-* screens). One column: title and status, the action
 // card (the only part that changes with the state), progress, and the on-chain details folded away.
 // The buyer can mark paid, open a dispute and cancel; the arbiter console is its own page (Arbiter.tsx).
-// The seller's own view is in SellerTrade.tsx. Not here yet: the chat (step 12).
+// The seller's own view is in SellerTrade.tsx. On a buy offer the buyer also accepts the seller's request here
+// (Trade-BuyOffer-Buyer). Not here yet: the chat (step 12).
 
 const POLL_MS = 3000;
 // Invented copy: generic reasons for a dispute, chosen from a list.
@@ -102,7 +106,8 @@ function TradeView({ trade, role, onUpdate, reload }: { trade: Trade; role: Role
   const asset = assetInfo(trade.asset, trade.assetDecimals, config);
   const amount = formatAmount(trade.amount, asset);
   const fiat = formatFiatAmount(trade.fiatAmount, trade.fiat);
-  const payout = pkhToCashAddress(trade.buyerPayoutPkh, { tokenAware: !asset.isBch });
+  // On a buy offer the buyer's payout is chosen when the buyer accepts.
+  const payout = trade.buyerPayoutPkh ? pkhToCashAddress(trade.buyerPayoutPkh, { tokenAware: !asset.isBch }) : null;
   const view: Role = role;
 
   // The browser checks the escrow itself before telling the buyer the coins are locked (protocol section 5).
@@ -141,11 +146,11 @@ function TradeView({ trade, role, onUpdate, reload }: { trade: Trade; role: Role
     <main className="s-main">
       <div className="s-trade">
         <div className="s-pagehead">
-          {view === 'buyer' ? (
+          {view === 'buyer' && trade.side !== 'buy' ? (
             <Link className="s-back" to="/offers">
               ← Offers
             </Link>
-          ) : view === 'seller' ? (
+          ) : view === 'buyer' || view === 'seller' ? (
             <Link className="s-back" to="/trades">
               ← My trades
             </Link>
@@ -156,7 +161,7 @@ function TradeView({ trade, role, onUpdate, reload }: { trade: Trade; role: Role
           )}
           <h1 className="cf-title">{tradeTitle(trade.status, view, amount, fiat)}</h1>
           <div className="cf-row">
-            <StatusPill state={trade.status} role={view} />
+            <StatusPill state={trade.status} role={view} side={trade.side} />
             {trade.fundingTxid ? (
               <ProvenanceTag kind="chain">Real escrow on mainnet</ProvenanceTag>
             ) : (
@@ -267,6 +272,7 @@ function BuyerAction(props: {
 
   switch (trade.status) {
     case 'Requested':
+      if (trade.side === 'buy') return <BuyRequest trade={trade} amount={props.amount} fiat={props.fiat} onUpdate={props.onUpdate} />;
       return (
         <ActionCard
           step="Step 2 of 4 · Waiting"
@@ -291,7 +297,7 @@ function BuyerAction(props: {
       return (
         <ActionCard
           step="Step 2 of 4 · Waiting"
-          title="Waiting for the seller to fund the escrow"
+          title={trade.side === 'buy' ? 'Waiting for the seller to lock the coins' : 'Waiting for the seller to fund the escrow'}
           reassurance="You have not paid anything. Do not pay until the escrow is funded."
           deadline={
             trade.fundingDeadline && (
@@ -391,6 +397,92 @@ function BuyerAction(props: {
   }
 }
 
+// The buyer who published a buy offer accepts a seller's request (Trade-BuyOffer-Buyer). Accepting sends only the
+// buyer's keys: no signature and no coins. Before that, this browser checks the request against the offer.
+function BuyRequest(props: { trade: Trade; amount: string; fiat: string; onUpdate: (t: Trade) => void }) {
+  const { trade } = props;
+  const wallet = useWallet();
+  const { identity, xpubs } = wallet;
+  const { busy, error, run } = useTradeAction<'accept' | 'decline'>(trade, identity, props.onUpdate);
+  const offer = usePoll(() => apiGet<{ offer: Offer }>(`/api/offers/${trade.offerTxid}`).then((r) => r.offer.document), trade.offerTxid);
+  const prep = usePoll(() => (identity && xpubs ? prepareIndices(identity, xpubs, 'buyer') : Promise.resolve(null)), `${identity}:${trade.id}`);
+  const problem = offer.data ? checkBuyRequest(trade, offer.data) : null;
+  const methods = offer.data?.paymentMethods.join(' or ');
+
+  const accept = () =>
+    run('accept', 'The request was not accepted', async () => {
+      if (!identity || !xpubs || !prep.data || !offer.data) throw new TradeActionError('Campfire is still preparing your wallet. Try again in a moment.');
+      const stop = checkBuyRequest(trade, offer.data);
+      if (stop) throw new TradeActionError(`${stop} Nothing was accepted.`);
+      // The session key is saved before the request, so a lost answer can still be matched to its trade.
+      const store = browserStore();
+      const session = (store && loadPendingSession(store, trade.id)) || generateSessionKeyPair();
+      if (store) savePendingSession(store, trade.id, session);
+      const body = buildBuyerAcceptBody({
+        identity,
+        defiXpub: xpubs.defi,
+        receiveXpub: xpubs.receive,
+        defiIndex: prep.data.defi,
+        receiveIndex: prep.data.receive,
+        session,
+      });
+      const { trade: accepted } = await apiPost<{ trade: Trade }>(`/api/trades/${trade.id}/accept`, body);
+      if (store) commitSession(store, accepted.id, session);
+      return accepted;
+    });
+
+  const decline = () =>
+    run('decline', 'The request was not declined', () =>
+      apiPost<{ trade: Trade }>(`/api/trades/${trade.id}/decline`, { buyerIdentity: identity }).then((r) => r.trade),
+    );
+
+  return (
+    <ActionCard
+      step="Step 2 of 4 · Your turn"
+      title={`A seller wants to sell you ${props.amount}`}
+      reassurance="Accepting is free and needs no signature. You pay only after the coins are locked for you."
+      deadline={
+        trade.quoteExpiresAt && (
+          <>
+            <Countdown deadline={trade.quoteExpiresAt} windowSec={600} />
+            <span className="cf-small cf-muted">left to accept at this price</span>
+          </>
+        )
+      }
+    >
+      <p className="cf-muted">
+        You will pay {props.fiat}
+        {methods ? ` by ${methods}` : ''}, after the coins are locked for you.
+      </p>
+      {problem && (
+        // Invented copy: the design has no screen for a request that fails the check.
+        <Notice tone="danger" title="Do not accept this request">
+          {problem}
+        </Notice>
+      )}
+      {error && (
+        <Notice tone="danger" title={error.title}>
+          {error.message}
+        </Notice>
+      )}
+      <div className="s-actions">
+        <Button
+          variant="primary"
+          busy={busy === 'accept'}
+          disabled={!prep.data || !offer.data || problem !== null || (busy !== null && busy !== 'accept')}
+          onClick={accept}
+          note={!prep.data ? 'Finding a fresh address of your wallet…' : 'No signature needed.'}
+        >
+          Accept
+        </Button>
+        <Button busy={busy === 'decline'} disabled={busy !== null && busy !== 'decline'} onClick={decline}>
+          Decline
+        </Button>
+      </div>
+    </ActionCard>
+  );
+}
+
 // The deposit at zero confirmations (Bitcoin Cash 0-conf): watched for a double-spend proof for a few
 // seconds, then safe to act on. Without the check the page falls back to asking for one confirmation.
 function ZeroConfNotice({ ds, isDemo }: { ds: DoubleSpendState; isDemo: boolean }) {
@@ -460,13 +552,21 @@ function EscrowCheckNotice({ check }: { check: EscrowCheck | null | 'error' }) {
 // The seller's payment details, decrypted in this browser with the session key stored when the offer was taken.
 function PaymentDetails({ trade, fiat }: { trade: Trade; fiat: string }) {
   const [state, setState] = useState<
-    { kind: 'loading' } | { kind: 'nokey' } | { kind: 'failed' } | { kind: 'ok'; view: PaymentDetailsView }
+    { kind: 'loading' } | { kind: 'nokey' } | { kind: 'failed' } | { kind: 'unsigned' } | { kind: 'ok'; view: PaymentDetailsView }
   >({ kind: 'loading' });
   useEffect(() => {
     let current = true;
     const key = readSessionKey(trade.id);
     if (!key || !trade.encryptedPaymentDetails || !trade.sellerSessionPk) {
       setState({ kind: 'nokey' });
+      return;
+    }
+    // On a buy offer the buyer shares the encryption key, so only the seller's signature shows who wrote the details.
+    if (
+      trade.side === 'buy' &&
+      !(trade.tradeId && trade.paymentDetailsSignature && verifyPaymentDetailsSignature(trade.sellerSessionPk, trade.tradeId, trade.encryptedPaymentDetails, trade.paymentDetailsSignature))
+    ) {
+      setState({ kind: 'unsigned' });
       return;
     }
     decryptPaymentDetails(key, trade.sellerSessionPk, trade.encryptedPaymentDetails).then(
@@ -476,12 +576,20 @@ function PaymentDetails({ trade, fiat }: { trade: Trade; fiat: string }) {
     return () => {
       current = false;
     };
-  }, [trade.id, trade.encryptedPaymentDetails, trade.sellerSessionPk]);
+  }, [trade.id, trade.side, trade.tradeId, trade.encryptedPaymentDetails, trade.paymentDetailsSignature, trade.sellerSessionPk]);
 
   if (state.kind === 'loading') return <Skeleton height={96} />;
   if (state.kind === 'nokey') return <Notice tone="warn">{NO_KEY}</Notice>;
   // Invented copy: the key is here but does not open the details.
   if (state.kind === 'failed') return <Notice tone="warn">The payment details could not be decrypted with this browser's key for the trade.</Notice>;
+  // Invented copy.
+  if (state.kind === 'unsigned') {
+    return (
+      <Notice tone="danger" title="Do not pay">
+        These payment details are not signed by the seller of this trade. Open a dispute so the arbiter can look at it.
+      </Notice>
+    );
+  }
 
   const amount = (
     <>
@@ -538,7 +646,7 @@ function PaymentDetails({ trade, fiat }: { trade: Trade; fiat: string }) {
 
 // --- Endings ---
 
-function BuyerResult({ trade, amount, payout }: { trade: Trade; amount: string; payout: string }) {
+function BuyerResult({ trade, amount, payout }: { trade: Trade; amount: string; payout: string | null }) {
   const settlement = trade.settlementTxid && (
     <>
       <HashLink value={trade.settlementTxid} kind="transaction" /> · <ProvenanceTag kind="chain" />
@@ -564,10 +672,14 @@ function BuyerResult({ trade, amount, payout }: { trade: Trade; amount: string; 
               <dd>{settlement}</dd>
             </>
           )}
-          <dt>Received at</dt>
-          <dd>
-            <HashLink value={payout} kind="address" />
-          </dd>
+          {payout && (
+            <>
+              <dt>Received at</dt>
+              <dd>
+                <HashLink value={payout} kind="address" />
+              </dd>
+            </>
+          )}
           <dt>Completed</dt>
           <dd>{formatDateTime(ended)}</dd>
         </>
@@ -690,7 +802,7 @@ function OnChainDetails(props: {
   asset: AssetInfo;
   amount: string;
   fiat: string;
-  payout: string;
+  payout: string | null;
   check: EscrowCheck | null | 'error';
   ds: DoubleSpendState;
   view: Role;
@@ -711,6 +823,18 @@ function OnChainDetails(props: {
   return (
     <Details>
       <p className="cf-small cf-muted">For checking the trade yourself: the contract address, the transactions, the price quote and the other person.</p>
+
+      {!trade.escrowAddress && !isFinal(trade) && (
+        <section className="cf-card" data-flush>
+          <div className="cf-card__section">
+            <div className="cf-row" data-between style={{ marginBottom: 'var(--space-2)' }}>
+              <h2 className="cf-heading">Escrow contract</h2>
+              <span className="cf-tag">Not created yet</span>
+            </div>
+            <p className="cf-small cf-muted">The contract address exists once both sides have accepted. Nothing is on-chain yet.</p>
+          </div>
+        </section>
+      )}
 
       {trade.escrowAddress && (
         <section className="cf-card" data-flush>
@@ -812,7 +936,8 @@ function OnChainDetails(props: {
             </dd>
             <dt>Paid to</dt>
             <dd>
-              <HashLink value={props.payout} kind="address" />
+              {/* Invented copy: on a buy offer the payout is not known before the buyer accepts. */}
+              {props.payout ? <HashLink value={props.payout} kind="address" /> : <span className="cf-small cf-muted">Chosen when the buyer accepts</span>}
               {props.view === 'buyer' && check?.payoutIsMine && (
                 <>
                   <br />
@@ -827,6 +952,13 @@ function OnChainDetails(props: {
             <dt>Offer</dt>
             <dd>
               <HashLink value={trade.offerTxid} kind="transaction" />
+              {/* Buy offers are only published by Campfire, which pays for them. */}
+              {trade.side === 'buy' && (
+                <>
+                  <br />
+                  <span className="cf-small cf-muted">Buy offer. Publishing fee paid by Campfire</span>
+                </>
+              )}
             </dd>
           </dl>
         </div>

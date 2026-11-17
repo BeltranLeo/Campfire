@@ -149,7 +149,7 @@ function ConsoleFrame({ trade, open, children }: { trade: Trade; open?: boolean;
         <h1 className="cf-title">{demo ? 'Demo arbiter console' : 'Arbiter console'}</h1>
         {open && (
           <div className="cf-row">
-            <StatusPill state={trade.status} role="visitor" />
+            <StatusPill state={trade.status} role="visitor" side={trade.side} />
             {demo && <ProvenanceTag kind="sim">Simulated arbiter</ProvenanceTag>}
             {trade.fundingTxid && <ProvenanceTag kind="chain">Real escrow on mainnet</ProvenanceTag>}
             {!demo && token && (

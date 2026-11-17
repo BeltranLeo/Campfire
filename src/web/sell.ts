@@ -1,5 +1,6 @@
-// Publishing a sell offer: the form's rules and the offer document they produce (docs/protocol.md,
-// section 2.2). No DOM here, so test/sell.test.ts can check what ends up in the offer.
+// Publishing an offer: the form's rules and the offer document they produce (docs/protocol.md, section 3.2).
+// A sell offer is signed and paid for by the seller's wallet; a buy offer is published by Campfire for the buyer.
+// No DOM here, so test/sell.test.ts can check what ends up in the offer.
 
 import { binToHex } from '@bitauth/libauth';
 import type { NetworkProvider } from 'cashscript';
@@ -13,6 +14,8 @@ export type PriceType = 'market' | 'fixed';
 
 /** What the form holds, exactly as typed. */
 export interface OfferForm {
+  /** "sell": I give BCH and get money. "buy": I give money and get BCH. */
+  side: 'sell' | 'buy';
   fiat: string;
   priceType: PriceType;
   /** Percent over the market price, e.g. "2.5". */
@@ -80,6 +83,8 @@ export function buildOfferDocument(params: {
   oracle: string;
   /** Unix seconds. */
   now: number;
+  /** The longest expiry Campfire pays for, for buy offers. */
+  maxExpirySec?: number;
 }): OfferBuild {
   const { form } = params;
   const errors: FormErrors = {};
@@ -108,7 +113,7 @@ export function buildOfferDocument(params: {
 
   const document: OfferDocument = {
     v: 1,
-    side: 'sell',
+    side: form.side,
     asset: 'BCH',
     assetDecimals: 8,
     fiat: form.fiat,
@@ -117,7 +122,8 @@ export function buildOfferDocument(params: {
     max: max.toString(),
     paymentMethods: methods,
     paymentWindowSec: form.paymentWindowSec,
-    expiresAt: params.now + form.expirySec,
+    // A buy offer never asks Campfire to pay for longer than it does.
+    expiresAt: params.now + (form.side === 'buy' && params.maxExpirySec !== undefined ? Math.min(form.expirySec, params.maxExpirySec) : form.expirySec),
     arbiter: params.arbiter.toLowerCase(),
     // A fixed price takes no oracle: the protocol rejects the field on those offers.
     ...(price.type === 'floating' ? { oracle: params.oracle.toLowerCase() } : {}),
@@ -135,16 +141,20 @@ export function buildOfferDocument(params: {
  * Typical margins of the open offers for the same coin and currency, to help choose one. Null when there are
  * none: nothing is invented to fill the space.
  */
-export function marginRange(offers: { document: ListedOfferDocument }[], fiat: string): { low: number; high: number } | null {
+export function marginRange(
+  offers: { document: ListedOfferDocument }[],
+  fiat: string,
+  side: 'sell' | 'buy' = 'sell',
+): { low: number; high: number } | null {
   const margins = offers
-    .filter((o) => o.document.side === 'sell' && o.document.asset === 'BCH' && o.document.fiat === fiat && o.document.price.type === 'floating')
+    .filter((o) => o.document.side === side && o.document.asset === 'BCH' && o.document.fiat === fiat && o.document.price.type === 'floating')
     .map((o) => (o.document.price.type === 'floating' ? o.document.price.marginBps : 0));
   return margins.length === 0 ? null : { low: Math.min(...margins), high: Math.max(...margins) };
 }
 
 // --- Closing an offer ---
 
-/** How far into the receive path to look for the address that holds an offer's marker. */
+/** How far into the receive path to look for the address that holds an offer's marker, when its index is not recorded. */
 const MARKER_SEARCH_LIMIT = 200;
 
 /**
@@ -154,14 +164,16 @@ const MARKER_SEARCH_LIMIT = 200;
  * sentence, before the wallet is asked to sign.
  */
 export async function buildCloseOffer(params: {
-  offer: Pick<ListedOffer, 'offerTxid' | 'markerAddress' | 'markerVout'>;
+  offer: Pick<ListedOffer, 'offerTxid' | 'markerAddress' | 'markerVout' | 'markerReceiveIndex'>;
   provider: NetworkProvider;
   receiveXpub: string;
 }): Promise<WalletTransactionRequest> {
   const { offer } = params;
   if (!offer.markerAddress) throw new TradeActionError('This offer has no marker to spend.');
   const wanted = binToHex(cashAddressToPkh(offer.markerAddress));
-  let index = -1;
+  // The service records the index for offers published since buy offers exist; older offers are searched for.
+  const recorded = offer.markerReceiveIndex;
+  let index = recorded !== undefined && binToHex(derivePayoutPkhFromXpub(params.receiveXpub, recorded)) === wanted ? recorded : -1;
   for (let i = 0; i < MARKER_SEARCH_LIMIT && index < 0; i++) {
     if (binToHex(derivePayoutPkhFromXpub(params.receiveXpub, i)) === wanted) index = i;
   }

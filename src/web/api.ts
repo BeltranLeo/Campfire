@@ -128,8 +128,25 @@ export interface Offer {
   /** The 1,000-sat marker output that keeps the offer open; spending it closes the offer. */
   markerAddress?: string;
   markerVout?: number;
+  /** The receive index of the marker's address in the publisher's wallet, when the service recorded it. */
+  markerReceiveIndex?: number;
   closeTxid?: string;
+  /** Published and paid for by Campfire (buy offers). */
+  sponsored?: boolean;
   createdAt: number;
+}
+
+/** GET /api/offers/sponsored: what is left of the buy offers Campfire pays for. */
+export interface SponsorshipStatus {
+  enabled: boolean;
+  dailyOffers?: number;
+  openOffersPerIdentity?: number;
+  maxExpirySec?: number;
+  usedToday?: number;
+  remainingToday?: number;
+  /** Unix seconds when a daily slot frees up; null while there is room. */
+  nextSlotAt?: number | null;
+  openNow?: number;
 }
 
 export interface PriceQuote {
@@ -145,9 +162,12 @@ export interface TradeSummary {
   id: string;
   status: TradeState;
   offerTxid: string;
+  /** The side of the offer the trade came from; absent on trades from before buy offers (sell). */
+  side?: 'sell' | 'buy';
   buyerIdentity: string;
   sellerIdentity: string;
   buyerSessionPk?: string;
+  sellerSessionPk?: string;
   buyerDefiIndex?: number;
   buyerReceiveIndex?: number;
   sellerDefiIndex?: number;
@@ -166,11 +186,11 @@ export interface Trade extends TradeSummary {
   quote?: PriceQuote;
   marginBps?: number;
   quoteExpiresAt?: number;
-  buyerPk: string;
-  buyerPayoutPkh: string;
+  /** The buyer's keys: on a buy offer they arrive only when the buyer accepts. */
+  buyerPk?: string;
+  buyerPayoutPkh?: string;
   sellerPk?: string;
   sellerPayoutPkh?: string;
-  sellerSessionPk?: string;
   arbiterPk: string;
   oraclePk?: string;
   refundTime?: number;
@@ -178,6 +198,8 @@ export interface Trade extends TradeSummary {
   escrowAddress?: string;
   escrowTokenAddress?: string;
   encryptedPaymentDetails?: string;
+  /** Buy offers: the seller's session-key signature over the payment details (protocol section 6). */
+  paymentDetailsSignature?: string;
   fundingDeadline?: number;
   fundingTxid?: string;
   fundingVout?: number;
@@ -216,5 +238,6 @@ export interface ArbiterChat {
 export interface DemoInfo {
   enabled: boolean;
   identity: string;
-  limits: { maxActiveTrades: number; maxDailyFundings: number };
+  /** Amounts come as strings in base units (sats, PUSD cents). */
+  limits: { maxActiveTrades: number; maxDailyFundings: number; minBchSats?: string; maxBchSats?: string };
 }

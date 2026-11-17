@@ -2,18 +2,18 @@ import type { TradeState } from '../api';
 
 // A trade's state as a short label. The text depends on who is looking: the party whose turn it is
 // reads "your …" in the active tone, the other party waits in the idle tone, and a visitor sees
-// the neutral wording. Written for sell offers; buy offers swap who accepts (handled with them).
+// the neutral wording. On a buy offer the buyer accepts the request, so `Requested` is the buyer's turn.
 
 export type TradeRole = 'buyer' | 'seller' | 'visitor';
 type Tone = 'active' | 'done' | 'warn' | 'danger' | 'idle' | undefined;
 
-function pill(state: TradeState, role: TradeRole): [string, Tone] {
+function pill(state: TradeState, role: TradeRole, side: 'sell' | 'buy'): [string, Tone] {
   const turn = (who: TradeRole, mine: string, theirs: string): [string, Tone] =>
     role === who ? [mine, 'active'] : [theirs, role === 'visitor' ? 'active' : 'idle'];
 
   switch (state) {
     case 'Requested':
-      return turn('seller', 'Waiting for you', 'Waiting for seller');
+      return side === 'buy' ? turn('buyer', 'Waiting for you', 'Waiting for buyer') : turn('seller', 'Waiting for you', 'Waiting for seller');
     case 'Accepted':
       return turn('seller', 'Waiting for your deposit', 'Waiting for deposit');
     case 'Funded':
@@ -36,8 +36,8 @@ function pill(state: TradeState, role: TradeRole): [string, Tone] {
   }
 }
 
-export function StatusPill({ state, role }: { state: TradeState; role: TradeRole }) {
-  const [text, tone] = pill(state, role);
+export function StatusPill({ state, role, side = 'sell' }: { state: TradeState; role: TradeRole; side?: 'sell' | 'buy' }) {
+  const [text, tone] = pill(state, role, side);
   return (
     <span className="cf-pill" data-tone={tone}>
       {text}

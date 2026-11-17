@@ -344,7 +344,7 @@ function Activity({ finished, sideOf, failed, loading, retry }: { finished: Trad
               <strong>{rowTitle(trade, role, formatAmount(trade.amount, asset), formatFiatAmount(trade.fiatAmount, trade.fiat))}</strong>
               <span className="cf-small cf-muted">{historyNote(trade, role)}</span>
             </span>
-            <StatusPill state={trade.status} role={role} />
+            <StatusPill state={trade.status} role={role} side={trade.side} />
           </Link>
         );
       })}

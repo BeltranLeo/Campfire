@@ -29,12 +29,23 @@ export function nextStep(trade: Trade, role: 'buyer' | 'seller', now = Math.floo
   }
   switch (trade.status) {
     case 'Requested':
+      // On a buy offer the seller took it, and the buyer who published it accepts.
+      if (trade.side === 'buy') {
+        return seller
+          ? { step: 'Waiting for the buyer to accept', turn: false, deadline: trade.quoteExpiresAt, windowSec: 600 }
+          : { step: 'Accept or decline the request', turn: true, deadline: trade.quoteExpiresAt, windowSec: 600 };
+      }
       return seller
         ? { step: 'Accept or decline the request', turn: true, deadline: trade.quoteExpiresAt, windowSec: 600 }
         : { step: 'Waiting for the seller to accept', turn: false, deadline: trade.quoteExpiresAt, windowSec: 600 };
     case 'Accepted':
       return seller
-        ? { step: 'Deposit into the escrow', turn: true, deadline: trade.fundingDeadline, windowSec: 1800 }
+        ? {
+            step: trade.side === 'buy' ? 'Lock the coins and share how to pay you' : 'Deposit into the escrow',
+            turn: true,
+            deadline: trade.fundingDeadline,
+            windowSec: 1800,
+          }
         : { step: 'Waiting for the seller to deposit', turn: false, deadline: trade.fundingDeadline, windowSec: 1800 };
     case 'Funded': {
       const windowSec = trade.paymentDeadline && trade.fundedAt ? trade.paymentDeadline - trade.fundedAt : undefined;
@@ -91,7 +102,12 @@ export function historyNote(trade: Trade, role: 'buyer' | 'seller'): string {
       how = 'returned after the refund time';
       break;
     case 'Dropped':
-      how = role === 'buyer' ? 'not accepted in time' : 'declined or not funded in time';
+      if (trade.side === 'buy') {
+        // Accepting opens the funding window, so a deadline means the buyer accepted and the deposit never came.
+        how = trade.fundingDeadline !== undefined ? 'not funded in time' : role === 'buyer' ? 'declined or not accepted in time' : 'not accepted in time';
+      } else {
+        how = role === 'buyer' ? 'not accepted in time' : 'declined or not funded in time';
+      }
       break;
   }
   return how ? `${when} · ${how}` : when;

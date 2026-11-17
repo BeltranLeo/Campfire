@@ -1,5 +1,6 @@
-// Taking a sell offer: the buyer's side of POST /api/trades. No DOM here, so test/take.test.ts can
-// check the request against the same derivation checks the service runs (docs/protocol.md, section 1).
+// Taking an offer (POST /api/trades) and, on a buy offer, the buyer's acceptance: the keys each side sends.
+// No DOM here, so test/take.test.ts can check the requests against the same derivation checks the service runs
+// (docs/protocol.md, section 1).
 
 import { binToHex } from '@bitauth/libauth';
 import { derivePayoutPkhFromXpub, derivePubkeyFromXpub, pkhToCashAddress } from '../protocol/keys.js';
@@ -51,16 +52,64 @@ export function buildTakeRequest(params: {
   receiveIndex: number;
   session: SessionKeyPair;
 }): TakeRequest {
+  return { offerTxid: params.offerTxid, buyerIdentity: params.identity, amount: params.amount.toString(), ...buyerKeys(params) };
+}
+
+/** A buyer's keys for one trade: a fresh signing key, a fresh payout address and the session key. */
+export function buyerKeys(params: { defiXpub: string; receiveXpub: string; defiIndex: number; receiveIndex: number; session: SessionKeyPair }) {
   return {
-    offerTxid: params.offerTxid,
-    buyerIdentity: params.identity,
-    amount: params.amount.toString(),
     buyerPk: binToHex(derivePubkeyFromXpub(params.defiXpub, params.defiIndex)),
     buyerDefiIndex: params.defiIndex,
     buyerPayoutPkh: binToHex(derivePayoutPkhFromXpub(params.receiveXpub, params.receiveIndex)),
     buyerReceiveIndex: params.receiveIndex,
     buyerSessionPk: params.session.publicKey,
   };
+}
+
+/** What a seller sends to take a buy offer: the amount and the seller's keys. Nothing is signed yet. */
+export interface SellerTakeRequest {
+  offerTxid: string;
+  sellerIdentity: string;
+  amount: string;
+  sellerPk: string;
+  sellerDefiIndex: number;
+  sellerPayoutPkh: string;
+  sellerReceiveIndex: number;
+  sellerSessionPk: string;
+}
+
+export function buildSellerTakeRequest(params: {
+  offerTxid: string;
+  identity: string;
+  amount: bigint;
+  defiXpub: string;
+  receiveXpub: string;
+  defiIndex: number;
+  receiveIndex: number;
+  session: SessionKeyPair;
+}): SellerTakeRequest {
+  return {
+    offerTxid: params.offerTxid,
+    sellerIdentity: params.identity,
+    amount: params.amount.toString(),
+    sellerPk: binToHex(derivePubkeyFromXpub(params.defiXpub, params.defiIndex)),
+    sellerDefiIndex: params.defiIndex,
+    sellerPayoutPkh: binToHex(derivePayoutPkhFromXpub(params.receiveXpub, params.receiveIndex)),
+    sellerReceiveIndex: params.receiveIndex,
+    sellerSessionPk: params.session.publicKey,
+  };
+}
+
+/** What the buyer who published a buy offer sends to accept a seller's request: their keys only, no signature. */
+export function buildBuyerAcceptBody(params: {
+  identity: string;
+  defiXpub: string;
+  receiveXpub: string;
+  defiIndex: number;
+  receiveIndex: number;
+  session: SessionKeyPair;
+}) {
+  return { buyerIdentity: params.identity, ...buyerKeys(params) };
 }
 
 export { generateSessionKeyPair };
@@ -88,12 +137,15 @@ export function demoLimitKind(message: string): 'busy' | 'daily' | 'funds' | nul
 
 /**
  * After a take whose answer was lost (a timeout, or an error after the trade was recorded), finds the
- * trade this browser started by its session key. Final trades are ignored: there is nothing to resume.
+ * trade this browser started by its session key: the buyer's on a sell offer, the seller's on a buy offer.
+ * Final trades are ignored: there is nothing to resume.
  */
 export function findStartedTrade(trades: TradeSummary[], sessionPk: string): TradeSummary | undefined {
   const pk = sessionPk.toLowerCase();
   return trades.find(
-    (t) => t.buyerSessionPk?.toLowerCase() === pk && !['Dropped', 'Cancelled', 'Refunded', 'ResolvedSeller'].includes(t.status),
+    (t) =>
+      (t.buyerSessionPk?.toLowerCase() === pk || t.sellerSessionPk?.toLowerCase() === pk) &&
+      !['Dropped', 'Cancelled', 'Refunded', 'ResolvedSeller'].includes(t.status),
   );
 }
 

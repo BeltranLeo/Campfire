@@ -22,18 +22,24 @@ import {
   buildSellerRelease,
   checkAcceptedTrade,
   clearSavedDeposit,
+  clearSavedDetails,
   depositNeeds,
   findDeposit,
   loadSavedDeposit,
+  loadSavedDetails,
   saveDeposit,
+  saveDetails,
+  sealPaymentDetails,
+  type SealedDetails,
 } from '../seller';
 import { browserStore, commitSession, generateSessionKeyPair, loadPendingSession, payoutAddress, readSessionKey, savePendingSession } from '../take';
 import { TradeActionError, disputeKeyHex, signedPayoutPkh } from '../trade';
 import { refreshWalletCoins, useWalletCoins } from '../walletCoins';
 import { WalletDeclined, useWallet } from '../wallet';
 
-// The seller's side of one trade (Sell-Accept-*, Trade-Seller-* screens): accept a request and deposit into the
-// escrow, wait for the buyer, release after checking the payment, or open a dispute. The wallet signs the deposit
+// The seller's side of one trade (Sell-Accept-*, Trade-Seller-*, Trade-BuyOffer-Seller screens): accept a request
+// and deposit into the escrow, wait for the buyer, release after checking the payment, or open a dispute. On a buy
+// offer the seller took the offer, waits for the buyer to accept, and then deposits with the payment details. The wallet signs the deposit
 // and the release; everything else is off-chain. The seller checks the terms the service built before every
 // signature (seller.ts), so a wrong address or key stops here and not on-chain.
 
@@ -45,6 +51,8 @@ const DISPUTE_REASONS = [
   'Something else',
 ];
 const BCH = { symbol: 'BCH', decimals: 8, isBch: true } as const;
+/** Stands in for localStorage when the browser blocks it: nothing is saved, nothing is found. */
+const NO_STORE = { getItem: () => null, setItem: () => undefined, removeItem: () => undefined };
 
 type Action = 'accept' | 'decline' | 'deposit' | 'release' | 'dispute';
 
@@ -108,7 +116,14 @@ export function SellerAction(props: { trade: Trade; amount: string; fiat: string
       offer: offer.document,
       now: Math.floor(Date.now() / 1000),
     });
-    const record = (hex?: string) => apiPost<{ trade: Trade }>(`/api/trades/${t.id}/funding`, hex ? { fundingTxHex: hex } : {}).then((r) => r.trade);
+    // On a buy offer the details go with the deposit, sealed before the wallet signs anything: the service refuses a
+    // deposit without them, so they are kept next to the signed deposit for a retry after a reload.
+    const sealed: SealedDetails | null = t.side === 'buy' ? await sealDetails(t) : null;
+    const record = (hex?: string) =>
+      apiPost<{ trade: Trade }>(`/api/trades/${t.id}/funding`, { ...(hex ? { fundingTxHex: hex } : {}), ...sealed }).then((r) => {
+        if (store) clearSavedDetails(store, t.id);
+        return r.trade;
+      });
 
     if (await findDeposit(checked.contract, checked.terms)) return record();
 
@@ -135,6 +150,19 @@ export function SellerAction(props: { trade: Trade; amount: string; fiat: string
     if (store) clearSavedDeposit(store, t.id);
     void refreshWalletCoins();
     return recorded;
+  }
+
+  /** The details typed now, or the ones sealed in an earlier attempt when the box is empty after a reload. */
+  async function sealDetails(t: Trade): Promise<SealedDetails> {
+    const store = browserStore();
+    const saved = store && loadSavedDetails(store, t.id);
+    if (details.trim() === '' && saved) return saved;
+    const key = readSessionKey(t.id);
+    if (!key) throw new TradeActionError('This browser does not have the key for this trade, so it cannot encrypt the payment details. Nothing was deposited.');
+    if (!t.buyerSessionPk || !t.tradeId) throw new TradeActionError('The buyer has not accepted yet. Nothing was deposited.');
+    const sealedNow = await sealPaymentDetails({ sessionPrivateKey: key, buyerSessionPk: t.buyerSessionPk, tradeId: t.tradeId, details });
+    if (store) saveDetails(store, t.id, sealedNow);
+    return sealedNow;
   }
 
   async function acceptAndDeposit() {
@@ -217,6 +245,83 @@ export function SellerAction(props: { trade: Trade; amount: string; fiat: string
       )}
     </>
   );
+
+  const savedDetails = trade.side === 'buy' ? loadSavedDetails(browserStore() ?? NO_STORE, trade.id) : null;
+
+  if (trade.side === 'buy' && trade.status === 'Requested') {
+    // Invented copy: the design shows the buyer's side of this wait only.
+    return (
+      <ActionCard
+        step="Step 2 of 4 · Waiting"
+        title="Waiting for the buyer to accept"
+        reassurance="Nothing is locked yet. You sign only when you lock the coins."
+        deadline={
+          trade.quoteExpiresAt && (
+            <>
+              <Countdown deadline={trade.quoteExpiresAt} windowSec={600} />
+              <span className="cf-small cf-muted">left for the buyer to accept at this price</span>
+            </>
+          )
+        }
+      >
+        <p className="cf-muted">
+          When the buyer accepts, you have 30 minutes to lock {deposit ?? 'the coins'} and share how to pay you. If the buyer does not answer in time,
+          the request is dropped.
+        </p>
+        {walletNotices}
+      </ActionCard>
+    );
+  }
+
+  if (trade.side === 'buy' && trade.status === 'Accepted') {
+    return (
+      <ActionCard
+        step="Step 2 of 4 · Your turn"
+        title="The buyer accepted. Lock the coins and share how to pay you."
+        reassurance="The contract can only pay the buyer or return the coins to you. Campfire cannot move them."
+        deadline={
+          trade.fundingDeadline && (
+            <>
+              <Countdown deadline={trade.fundingDeadline} windowSec={1800} />
+              <span className="cf-small cf-muted">left to lock the coins. After that the trade is dropped.</span>
+            </>
+          )
+        }
+      >
+        <div className="cf-field">
+          <label htmlFor="details">How the buyer should pay you</label>
+          <textarea
+            id="details"
+            className="cf-textarea"
+            rows={3}
+            maxLength={500}
+            placeholder={savedDetails ? 'Your earlier details are kept. Write new ones to replace them.' : 'Bank, account number or alias, reference'}
+            value={details}
+            onChange={(e) => setDetails(e.target.value)}
+          />
+          <span className="cf-hint">Encrypted in your browser for this buyer only. Shown once your coins are locked. Campfire cannot read it.</span>
+        </div>
+        {deposit && (
+          <p className="cf-small cf-muted">
+            You lock {deposit}: {formatAmount(trade.amount, BCH)} for the buyer plus a 1,000-sat fee budget for the closing transaction.
+          </p>
+        )}
+        {walletNotices}
+        {failure}
+        <div className="s-actions">
+          <Button
+            variant="primary"
+            signs
+            busy={busy === 'deposit'}
+            disabled={!isBch || short || (details.trim() === '' && !savedDetails) || (busy !== null && busy !== 'deposit')}
+            onClick={depositOnly}
+          >
+            {deposit ? `Lock ${deposit}` : 'Lock the coins'}
+          </Button>
+        </div>
+      </ActionCard>
+    );
+  }
 
   switch (trade.status) {
     case 'Requested':
@@ -436,7 +541,7 @@ function RequestCard({ trade, fiat }: { trade: Trade; fiat: string }) {
           </dd>
           <dt>Pays to</dt>
           <dd>
-            <HashLink value={pkhToCashAddress(trade.buyerPayoutPkh)} kind="address" />
+            {trade.buyerPayoutPkh && <HashLink value={pkhToCashAddress(trade.buyerPayoutPkh)} kind="address" />}
           </dd>
         </dl>
       </div>
