@@ -45,6 +45,8 @@ export interface WalletState {
   reputation: Reputation | null;
   /** Unfinished trades of this identity; null until loaded. */
   activeTrades: number | null;
+  /** A signature request is out and the wallet has not answered yet. */
+  signing: boolean;
   error: { title: string; message: string } | null;
 }
 
@@ -56,6 +58,7 @@ const INITIAL: WalletState = {
   xpubs: null,
   reputation: null,
   activeTrades: null,
+  signing: false,
   error: null,
 };
 
@@ -153,6 +156,7 @@ class WalletController {
   async sign(request: Record<string, unknown>, inputPaths: SigningPath[]): Promise<string> {
     const manager = this.manager;
     if (!manager || this.state.status !== 'connected') throw new WalletDeclined();
+    this.set({ signing: true });
     try {
       const response = await manager.signTransaction(
         { transaction: request as unknown as SignTransactionRequest['transaction'], inputPaths },
@@ -162,6 +166,9 @@ class WalletController {
       return response.signedTransaction;
     } catch {
       throw new WalletDeclined();
+    } finally {
+      // A disconnect during the request already reset the state; only clear what this call set.
+      if (this.state.signing) this.set({ signing: false });
     }
   }
 

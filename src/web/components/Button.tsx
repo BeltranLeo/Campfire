@@ -1,5 +1,6 @@
 import type { ReactNode } from 'react';
 import { Link } from 'react-router';
+import { useWallet } from '../wallet';
 
 // Design principle 3: a button says whether it opens the wallet. A signing button carries
 // "Signs in your wallet" under its label; others may say "No signature needed" with `note`.
@@ -14,7 +15,7 @@ export interface ButtonProps {
   signs?: boolean | string;
   /** A line under the button for actions that do not sign, e.g. "No signature needed." */
   note?: ReactNode;
-  /** Waiting for the wallet or the server. A signing button then reads "Waiting for wallet…". */
+  /** Working on it. A signing button reads "Preparing…" until the wallet has the request, then "Waiting for wallet…". */
   busy?: boolean;
   disabled?: boolean;
   onClick?: () => void;
@@ -36,6 +37,9 @@ export function Button({
   to,
   type = 'button',
 }: ButtonProps) {
+  // "Waiting for wallet…" is true only once the request is out. Before that the page is still preparing it
+  // (reading coins), and a visitor who switches to the wallet app then leaves the page with nothing to approve.
+  const { signing } = useWallet();
   const common = {
     className: 'cf-btn',
     'data-variant': variant,
@@ -50,7 +54,7 @@ export function Button({
   ) : (
     // A busy button keeps its full colour (as in the design) but ignores further clicks.
     <button {...common} type={type} onClick={busy ? undefined : onClick} disabled={disabled} aria-busy={busy || undefined}>
-      {busy && signs ? 'Waiting for wallet…' : children}
+      {busy && signs ? (signing ? 'Waiting for wallet…' : 'Preparing…') : children}
     </button>
   );
 
@@ -59,7 +63,9 @@ export function Button({
     <div className="s-primary">
       {control}
       {signs ? (
-        <span className="cf-signs">{typeof signs === 'string' ? signs : 'Signs in your wallet'}</span>
+        <span className="cf-signs">
+          {busy && signing ? 'Open your wallet to approve, then come back here.' : typeof signs === 'string' ? signs : 'Signs in your wallet'}
+        </span>
       ) : (
         <span className="cf-small cf-subtle">{note}</span>
       )}

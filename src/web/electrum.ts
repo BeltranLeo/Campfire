@@ -24,6 +24,59 @@ function lookupProvider(): Promise<ElectrumNetworkProvider> {
 /** The connection kept open for the page, for pages that ask many questions in a row (a wallet's coins). */
 export const keptElectrum = lookupProvider;
 
+// A phone closes the page's sockets while it is in the background (for example while the visitor is in the wallet
+// app), and the kept connection would stay dead for the rest of the visit. A page that comes back drops it so the
+// next lookup opens a new one.
+function dropKeptConnection() {
+  const old = lookup;
+  lookup = null;
+  void old?.then((p) => p.disconnect()).catch(() => {});
+}
+// Typed by hand: the tests also load this file, and their compiler settings have no DOM types.
+const page = (globalThis as { document?: PageDocument }).document;
+interface PageDocument {
+  visibilityState: string;
+  addEventListener(type: 'visibilitychange', listener: () => void): void;
+  removeEventListener(type: 'visibilitychange', listener: () => void): void;
+}
+const LOST = /connection lost|not connected|disconnected|timed out/i;
+page?.addEventListener('visibilitychange', () => {
+  if (page.visibilityState !== 'visible' || !lookup) return;
+  // A desktop tab keeps its socket, so only a connection that does not answer is dropped.
+  const probe = lookup.then((p) => withDeadline(p.performRequest('server.ping'), Date.now() + 3000));
+  probe.catch((err) => {
+    if (LOST.test(err instanceof Error ? err.message : String(err))) dropKeptConnection();
+  });
+});
+
+const visible = () =>
+  !page || page.visibilityState === 'visible'
+    ? Promise.resolve()
+    : new Promise<void>((resolve) => {
+        const onChange = () => {
+          if (page.visibilityState !== 'visible') return;
+          page.removeEventListener('visibilitychange', onChange);
+          resolve();
+        };
+        page.addEventListener('visibilitychange', onChange);
+      });
+
+/**
+ * Runs `work` on the kept connection. If the connection was lost on the way (the page was hidden), waits for the
+ * page to be visible again and runs it once more on a new connection. Use it for the reads that come before a
+ * signature, so a quick switch to the wallet app cannot abort the request before the wallet has it.
+ */
+export async function withKeptElectrum<T>(work: (provider: ElectrumNetworkProvider) => Promise<T>): Promise<T> {
+  try {
+    return await work(await lookupProvider());
+  } catch (err) {
+    if (!LOST.test(err instanceof Error ? err.message : String(err))) throw err;
+    await visible();
+    dropKeptConnection();
+    return work(await lookupProvider());
+  }
+}
+
 const BATCH = 25;
 /**
  * The wallet shows its first unused address on its receive screen, and the owner may have shared it (a

@@ -8,7 +8,7 @@ import { EmptyState, Notice, Skeleton } from '../components/States';
 import { StatusPill } from '../components/StatusPill';
 import { Countdown } from '../components/Timeline';
 import { useConfig } from '../config';
-import { keptElectrum } from '../electrum';
+import { withKeptElectrum } from '../electrum';
 import { formatAmount, formatBch, formatDayMonth, formatFiatAmount, formatRange } from '../format';
 import { useNow } from '../hooks/useNow';
 import { usePoll } from '../hooks/usePoll';
@@ -213,7 +213,8 @@ function OffersTab({ identity, trades }: { identity: string; trades: Trade[] }) 
     setClosing(offer.offerTxid);
     setFailure(null);
     try {
-      const tx = await buildCloseOffer({ offer, provider: await keptElectrum(), receiveXpub: wallet.xpubs.receive });
+      const receiveXpub = wallet.xpubs.receive;
+      const tx = await withKeptElectrum((provider) => buildCloseOffer({ offer, provider, receiveXpub }));
       const closeTxHex = await wallet.sign(tx.request, tx.inputPaths);
       const send = (hex?: string) =>
         apiPost(`/api/offers/${offer.offerTxid}/close`, { sellerIdentity: identity, ...(hex ? { closeTxHex: hex } : {}) });

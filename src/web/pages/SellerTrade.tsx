@@ -9,7 +9,7 @@ import { HashLink, ProvenanceTag } from '../components/Provenance';
 import { Notice, Skeleton } from '../components/States';
 import { Countdown } from '../components/Timeline';
 import { describeScan, loadWalletCoins, spendableBch } from '../coins';
-import { keptElectrum } from '../electrum';
+import { withKeptElectrum } from '../electrum';
 import { applyMargin, describeMargin, formatAmount, formatBch, formatDate, formatDateTime, formatFiat } from '../format';
 import { usePoll } from '../hooks/usePoll';
 import { useNow } from '../hooks/useNow';
@@ -80,7 +80,7 @@ export function SellerAction(props: { trade: Trade; amount: string; fiat: string
   async function accept(): Promise<Trade> {
     if (!identity || !xpubs || !prep.data || !trade.buyerSessionPk) throw new TradeActionError('Campfire is still preparing your wallet. Try again in a moment.');
     const store = browserStore();
-    assertCanDeposit(trade, await loadWalletCoins(await keptElectrum(), xpubs));
+    assertCanDeposit(trade, await withKeptElectrum((provider) => loadWalletCoins(provider, xpubs)));
     // The session key is saved before the request, so a lost answer can still be matched to its trade.
     const session = (store && loadPendingSession(store, trade.id)) || generateSessionKeyPair();
     if (store) savePendingSession(store, trade.id, session);
@@ -104,46 +104,52 @@ export function SellerAction(props: { trade: Trade; amount: string; fiat: string
    * a signed one this browser kept from an earlier attempt, and only then builds and signs a new one.
    */
   async function makeDeposit(t: Trade): Promise<Trade> {
+    type Prepared = { done: Trade } | { tx: ReturnType<typeof buildDeposit>; record: (hex?: string) => Promise<Trade> };
     if (!xpubs) throw new WalletDeclined();
-    const provider = await keptElectrum();
     const store = browserStore();
-    const { offer } = await apiGet<{ offer: Offer }>(`/api/offers/${t.offerTxid}`);
-    const checked = checkAcceptedTrade(t, {
-      provider,
-      defiXpub: xpubs.defi,
-      receiveXpub: xpubs.receive,
-      sessionPrivateKey: readSessionKey(t.id),
-      offer: offer.document,
-      now: Math.floor(Date.now() / 1000),
-    });
-    // On a buy offer the details go with the deposit, sealed before the wallet signs anything: the service refuses a
-    // deposit without them, so they are kept next to the signed deposit for a retry after a reload.
-    const sealed: SealedDetails | null = t.side === 'buy' ? await sealDetails(t) : null;
-    const record = (hex?: string) =>
-      apiPost<{ trade: Trade }>(`/api/trades/${t.id}/funding`, { ...(hex ? { fundingTxHex: hex } : {}), ...sealed }).then((r) => {
-        if (store) clearSavedDetails(store, t.id);
-        return r.trade;
+    // Everything read from the chain before the wallet is asked runs in one block that is repeated if the connection
+    // drops while the visitor is away (see withKeptElectrum). Nothing in it signs or deposits.
+    const prepared = await withKeptElectrum<Prepared>(async (provider) => {
+      const { offer } = await apiGet<{ offer: Offer }>(`/api/offers/${t.offerTxid}`);
+      const checked = checkAcceptedTrade(t, {
+        provider,
+        defiXpub: xpubs.defi,
+        receiveXpub: xpubs.receive,
+        sessionPrivateKey: readSessionKey(t.id),
+        offer: offer.document,
+        now: Math.floor(Date.now() / 1000),
       });
+      // On a buy offer the details go with the deposit, sealed before the wallet signs anything: the service refuses a
+      // deposit without them, so they are kept next to the signed deposit for a retry after a reload.
+      const sealed: SealedDetails | null = t.side === 'buy' ? await sealDetails(t) : null;
+      const record = (hex?: string) =>
+        apiPost<{ trade: Trade }>(`/api/trades/${t.id}/funding`, { ...(hex ? { fundingTxHex: hex } : {}), ...sealed }).then((r) => {
+          if (store) clearSavedDetails(store, t.id);
+          return r.trade;
+        });
 
-    if (await findDeposit(checked.contract, checked.terms)) return record();
+      if (await findDeposit(checked.contract, checked.terms)) return { done: await record() };
 
-    // The same signed transaction is sent again, never a new one: a second deposit to the same escrow would stay
-    // locked until the refund time. If it cannot be recorded the trade simply ends when the funding window does,
-    // with nothing locked twice.
-    const saved = store && loadSavedDeposit(store, t.id);
-    if (saved) {
-      const recorded = await record(saved);
-      if (store) clearSavedDeposit(store, t.id);
-      return recorded;
-    }
+      // The same signed transaction is sent again, never a new one: a second deposit to the same escrow would stay
+      // locked until the refund time. If it cannot be recorded the trade simply ends when the funding window does,
+      // with nothing locked twice.
+      const saved = store && loadSavedDeposit(store, t.id);
+      if (saved) {
+        const recorded = await record(saved);
+        if (store) clearSavedDeposit(store, t.id);
+        return { done: recorded };
+      }
 
-    const owned = await loadWalletCoins(provider, xpubs);
-    const changeIndex = prep.data?.change ?? null;
-    const changeAddress =
-      xpubs.change && changeIndex !== null
-        ? payoutAddress(xpubs.change, changeIndex, false)
-        : payoutAddress(xpubs.receive, t.sellerReceiveIndex ?? 0, false);
-    const tx = buildDeposit({ trade: t, checked, coins: owned, changeAddress });
+      const owned = await loadWalletCoins(provider, xpubs);
+      const changeIndex = prep.data?.change ?? null;
+      const changeAddress =
+        xpubs.change && changeIndex !== null
+          ? payoutAddress(xpubs.change, changeIndex, false)
+          : payoutAddress(xpubs.receive, t.sellerReceiveIndex ?? 0, false);
+      return { tx: buildDeposit({ trade: t, checked, coins: owned, changeAddress }), record };
+    });
+    if ('done' in prepared) return prepared.done;
+    const { tx, record } = prepared;
     const signedTxHex = await wallet.sign(tx.request, tx.inputPaths);
     if (store) saveDeposit(store, t.id, signedTxHex);
     const recorded = await record(signedTxHex);
@@ -188,7 +194,7 @@ export function SellerAction(props: { trade: Trade; amount: string; fiat: string
   const release = () =>
     run('release', 'The coins were not released', async () => {
       if (!xpubs) throw new WalletDeclined();
-      const built = await buildSellerRelease(trade, await keptElectrum(), xpubs.defi);
+      const built = await withKeptElectrum((provider) => buildSellerRelease(trade, provider, xpubs.defi));
       const signedTxHex = await wallet.sign(built.request, built.inputPaths);
       return apiPost<{ trade: Trade }>(`/api/trades/${trade.id}/settle`, { path: 'release', signedTxHex }).then((r) => r.trade);
     });

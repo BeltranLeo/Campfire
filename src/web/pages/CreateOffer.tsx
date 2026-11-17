@@ -9,7 +9,7 @@ import { HashLink, ProvenanceTag } from '../components/Provenance';
 import { Notice, Skeleton } from '../components/States';
 import { describeScan, scanWalletCoins, spendableBch } from '../coins';
 import { useConfig } from '../config';
-import { findUnusedReceiveIndex, keptElectrum } from '../electrum';
+import { findUnusedReceiveIndex, withKeptElectrum } from '../electrum';
 import { applyMargin, formatBch, formatDateTime, formatFiat, formatFiatAmount } from '../format';
 import { usePoll } from '../hooks/usePoll';
 import { refreshWalletCoins, useWalletCoins } from '../walletCoins';
@@ -147,15 +147,16 @@ export function CreateOffer() {
     const markerAddress = payoutAddress(xpubs.receive, prep.data.markerIndex, false);
     const changeAddress = xpubs.change && prep.data.changeIndex !== null ? payoutAddress(xpubs.change, prep.data.changeIndex, false) : markerAddress;
     // The coins are read again now, so a coin spent since the last refresh is never used.
-    const provider = await keptElectrum();
-    const tx = buildPublishOfferTransaction({
-      provider,
-      document: built.document,
-      offerJson: built.json,
-      utxos: (await scanWalletCoins(provider, xpubs)).coins,
-      markerAddress,
-      changeAddress,
-    });
+    const tx = await withKeptElectrum(async (provider) =>
+      buildPublishOfferTransaction({
+        provider,
+        document: built.document,
+        offerJson: built.json,
+        utxos: (await scanWalletCoins(provider, xpubs)).coins,
+        markerAddress,
+        changeAddress,
+      }),
+    );
     const signedTxHex = await wallet.sign(tx.request, tx.inputPaths);
     const { offer } = await apiPost<{ offer: Offer }>('/api/offers', {
       sellerIdentity: identity,
