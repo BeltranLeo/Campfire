@@ -6,10 +6,11 @@ import { pkhToCashAddress } from '../../protocol/keys.js';
 import { verifyPriceQuote } from '../../protocol/trades.js';
 import { ApiError, apiGet, apiPost, type Reputation, type Trade } from '../api';
 import { assetInfo, type AssetInfo } from '../assets';
-import { Button, WALLET_DECLINED } from '../components/Button';
+import { ActionCard } from '../components/ActionCard';
+import { Button } from '../components/Button';
+import { DisputeForm } from '../components/DisputeForm';
 import { CopyButton } from '../components/CopyButton';
 import { Details } from '../components/Details';
-import { Icon } from '../components/Icon';
 import { HashLink, ProvenanceTag, SimBox } from '../components/Provenance';
 import { EmptyState, Notice, Skeleton } from '../components/States';
 import { StatusPill } from '../components/StatusPill';
@@ -28,8 +29,10 @@ import {
   formatHourMinute,
 } from '../format';
 import { usePoll } from '../hooks/usePoll';
+import { useTradeAction } from '../hooks/useTradeAction';
+import { SellerAction, SellerResult } from './SellerTrade';
+import { readSessionKey } from '../take';
 import {
-  TradeActionError,
   buildBuyerCancel,
   checkEscrow,
   disputeKeyHex,
@@ -47,7 +50,7 @@ import { WalletDeclined, useWallet } from '../wallet';
 // One trade, for the buyer or a visitor (Main, Trade-* screens). One column: title and status, the action
 // card (the only part that changes with the state), progress, and the on-chain details folded away.
 // The buyer can mark paid, open a dispute and cancel; the arbiter console is its own page (Arbiter.tsx).
-// Not here yet: the chat (step 12) and the seller's view (step 10).
+// The seller's own view is in SellerTrade.tsx. Not here yet: the chat (step 12).
 
 const POLL_MS = 3000;
 // Invented copy: generic reasons for a dispute, chosen from a list.
@@ -98,8 +101,7 @@ function TradeView({ trade, role, onUpdate, reload }: { trade: Trade; role: Role
   const amount = formatAmount(trade.amount, asset);
   const fiat = formatFiatAmount(trade.fiatAmount, trade.fiat);
   const payout = pkhToCashAddress(trade.buyerPayoutPkh, { tokenAware: !asset.isBch });
-  // The seller's own view comes with step 10; until then a seller sees what a visitor sees.
-  const view: Role = role === 'seller' ? 'visitor' : role;
+  const view: Role = role;
 
   // The browser checks the escrow itself before telling the buyer the coins are locked (protocol section 5).
   const [check, setCheck] = useState<EscrowCheck | null | 'error'>(null);
@@ -141,6 +143,10 @@ function TradeView({ trade, role, onUpdate, reload }: { trade: Trade; role: Role
             <Link className="s-back" to="/offers">
               ← Offers
             </Link>
+          ) : view === 'seller' ? (
+            <Link className="s-back" to="/trades">
+              ← My trades
+            </Link>
           ) : (
             <Link className="s-back" to="/transparency">
               ← Transparency
@@ -164,8 +170,14 @@ function TradeView({ trade, role, onUpdate, reload }: { trade: Trade; role: Role
           ) : (
             <BuyerAction trade={trade} amount={amount} fiat={fiat} check={check} ds={ds} onUpdate={onUpdate} reload={reload} />
           )
+        ) : view === 'seller' ? (
+          isFinal(trade) ? (
+            <SellerResult trade={trade} amount={amount} />
+          ) : (
+            <SellerAction trade={trade} amount={amount} fiat={fiat} onUpdate={onUpdate} />
+          )
         ) : (
-          <VisitorCard trade={trade} sellerViewing={role === 'seller'} />
+          <VisitorCard trade={trade} />
         )}
 
         <section className="cf-card" data-flush>
@@ -185,25 +197,6 @@ function TradeView({ trade, role, onUpdate, reload }: { trade: Trade; role: Role
 
 // --- Action card (the buyer, while the trade is open) ---
 
-function ActionCard(props: { step: string; title: string; reassurance?: ReactNode; deadline?: ReactNode; children?: ReactNode }) {
-  return (
-    <section className="cf-card s-action" data-flush>
-      <div className="cf-card__section">
-        <span className="cf-stepper">{props.step}</span>
-        <h2 className="cf-heading">{props.title}</h2>
-        {props.reassurance && (
-          <p className="cf-row cf-small" data-nowrap style={{ color: 'var(--chain)', alignItems: 'flex-start' }}>
-            <Icon name="shield" />
-            <span>{props.reassurance}</span>
-          </p>
-        )}
-        {props.deadline && <div className="s-deadline">{props.deadline}</div>}
-        {props.children}
-      </div>
-    </section>
-  );
-}
-
 function BuyerAction(props: {
   trade: Trade;
   amount: string;
@@ -215,43 +208,9 @@ function BuyerAction(props: {
 }) {
   const { trade } = props;
   const wallet = useWallet();
-  // Which action is running; the others wait, so two writes never race.
-  const [busy, setBusy] = useState<'paid' | 'dispute' | 'cancel' | null>(null);
-  const [error, setError] = useState<{ title: string; message: string } | null>(null);
-  // The dispute asks for a reason first (a generic list, plus optional details), so it opens a small form.
+  const { busy, error, run } = useTradeAction<'paid' | 'dispute' | 'cancel'>(trade, wallet.identity, props.onUpdate);
+  // The dispute asks for a reason first, so it opens a small form.
   const [disputing, setDisputing] = useState(false);
-  const [reason, setReason] = useState('');
-  const [details, setDetails] = useState('');
-
-  // Runs one write. The answer may be lost after the server recorded it (the demo seller releases within
-  // the request; a cancel is broadcast within it): read the trade again before reporting an error, and
-  // never offer the same step twice.
-  async function run(action: 'paid' | 'dispute' | 'cancel', failed: string, write: () => Promise<Trade>) {
-    setBusy(action);
-    setError(null);
-    try {
-      props.onUpdate(await write());
-    } catch (err) {
-      if (err instanceof WalletDeclined) {
-        setError({ title: failed, message: WALLET_DECLINED });
-        return;
-      }
-      if (err instanceof TradeActionError) {
-        setError({ title: failed, message: err.message });
-        return;
-      }
-      try {
-        const { trade: latest } = await apiGet<{ trade: Trade }>(`/api/trades/${trade.id}?viewer=${wallet.identity}`);
-        props.onUpdate(latest);
-        if (latest.status !== trade.status) return;
-      } catch {
-        // Fall through to the original error.
-      }
-      setError({ title: failed, message: err instanceof ApiError ? err.message : 'Something went wrong. Try again.' });
-    } finally {
-      setBusy(null);
-    }
-  }
 
   const markPaid = () =>
     run('paid', 'The trade was not marked as paid', () =>
@@ -259,7 +218,7 @@ function BuyerAction(props: {
     );
 
   // The chat key goes along when this browser has it, so the arbiter can read the messages (protocol section 6).
-  const openDispute = () =>
+  const openDispute = (reason: string, details: string) =>
     run('dispute', 'The dispute was not opened', () => {
       const sharedTradeKeyHex = disputeKeyHex(readSessionKey(trade.id), trade.sellerSessionPk);
       const extra = details.trim();
@@ -289,41 +248,8 @@ function BuyerAction(props: {
       Open dispute
     </Button>
   );
-  // Invented copy: the design has no screen for the reason.
   const disputeForm = disputing && (
-    <div className="cf-well cf-stack" data-gap="3">
-      <div className="cf-field">
-        <label htmlFor="dispute-reason">Why are you opening a dispute?</label>
-        <select id="dispute-reason" className="cf-select" value={reason} onChange={(e) => setReason(e.target.value)}>
-          <option value="" disabled>
-            Choose a reason
-          </option>
-          {DISPUTE_REASONS.map((r) => (
-            <option key={r}>{r}</option>
-          ))}
-        </select>
-      </div>
-      <div className="cf-field">
-        <label htmlFor="dispute-details">More details (optional)</label>
-        <textarea
-          id="dispute-details"
-          className="cf-textarea"
-          rows={3}
-          maxLength={500}
-          value={details}
-          onChange={(e) => setDetails(e.target.value)}
-        />
-        <span className="cf-hint">The arbiter reads this when it decides.</span>
-      </div>
-      <div className="s-actions">
-        <Button busy={busy === 'dispute'} disabled={reason === '' || (busy !== null && busy !== 'dispute')} onClick={openDispute}>
-          Send dispute
-        </Button>
-        <Button variant="ghost" disabled={busy !== null} onClick={() => setDisputing(false)}>
-          Back
-        </Button>
-      </div>
-    </div>
+    <DisputeForm reasons={DISPUTE_REASONS} busy={busy === 'dispute'} locked={busy !== null} onSend={openDispute} onBack={() => setDisputing(false)} />
   );
   const cancelButton = (
     <Button
@@ -592,14 +518,6 @@ function PaymentDetails({ trade, fiat }: { trade: Trade; fiat: string }) {
   );
 }
 
-function readSessionKey(tradeId: string): string | null {
-  try {
-    return localStorage.getItem(`campfire.session.${tradeId}`);
-  } catch {
-    return null;
-  }
-}
-
 // --- Endings ---
 
 function BuyerResult({ trade, amount, payout }: { trade: Trade; amount: string; payout: string }) {
@@ -714,21 +632,15 @@ function BuyerResult({ trade, amount, payout }: { trade: Trade; amount: string; 
   );
 }
 
-function VisitorCard({ trade, sellerViewing }: { trade: Trade; sellerViewing: boolean }) {
+function VisitorCard({ trade }: { trade: Trade }) {
   const ended = trade.completedAt ?? trade.verdictIssuedAt;
   return (
     <section className="cf-card" data-flush>
       <div className="cf-card__section">
         <div className="cf-stack">
-          {sellerViewing ? (
-            <Notice title="You are the seller in this trade.">
-              The seller's view of this page is not built yet. Everything on-chain is public and linked below.
-            </Notice>
-          ) : (
-            <Notice title="You are viewing this trade as a visitor.">
-              Payment details and chat are visible only to the buyer and the seller. Everything on-chain is public and linked below.
-            </Notice>
-          )}
+          <Notice title="You are viewing this trade as a visitor.">
+            Payment details and chat are visible only to the buyer and the seller. Everything on-chain is public and linked below.
+          </Notice>
           {isFinal(trade) && (
             <dl className="cf-dl">
               {trade.settlementTxid && (
@@ -766,7 +678,10 @@ function OnChainDetails(props: {
   view: Role;
 }) {
   const { trade, asset } = props;
-  const reputation = usePoll(() => apiGet<Reputation>(`/api/identities/${trade.sellerIdentity}/reputation`), trade.sellerIdentity);
+  // The other person: the seller for the buyer and visitors, the buyer for the seller.
+  const party = props.view === 'seller' ? 'buyer' : 'seller';
+  const partyIdentity = party === 'buyer' ? trade.buyerIdentity : trade.sellerIdentity;
+  const reputation = usePoll(() => apiGet<Reputation>(`/api/identities/${partyIdentity}/reputation`), partyIdentity);
   const expected = expectedEscrowFunding({ asset: trade.asset, amount: trade.amount });
   const holds = expected.token
     ? `${formatAmount(expected.satoshis, { symbol: 'BCH', decimals: 8, isBch: true })} + ${props.amount}`
@@ -902,17 +817,17 @@ function OnChainDetails(props: {
       <section className="cf-card" data-flush>
         <div className="cf-card__section">
           <div className="cf-row" data-between style={{ marginBottom: 'var(--space-2)' }}>
-            <h2 className="cf-heading">Seller</h2>
-            {trade.isDemo && <ProvenanceTag kind="sim">Simulated fiat</ProvenanceTag>}
+            <h2 className="cf-heading">{party === 'buyer' ? 'Buyer' : 'Seller'}</h2>
+            {party === 'seller' && trade.isDemo && <ProvenanceTag kind="sim">Simulated fiat</ProvenanceTag>}
           </div>
           <div className="cf-stack" data-gap="1">
             <span>
-              {trade.isDemo && <strong>Demo seller </strong>}
-              <HashLink value={trade.sellerIdentity} kind="plain" />
+              {party === 'seller' && trade.isDemo && <strong>Demo seller </strong>}
+              <HashLink value={partyIdentity} kind="plain" />
             </span>
             {rep && (
               <span className="cf-small">
-                <strong>{rep.completedAsSeller}</strong> completed as seller
+                <strong>{party === 'buyer' ? rep.completedAsBuyer : rep.completedAsSeller}</strong> completed as {party}
                 {rep.firstCompletedAt !== null && ` · since ${formatDate(rep.firstCompletedAt)}`}
               </span>
             )}

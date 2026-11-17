@@ -28,11 +28,13 @@ export function newerTrade<T extends Pick<Trade, 'id' | 'updatedAt'>>(current: T
 
 export const isFinal = (trade: Pick<Trade, 'status'>) => isFinalState(trade.status);
 
-/** "Buy 15,000 sats for 0.07 USD", "Bought …" once the buyer has the coins, no verb for visitors. */
+/** "Buy 15,000 sats for 0.07 USD", "Bought …" once the buyer has the coins; "Sell …" / "Sold …" for the seller; no verb for visitors. */
 export function tradeTitle(status: TradeState, role: Role, amount: string, fiat: string): string {
   const what = `${amount} for ${fiat}`;
   if (role === 'visitor') return what;
-  return status === 'Released' || status === 'ResolvedBuyer' ? `Bought ${what}` : `Buy ${what}`;
+  const done = status === 'Released' || status === 'ResolvedBuyer';
+  if (role === 'seller') return done ? `Sold ${what}` : `Sell ${what}`;
+  return done ? `Bought ${what}` : `Buy ${what}`;
 }
 
 export interface Step {
@@ -51,49 +53,60 @@ export interface Step {
 
 /**
  * Four fixed steps (take, fund, pay, release). An ending other than Released replaces the steps
- * that did not happen with what did. `amount` is the formatted amount ("15,000 sats").
+ * that did not happen with what did. `amount` is the formatted amount ("15,000 sats"). The seller's own
+ * view adds a step for accepting before the deposit and words every step as "you".
  */
 export function timeline(trade: Trade, role: Role, amount: string): Step[] {
   const you = role === 'buyer';
+  const mine = role === 'seller';
   const buyer = you ? 'You' : 'Buyer';
   const toBuyer = you ? 'to your wallet' : 'to the buyer';
   const s = trade.status;
   const funded = trade.fundingTxid !== undefined;
   const paid = trade.paidAt !== undefined;
 
-  const steps: Step[] = [{ state: 'done', title: `${buyer} took the offer`, at: trade.createdAt, offchain: true }];
+  const steps: Step[] = [{ state: 'done', title: mine ? 'Buyer took your offer' : `${buyer} took the offer`, at: trade.createdAt, offchain: true }];
 
   // Step 2: the seller accepts and funds the escrow.
   if (funded) {
     steps.push({
       state: 'done',
-      title: 'Seller funded the escrow',
+      title: mine ? 'You funded the escrow' : 'Seller funded the escrow',
       at: trade.fundedAt,
       txid: trade.fundingTxid,
       confirmations: trade.fundingConfirmations,
     });
+  } else if (mine && s === 'Accepted') {
+    steps.push({ state: 'done', title: 'You accepted', offchain: true, note: 'Payment details encrypted for the buyer' });
+    steps.push({ state: 'current', title: 'You fund the escrow', note: 'Funding window: 30 min' });
   } else if (s === 'Requested' || s === 'Accepted') {
-    steps.push({ state: 'current', title: 'Seller accepts and funds the escrow', note: 'Up to 10 min to accept, then 30 min to fund' });
+    steps.push({
+      state: 'current',
+      title: mine ? 'You accept and fund the escrow' : 'Seller accepts and funds the escrow',
+      note: 'Up to 10 min to accept, then 30 min to fund',
+    });
   } else {
     // Dropped before any deposit: nothing reached the chain.
-    steps.push({ state: 'failed', title: 'The seller did not accept and fund in time', at: trade.updatedAt });
+    steps.push({ state: 'failed', title: mine ? 'The trade was dropped' : 'The seller did not accept and fund in time', at: trade.updatedAt });
     return steps;
   }
 
   // Step 3: the buyer pays off-chain and marks it.
+  const pays = `${buyer} send${you ? '' : 's'} the payment and mark${you ? '' : 's'} it as paid`;
   if (paid) {
     steps.push({ state: 'done', title: `${buyer} marked the payment as sent`, at: trade.paidAt, offchain: true, simulated: trade.isDemo });
   } else if (s === 'Funded') {
-    steps.push({ state: 'current', title: `${buyer} send${you ? '' : 's'} the payment and mark${you ? '' : 's'} it as paid`, note: windowNote(trade) });
+    steps.push({ state: 'current', title: pays, note: windowNote(trade) });
   } else if (s === 'Requested' || s === 'Accepted') {
-    steps.push({ state: 'todo', title: `${buyer} send${you ? '' : 's'} the payment and mark${you ? '' : 's'} it as paid` });
+    steps.push({ state: 'todo', title: pays });
   } else if (s === 'ResolvedSeller' && !trade.disputedAt) {
     steps.push({ state: 'failed', title: 'Payment window ended without a payment', at: trade.verdictIssuedAt });
   }
 
   // A dispute takes the place of the release while it is open, and stays in the story once it is decided.
   if (trade.disputedAt !== undefined && s !== 'Dropped') {
-    const by = trade.disputedBy === 'seller' ? 'the seller' : trade.disputedBy === 'buyer' ? (you ? 'you' : 'the buyer') : undefined;
+    const opener = trade.disputedBy;
+    const by = opener === 'seller' ? (mine ? 'you' : 'the seller') : opener === 'buyer' ? (you ? 'you' : 'the buyer') : undefined;
     steps.push({
       state: s === 'Disputed' ? 'current' : 'done',
       title: by ? `Dispute opened by ${by}` : 'Dispute opened',
@@ -103,7 +116,7 @@ export function timeline(trade: Trade, role: Role, amount: string): Step[] {
   }
 
   // Step 4, or the ending that replaced it.
-  const release = `Seller releases ${amount} ${toBuyer}`;
+  const release = mine ? 'You confirm the payment and release' : `Seller releases ${amount} ${toBuyer}`;
   switch (s) {
     case 'Requested':
     case 'Accepted':
@@ -117,19 +130,19 @@ export function timeline(trade: Trade, role: Role, amount: string): Step[] {
       steps.push({ state: 'todo', title: 'Arbiter decides: funds go to buyer or seller' });
       break;
     case 'Released':
-      steps.push({ state: 'done', title: `Seller released ${amount} ${toBuyer}`, at: trade.completedAt, txid: trade.settlementTxid });
+      steps.push({ state: 'done', title: `${mine ? 'You released' : 'Seller released'} ${amount} ${toBuyer}`, at: trade.completedAt, txid: trade.settlementTxid });
       break;
     case 'ResolvedBuyer':
       steps.push({ state: 'done', title: `Arbiter released ${amount} ${toBuyer}`, at: trade.completedAt ?? trade.verdictIssuedAt, txid: trade.settlementTxid });
       break;
     case 'ResolvedSeller':
-      steps.push({ state: 'done', title: `Arbiter returned ${amount} to the seller`, at: trade.completedAt ?? trade.verdictIssuedAt, txid: trade.settlementTxid });
+      steps.push({ state: 'done', title: `Arbiter returned ${amount} to ${mine ? 'you' : 'the seller'}`, at: trade.completedAt ?? trade.verdictIssuedAt, txid: trade.settlementTxid });
       break;
     case 'Cancelled':
-      steps.push({ state: 'done', title: `${buyer} cancelled: the escrow returned ${amount} to the seller`, at: trade.completedAt, txid: trade.settlementTxid });
+      steps.push({ state: 'done', title: `${buyer} cancelled: the escrow returned ${amount} to ${mine ? 'you' : 'the seller'}`, at: trade.completedAt, txid: trade.settlementTxid });
       break;
     case 'Refunded':
-      steps.push({ state: 'done', title: `The seller recovered ${amount} after the refund time`, at: trade.completedAt, txid: trade.settlementTxid });
+      steps.push({ state: 'done', title: `${mine ? 'You' : 'The seller'} recovered ${amount} after the refund time`, at: trade.completedAt, txid: trade.settlementTxid });
       break;
     case 'Dropped':
       steps.push({ state: 'failed', title: 'The trade was dropped', at: trade.updatedAt });
@@ -140,12 +153,13 @@ export function timeline(trade: Trade, role: Role, amount: string): Step[] {
 
 /**
  * The key buyer and seller share for the chat, handed to the arbiter with a dispute so it can read the
- * messages (protocol section 6). Undefined when this browser has no session key for the trade.
+ * messages (protocol section 6). `peerSessionPk` is the OTHER party's session key: the seller's for the buyer,
+ * the buyer's for the seller. Undefined when this browser has no session key for the trade.
  */
-export function disputeKeyHex(sessionPrivateKey: string | null, sellerSessionPk: string | undefined): string | undefined {
-  if (!sessionPrivateKey || !sellerSessionPk) return undefined;
+export function disputeKeyHex(sessionPrivateKey: string | null, peerSessionPk: string | undefined): string | undefined {
+  if (!sessionPrivateKey || !peerSessionPk) return undefined;
   try {
-    return binToHex(deriveSharedTradeKey(sessionPrivateKey, sellerSessionPk));
+    return binToHex(deriveSharedTradeKey(sessionPrivateKey, peerSessionPk));
   } catch {
     return undefined;
   }

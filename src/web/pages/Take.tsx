@@ -8,21 +8,20 @@ import { CoinIcon } from '../components/CoinIcon';
 import { HashLink, ProvenanceTag } from '../components/Provenance';
 import { EmptyState, Notice, Skeleton } from '../components/States';
 import { useConfig } from '../config';
-import { findUnusedReceiveIndex } from '../electrum';
 import { applyMargin, formatAmount, formatClock, formatFiat, formatFiatAmount, formatPaymentWindow, formatRange, fromBaseUnits } from '../format';
+import { prepareIndices } from '../indices';
 import { useNow } from '../hooks/useNow';
 import { usePoll } from '../hooks/usePoll';
 import {
+  browserStore,
   buildTakeRequest,
   commitSession,
   demoLimitKind,
   findStartedTrade,
   generateSessionKeyPair,
-  nextIndices,
   parseAmount,
   payoutAddress,
   savePendingSession,
-  type SessionStore,
 } from '../take';
 import { useWallet } from '../wallet';
 
@@ -125,17 +124,7 @@ function TakeOffer({ offer }: { offer: Offer }) {
   // --- The buyer's keys: next Campfire indices, and a payout address never used on-chain ---
   const identity = wallet.status === 'connected' ? wallet.identity : null;
   const xpubs = wallet.xpubs;
-  const prep = usePoll(async () => {
-    if (!identity || !xpubs) return null;
-    const { trades } = await apiGet<{ trades: TradeSummary[] }>(`/api/trades?identity=${identity}`);
-    const next = nextIndices(trades, identity);
-    try {
-      return { defi: next.defi, receive: await findUnusedReceiveIndex(xpubs.receive, next.receive), fresh: true };
-    } catch {
-      // Without the chain lookup the address may have been used before, so the page does not call it fresh.
-      return { defi: next.defi, receive: next.receive, fresh: false };
-    }
-  }, identity ?? 'none');
+  const prep = usePoll(() => (identity && xpubs ? prepareIndices(identity, xpubs, 'buyer') : Promise.resolve(null)), identity ?? 'none');
   const payout = prep.data && xpubs ? payoutAddress(xpubs.receive, prep.data.receive, !asset.isBch) : null;
 
   // --- Taking ---
@@ -444,17 +433,5 @@ function LimitNotice({ message, demo }: { message: string; demo: DemoInfo | null
       );
     default:
       return <Notice tone="warn">{message}</Notice>;
-  }
-}
-
-// localStorage can be blocked (private windows); the take still works, but this browser then cannot
-// read the payment details or the chat later.
-function browserStore(): SessionStore | null {
-  try {
-    localStorage.setItem('campfire.storage-check', '1');
-    localStorage.removeItem('campfire.storage-check');
-    return localStorage;
-  } catch {
-    return null;
   }
 }

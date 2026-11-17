@@ -127,3 +127,24 @@ export function loadPendingSession(store: SessionStore, offerTxid: string): Sess
     return null;
   }
 }
+
+// localStorage can be blocked (private windows); a trade still works, but this browser then cannot
+// read the payment details or the chat later.
+export function browserStore(): SessionStore | null {
+  try {
+    localStorage.setItem('campfire.storage-check', '1');
+    localStorage.removeItem('campfire.storage-check');
+    return localStorage;
+  } catch {
+    return null;
+  }
+}
+
+/** This browser's session private key for a trade, if it has one. */
+export function readSessionKey(tradeId: string): string | null {
+  try {
+    return localStorage.getItem(sessionKey(tradeId));
+  } catch {
+    return null;
+  }
+}
