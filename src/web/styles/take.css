@@ -1,0 +1,4 @@
+/* Take-offer page: the amount field with its currency toggle, and the big answer in the well. */
+.tk-label { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: var(--space-2); }
+.tk-label > label { font-size: 13px; line-height: 18px; font-weight: 600; }
+.tk-big { font-family: var(--font-display); font-size: 26px; line-height: 32px; font-weight: 600; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }

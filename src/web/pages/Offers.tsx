@@ -1,22 +1,27 @@
 import { useState } from 'react';
-import { useSearchParams } from 'react-router';
-import { ApiError, apiGet, type Offer } from '../api';
+import { Link, useSearchParams } from 'react-router';
+import { aliasFor } from '../alias';
+import { ApiError, apiGet, type Offer, type PriceQuote } from '../api';
 import { assetInfo } from '../assets';
 import { Button } from '../components/Button';
-import { OfferHead, OfferRow, OfferRowSkeleton } from '../components/OfferRow';
+import { OfferRow, OfferRowSkeleton } from '../components/OfferRow';
+import { ProvenanceTag } from '../components/Provenance';
 import { EmptyState, Notice } from '../components/States';
 import { useConfig } from '../config';
 import {
-  describeMargin,
+  formatAmount,
   formatClock,
   formatFiat,
+  formatFiatAmount,
   formatPaymentWindow,
   formatRange,
   paymentMethodLabel,
 } from '../format';
+import { fiatForUnits, parseFiatCents, unitsForFiat } from '../fiatAmount';
+import { parseAmount } from '../take';
 import { usePoll } from '../hooks/usePoll';
 import { usePrefs } from '../prefs';
-import { describeReputation, loadQuotes, loadReputations, priceOf, unique } from '../offerData';
+import { loadQuotes, loadReputations, priceOf, unique } from '../offerData';
 
 // The offer list (Offers-* screens). The visitor starts from an intention: "I want to buy" lists
 // sell offers, "I want to sell" lists buy offers. The choice lives in the URL (?side=sell) so the
@@ -48,6 +53,8 @@ export function Offers() {
   const [chosenCoin, setCoin] = useState(prefs?.assets.length === 1 ? prefs.assets[0] : '');
   const [chosenFiat, setFiat] = useState(prefs?.fiat.length === 1 ? prefs.fiat[0] : '');
   const [chosenMethod, setMethod] = useState('');
+  // What the visitor wants to pay (buying) or sell (selling). Component state only: it is a question, not a setting.
+  const [amount, setAmount] = useState('');
   const clearFilters = () => {
     setCoin('');
     setFiat('');
@@ -57,6 +64,7 @@ export function Offers() {
   const switchTo = (next: 'buy' | 'sell') => {
     if (next === intent) return;
     clearFilters();
+    setAmount('');
     setParams({ side: next });
   };
 
@@ -72,16 +80,52 @@ export function Offers() {
   const fiat = fiatOptions.includes(chosenFiat) ? chosenFiat : '';
   const method = methodOptions.includes(chosenMethod) ? chosenMethod : '';
 
-  const rows = sideOffers
+  const filtered = sideOffers
     .map((offer) => ({ offer, asset: assetInfo(offer.document.asset, offer.document.assetDecimals, config) }))
     .filter(
       ({ offer, asset }) =>
         (!coin || asset.symbol === coin) &&
         (!fiat || offer.document.fiat === fiat) &&
         (!method || offer.document.paymentMethods.includes(method)),
-    )
-    // Demo offers first (the way in for a first visit), then BCH before tokens; otherwise the service's order.
-    .sort((a, b) => Number(b.offer.isDemo) - Number(a.offer.isDemo) || Number(b.asset.isBch) - Number(a.asset.isBch));
+    );
+
+  // The pay field needs one currency. Use the filtered one, else the one most listed offers are in.
+  const payFiat = fiat || majority(filtered.map(({ offer }) => offer.document.fiat));
+  const payCents = intent === 'buy' ? parseFiatCents(amount) : null;
+  const sellUnits = intent === 'sell' ? parseAmount(amount, 8) : null;
+  const typed = amount.trim() !== '';
+  const hasAmount = (payCents !== null && payFiat !== '') || (sellUnits !== null && sellUnits > 0n);
+
+  const quoted = filtered.map(({ offer, asset }) => {
+    const doc = offer.document;
+    const price = priceOf(offer, quotes.data?.byPair);
+    const rate = unitRate(offer, quotes.data?.byPair);
+    // Fixed order key: what the visitor gets for their amount, or null when the offer cannot answer.
+    let result: { text: string; sortKey: number } | null = null;
+    let outside = false;
+    if (hasAmount && rate) {
+      if (payCents !== null && doc.fiat === payFiat) {
+        const units = unitsForFiat({ fiatCents: payCents, unitPrice: rate.unitPrice, marginBps: rate.marginBps, assetDecimals: asset.decimals });
+        if (units === null) result = null;
+        else if (units < BigInt(doc.min) || units > BigInt(doc.max)) outside = true;
+        else result = { text: `≈ ${formatAmount(units, asset)}`, sortKey: Number(units) / 10 ** asset.decimals };
+      } else if (sellUnits !== null && asset.isBch) {
+        if (sellUnits < BigInt(doc.min) || sellUnits > BigInt(doc.max)) outside = true;
+        else {
+          const worth = fiatForUnits({ units: sellUnits, unitPrice: rate.unitPrice, marginBps: rate.marginBps, assetDecimals: asset.decimals });
+          if (worth !== null) result = { text: `≈ ${formatFiatAmount(worth, doc.fiat)}`, sortKey: Number(worth) };
+        }
+      }
+    }
+    return { offer, asset, price, result, outside, applies: hasAmount && (payCents !== null ? doc.fiat === payFiat : asset.isBch) };
+  });
+
+  const rows = hasAmount
+    ? // Answers first (most for the money), then offers that cannot answer, in the service's order.
+      [...quoted].sort((a, b) => (b.result?.sortKey ?? -1) - (a.result?.sortKey ?? -1))
+    : // Demo offers first (the way in for a first visit), then BCH before tokens; otherwise the service's order.
+      [...quoted].sort((a, b) => Number(b.offer.isDemo) - Number(a.offer.isDemo) || Number(b.asset.isBch) - Number(a.asset.isBch));
+  const demo = rows.find(({ offer }) => offer.isDemo)?.offer;
 
   const showSkeleton = offers.loading && !offers.data;
   const failed = !offers.data && Boolean(offers.error);
@@ -90,10 +134,9 @@ export function Offers() {
     ? 'Loading offers…'
     : failed
       ? 'Offers unavailable'
-      : `${rows.length} open ${rows.length === 1 ? 'offer' : 'offers'}`;
-
-  const party = offerSide === 'sell' ? 'Seller' : 'Buyer';
-  const rangeLabel = intent === 'buy' ? 'You get' : 'You give';
+      : hasAmount
+        ? `${rows.length} ${rows.length === 1 ? 'offer' : 'offers'} · most ${intent === 'buy' ? 'BCH' : 'money'} for your ${intent === 'buy' ? 'money' : 'BCH'} first`
+        : `${rows.length} open ${rows.length === 1 ? 'offer' : 'offers'}`;
 
   return (
     <main className="s-main">
@@ -142,6 +185,43 @@ export function Offers() {
           onChange={setMethod}
         />
       </div>
+      {!showSkeleton && !failed && sideOffers.length > 0 && (intent === 'sell' || payFiat) && (
+        <div className="cf-field o-amount">
+          <label htmlFor="offers-amount">{intent === 'buy' ? 'I want to pay' : 'I want to sell'}</label>
+          <div className="cf-inputgroup">
+            <input
+              id="offers-amount"
+              className="cf-input o-amountinput"
+              inputMode="decimal"
+              autoComplete="off"
+              placeholder={intent === 'buy' ? '10,000' : '0.01'}
+              value={amount}
+              onChange={(e) => setAmount(e.target.value)}
+              aria-describedby={typed && !hasAmount ? 'offers-amount-hint' : undefined}
+            />
+            <span className="cf-addon">{intent === 'buy' ? payFiat : 'BCH'}</span>
+          </div>
+          {typed && !hasAmount && (
+            <span id="offers-amount-hint" className="cf-hint">
+              Enter an amount like {intent === 'buy' ? '10,000' : '0.01'}.
+            </span>
+          )}
+        </div>
+      )}
+      {intent === 'sell' && !showSkeleton && !failed && (
+        <Link className="o-postlink" to="/offers/new">
+          Or post your own offer
+        </Link>
+      )}
+      {demo && !showSkeleton && !failed && (
+        <div className="cf-simbox o-demo">
+          <ProvenanceTag kind="sim">Demo</ProvenanceTag>
+          <span className="o-demotext">Try first with simulated {moneyWord(demo.document.fiat)}</span>
+          <Button size="sm" to={`/offers/${demo.offerTxid}`}>
+            Try
+          </Button>
+        </div>
+      )}
       <span className="cf-small cf-muted">
         {status}
         {updated}
@@ -174,34 +254,30 @@ export function Offers() {
         </section>
       ) : (
         <section className="cf-card" data-flush>
-          <OfferHead rangeLabel={rangeLabel} party={party} />
-          {rows.map(({ offer, asset }) => {
+          {rows.map(({ offer, asset, price, result, outside, applies }) => {
             const doc = offer.document;
-            const price = priceOf(offer, quotes.data?.byPair);
+            const alias = aliasFor(offer.sellerIdentity);
             const rep = reputations.data?.get(offer.sellerIdentity);
+            const range = formatRange(doc.min, doc.max, asset);
+            // Without a typed amount the headline is the price; with one it is the answer, or why there is none.
+            const priceText = price === null ? '—' : `${formatFiat(price, doc.fiat)}/${asset.symbol}`;
+            const headline = !applies ? priceText : outside ? "Outside this offer's range" : (result?.text ?? '—');
             return (
               <OfferRow
                 key={offer.offerTxid}
-                coin={asset.coin}
-                logo={asset.logo}
-                symbol={asset.symbol}
-                price={price === null ? null : formatFiat(price, doc.fiat)}
-                priceNote={doc.price.type === 'fixed' ? 'Fixed price' : describeMargin(doc.price.marginBps)}
-                isDemo={offer.isDemo}
-                range={formatRange(doc.min, doc.max, asset)}
-                rangeLabel={rangeLabel}
-                rangeFiat={price === null ? null : fiatRange(doc.min, doc.max, asset.decimals, price, doc.fiat)}
-                paymentMethods={doc.paymentMethods}
+                initials={alias.initials}
+                hue={alias.hue}
+                headline={headline}
+                headlineMuted={applies && (outside || !result)}
+                alias={alias.name}
+                trades={rep ? (offerSide === 'sell' ? rep.completedAsSeller : rep.completedAsBuyer) : null}
+                methods={doc.paymentMethods.map(paymentMethodLabel).join(', ')}
                 paymentWindow={formatPaymentWindow(doc.paymentWindowSec)}
-                partyLabel={party}
-                partyIdentity={offer.sellerIdentity}
-                reputation={rep ? describeReputation(rep, offerSide) : null}
-                arbiter={doc.arbiter}
-                offerTxid={offer.offerTxid}
+                range={!applies || outside ? range : null}
+                isDemo={offer.isDemo}
                 action={
-                  // The demo offers are the one-click way in for the jury, so they carry the primary button.
-                  <Button variant={offer.isDemo ? 'primary' : undefined} to={`/offers/${offer.offerTxid}`}>
-                    {intent === 'buy' ? 'Buy' : 'Sell'} {asset.symbol}
+                  <Button size="sm" to={`/offers/${offer.offerTxid}`}>
+                    {intent === 'buy' ? 'Buy' : 'Sell'}
                   </Button>
                 }
               />
@@ -210,19 +286,34 @@ export function Offers() {
         </section>
       )}
 
-      <p className="cf-small cf-subtle">
-        Completed trades are counted by Campfire. The number cannot be verified on-chain and can be inflated with a
-        second wallet.
+      <p className="cf-small cf-muted">
+        Names like Quiet Ember come from each person's key. Nobody chooses them, and trade counts come from Campfire
+        and can be inflated with a second wallet.
       </p>
     </main>
   );
 }
 
-/** "≈ 0.01 – 0.04 USD": what the range is worth at this price. Approximate; the trade fixes the exact amount. */
-function fiatRange(min: string, max: string, decimals: number, price: number, fiat: string): string {
-  const worth = (units: string) =>
-    ((Number(units) / 10 ** decimals) * price).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-  return `≈ ${worth(min)} – ${worth(max)} ${fiat}`;
+/** The price per whole coin as text, plus the margin to apply: the offer's own price, exactly as the trade will use it. */
+function unitRate(offer: Offer, quotes: Map<string, PriceQuote> | undefined): { unitPrice: string; marginBps: number } | null {
+  const price = offer.document.price;
+  if (price.type === 'fixed') return { unitPrice: price.value, marginBps: 0 };
+  const quote = quotes?.get(price.pair);
+  return quote ? { unitPrice: quote.price, marginBps: price.marginBps } : null;
+}
+
+/** "pesos" or "dollars" for the demo strip, so it never names a currency the demo offer does not use. */
+function moneyWord(fiat: string): string {
+  return fiat === 'ARS' ? 'pesos' : fiat === 'USD' ? 'dollars' : fiat;
+}
+
+/** The most common value, or '' for an empty list. */
+function majority(values: string[]): string {
+  const counts = new Map<string, number>();
+  for (const value of values) counts.set(value, (counts.get(value) ?? 0) + 1);
+  let best = '';
+  for (const [value, count] of counts) if (count > (counts.get(best) ?? 0)) best = value;
+  return best;
 }
 
 function Filter(props: {

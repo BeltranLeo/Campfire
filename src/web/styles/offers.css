@@ -1,0 +1,20 @@
+/* Offers list: compact comparable rows, the amount field and the demo strip. */
+
+.o-row { display: grid; grid-template-columns: 36px minmax(0, 1fr) auto; gap: var(--space-3); align-items: center; padding: var(--space-3) var(--space-4); border-top: 1px solid var(--line); }
+.o-row:first-child { border-top: 0; }
+.o-avatar { display: inline-flex; align-items: center; justify-content: center; width: 36px; height: 36px; border-radius: 50%; background: hsl(var(--hue, 30) 45% 38%); color: #fff; font: 700 13px/1 var(--font-display); letter-spacing: 0.02em; }
+.o-main { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+/* Amounts are for people to read: the sans font with tabular figures, never mono. */
+.o-headline { font: 700 16px/22px var(--font-display); font-variant-numeric: tabular-nums; color: var(--ink); overflow-wrap: anywhere; }
+.o-headline[data-muted] { font-weight: 500; font-size: 14px; color: var(--ink-muted); }
+.o-line { font-size: 13px; line-height: 18px; color: var(--ink-muted); font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+.o-cta { display: flex; }
+
+.o-amount { max-width: 360px; }
+.o-amountinput { font-variant-numeric: tabular-nums; font-weight: 600; }
+.o-postlink { align-self: flex-start; font-size: 14px; line-height: 20px; font-weight: 600; color: var(--ink); text-decoration: underline; text-underline-offset: 3px; }
+.o-postlink:hover { text-decoration-thickness: 2px; }
+
+/* A compact strip: it only points at the demo offer, whose page asks for a wallet itself. */
+.o-demo { display: flex; align-items: center; gap: var(--space-3); padding: var(--space-2) var(--space-3); border-radius: var(--radius-md); }
+.o-demotext { flex: 1; min-width: 0; font-size: 14px; line-height: 20px; }

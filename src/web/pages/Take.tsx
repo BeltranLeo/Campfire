@@ -1,14 +1,17 @@
 import { useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router';
-import { computeFiatAmount, verifyPriceQuote } from '../../protocol/trades.js';
+import { verifyPriceQuote } from '../../protocol/trades.js';
+import { aliasFor } from '../alias';
 import { ApiError, apiGet, apiPost, type DemoInfo, type Offer, type PriceQuote, type Reputation, type TradeSummary } from '../api';
 import { assetInfo, type AssetInfo } from '../assets';
 import { Button } from '../components/Button';
 import { CoinIcon } from '../components/CoinIcon';
+import { Details } from '../components/Details';
 import { HashLink, ProvenanceTag } from '../components/Provenance';
 import { EmptyState, Notice, Skeleton } from '../components/States';
 import { useConfig } from '../config';
-import { applyMargin, describeMargin, formatAmount, formatBch, formatClock, formatFiat, formatFiatAmount, formatPaymentWindow, formatRange, paymentMethodLabel, toAmountInput } from '../format';
+import { applyMargin, formatAmount, formatBch, formatClock, formatFiat, formatFiatAmount, formatPaymentWindow, formatRange, paymentMethodLabel, toAmountInput } from '../format';
+import { fiatForUnits } from '../fiatAmount';
 import { prepareIndices } from '../indices';
 import { depositNeeds } from '../seller';
 import { spendableBch } from '../coins';
@@ -27,6 +30,7 @@ import {
   payoutAddress,
   savePendingSession,
 } from '../take';
+import { effectiveMode, resolveAmount, usablePrice, type AmountMode } from '../takeAmount';
 import { useWallet } from '../wallet';
 
 // Taking an offer (Take-* screens). On a sell offer the buyer chooses an amount, sees an indicative signed quote and
@@ -97,12 +101,6 @@ function TakeOffer({ offer }: { offer: Offer }) {
   const reputation = usePoll(() => apiGet<Reputation>(`/api/identities/${offer.sellerIdentity}/reputation`), offer.sellerIdentity);
   const demo = usePoll(() => (offer.isDemo ? apiGet<DemoInfo>('/api/demo') : Promise.resolve(null)), String(offer.isDemo));
 
-  // --- Amount ---
-  const [input, setInput] = useState(() => toAmountInput(doc.min, asset));
-  const amount = parseAmount(input, doc.assetDecimals);
-  const inRange = amount !== null && amount >= BigInt(doc.min) && amount <= BigInt(doc.max);
-  const range = `${toAmountInput(doc.min, asset)} and ${formatAmount(doc.max, asset)}`;
-
   // --- Indicative quote, verified against the offer's oracle key ---
   const price = doc.price;
   const quote = usePoll(
@@ -121,10 +119,39 @@ function TakeOffer({ offer }: { offer: Offer }) {
   const expired = verified !== null && now / 1000 - verified.timestamp > QUOTE_MAX_AGE_SEC;
   const unitPrice = price.type === 'fixed' ? price.value : verified?.price ?? null;
   const marginBps = price.type === 'floating' ? price.marginBps : 0;
-  const youPay =
-    unitPrice && amount !== null && amount > 0n
-      ? formatFiatAmount(computeFiatAmount({ amount, assetDecimals: doc.assetDecimals, unitPrice, marginBps }), doc.fiat)
-      : null;
+
+  // --- Amount: money by default, because that is what the buyer has in mind ---
+  const asked = { min: BigInt(doc.min), max: BigInt(doc.max), assetDecimals: doc.assetDecimals, unitPrice, marginBps };
+  const priced = usablePrice(unitPrice, marginBps, doc.assetDecimals);
+  const [wanted, setWanted] = useState<AmountMode>('fiat');
+  const [fiatInput, setFiatInput] = useState<string | null>(null);
+  const [coinInput, setCoinInput] = useState(() => toAmountInput(doc.min, asset));
+  const mode = effectiveMode(wanted, { isBch: asset.isBch, hasPrice: priced });
+  const priceArgs = unitPrice ? { unitPrice, marginBps, assetDecimals: doc.assetDecimals } : null;
+  const fiatOf = (units: bigint) => (priceArgs && priced ? fiatForUnits({ units, ...priceArgs }) : null);
+  // Until the buyer types, the field offers the fiat price of the smallest amount.
+  const input = mode === 'fiat' ? (fiatInput ?? fiatOf(BigInt(doc.min)) ?? '') : coinInput;
+  const result = resolveAmount({ ...asked, mode, input });
+  const amount = result.units;
+  const inRange = result.state === 'ok';
+  const coinRange = `${toAmountInput(doc.min, asset)} and ${formatAmount(doc.max, asset)}`;
+  const fiatRange = (() => {
+    const lo = fiatOf(BigInt(doc.min));
+    const hi = fiatOf(BigInt(doc.max));
+    return lo && hi ? `${formatFiatAmount(lo, '').trim()} and ${formatFiatAmount(hi, '').trim()} ${doc.fiat}` : coinRange;
+  })();
+  // What the buyer pays is recomputed from the units that will be sent, never from the number typed.
+  const payFiat = amount !== null && amount > 0n ? fiatOf(amount) : null;
+  const youPay = payFiat ? formatFiatAmount(payFiat, doc.fiat) : null;
+
+  function chooseMode(next: AmountMode) {
+    // Carry the amount across so switching does not lose what was typed.
+    if (amount !== null && amount > 0n) {
+      if (next === 'coin') setCoinInput(toAmountInput(amount, asset));
+      else if (fiatOf(amount)) setFiatInput(fiatOf(amount));
+    }
+    setWanted(next);
+  }
 
   // --- The buyer's keys: next Campfire indices, and a payout address never used on-chain ---
   const identity = wallet.status === 'connected' ? wallet.identity : null;
@@ -216,7 +243,7 @@ function TakeOffer({ offer }: { offer: Offer }) {
               </dd>
               <dt>Seller</dt>
               <dd>
-                <HashLink value={offer.sellerIdentity} kind="plain" />
+                {aliasFor(offer.sellerIdentity).name}
                 {rep && ` · ${rep.completedAsSeller} completed`}
               </dd>
               {doc.terms && (
@@ -227,14 +254,18 @@ function TakeOffer({ offer }: { offer: Offer }) {
                   </dd>
                 </>
               )}
-              <dt>Offer</dt>
-              <dd>
-                <HashLink value={offer.offerTxid} kind="transaction" /> · <ProvenanceTag kind="chain" />
-              </dd>
             </dl>
           </div>
         </div>
       </section>
+
+      <OfferDetails
+        offer={offer}
+        party="Seller"
+        priceBy="seller"
+        quote={verified}
+        payout={identity ? { address: payout, fresh: prep.data?.fresh !== false } : null}
+      />
 
       {offer.status !== 'Published' ? (
         <section className="cf-card">
@@ -246,20 +277,44 @@ function TakeOffer({ offer }: { offer: Offer }) {
         <section className="cf-card" data-pad>
           <div className="s-form">
             <div className="cf-field" data-invalid={!inRange || undefined}>
-              <label htmlFor="amount">Amount to buy</label>
+              {asset.isBch ? (
+                <div className="tk-label">
+                  <label htmlFor="amount">You pay</label>
+                  <div className="cf-seg" role="group" aria-label="Type the amount in">
+                    <button type="button" aria-pressed={mode === 'fiat'} disabled={!priced} title={priced ? undefined : priceUnavailable} onClick={() => chooseMode('fiat')}>
+                      {doc.fiat}
+                    </button>
+                    <button type="button" aria-pressed={mode === 'coin'} onClick={() => chooseMode('coin')}>
+                      {asset.symbol}
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                <label htmlFor="amount">Amount to buy</label>
+              )}
               <div className="cf-inputgroup">
                 <input
                   id="amount"
                   className="cf-input"
-                  data-mono
+                  data-mono={mode === 'coin' || undefined}
                   inputMode="decimal"
                   value={input}
                   aria-invalid={!inRange || undefined}
-                  onChange={(e) => setInput(e.target.value)}
+                  onChange={(e) => (mode === 'fiat' ? setFiatInput(e.target.value) : setCoinInput(e.target.value))}
                 />
-                <span className="cf-addon">{asset.symbol}</span>
+                <span className="cf-addon">{mode === 'fiat' ? doc.fiat : asset.symbol}</span>
               </div>
-              <span className="cf-hint">{inRange ? `Between ${range}.` : `Enter an amount between ${range}.`}</span>
+              <span className="cf-hint">
+                {mode === 'fiat'
+                  ? inRange
+                    ? `Between ${fiatRange}`
+                    : result.state === 'invalid'
+                      ? `Enter an amount of money, between ${fiatRange}`
+                      : `That is outside what this offer accepts. Enter between ${fiatRange}`
+                  : inRange
+                    ? `Between ${coinRange}.`
+                    : `Enter an amount between ${coinRange}.`}
+              </span>
             </div>
 
             {expired ? (
@@ -267,25 +322,23 @@ function TakeOffer({ offer }: { offer: Offer }) {
                 The price was not refreshed for over 10 minutes. Get a new quote to continue.
               </Notice>
             ) : (
-              <QuoteWell
-                youPay={youPay}
+              <TakeWell
+                label={mode === 'fiat' ? 'You get' : 'You pay'}
+                big={mode === 'fiat' ? (amount !== null && amount > 0n ? `≈ ${formatAmount(amount, asset)}` : null) : youPay && `≈ ${youPay}`}
                 unitPrice={unitPrice}
                 marginBps={marginBps}
                 fiat={doc.fiat}
                 asset={asset}
-                quote={verified}
-                oracle={doc.oracle}
-                fixed={price.type === 'fixed'}
+                lockWhen="you take it"
                 loading={price.type === 'floating' && quote.loading && !quote.data}
               />
             )}
 
             {identity ? (
               <Notice title="You do not need any BCH.">
-                Taking an offer is free and needs no signature. The seller funds the escrow and its network fee. The
-                funds will be sent to{' '}
-                {payout ? <HashLink value={payout} kind="address" /> : <Skeleton width={160} style={{ display: 'inline-block' }} />}
-                {prep.data?.fresh === false ? ', an address of your wallet.' : ', a fresh address of your wallet.'}
+                Taking an offer is free and needs no signature. The seller locks the BCH and pays its network fee. The
+                funds will be sent to {prep.data?.fresh === false ? 'an address' : 'a fresh address'} of your wallet. The
+                address is under Offer details.
               </Notice>
             ) : (
               <Notice title="You do not need any BCH.">
@@ -351,7 +404,7 @@ function TakeOffer({ offer }: { offer: Offer }) {
                     !prep.data
                       ? 'Finding a fresh address of your wallet…'
                       : offer.isDemo
-                        ? 'No signature needed. The demo seller funds the escrow right away.'
+                        ? 'No signature needed. The demo seller locks the BCH right away.'
                         : 'No signature needed.'
                   }
                 >
@@ -399,10 +452,11 @@ function TakeBuyOffer({ offer }: { offer: Offer }) {
   const expired = verified !== null && now / 1000 - verified.timestamp > QUOTE_MAX_AGE_SEC;
   const unitPrice = price.type === 'fixed' ? price.value : verified?.price ?? null;
   const marginBps = price.type === 'floating' ? price.marginBps : 0;
-  const youReceive =
-    unitPrice && amount !== null && amount > 0n
-      ? formatFiatAmount(computeFiatAmount({ amount, assetDecimals: doc.assetDecimals, unitPrice, marginBps }), doc.fiat)
+  const receiveFiat =
+    unitPrice && amount !== null && amount > 0n && usablePrice(unitPrice, marginBps, doc.assetDecimals)
+      ? fiatForUnits({ units: amount, unitPrice, marginBps, assetDecimals: doc.assetDecimals })
       : null;
+  const youReceive = receiveFiat ? formatFiatAmount(receiveFiat, doc.fiat) : null;
 
   // The seller deposits once the buyer accepts, so the wallet must already hold the deposit: a request the seller
   // cannot fund would only make the buyer wait for nothing.
@@ -488,7 +542,7 @@ function TakeBuyOffer({ offer }: { offer: Offer }) {
               </dd>
               <dt>Buyer</dt>
               <dd>
-                <HashLink value={offer.sellerIdentity} kind="plain" />
+                {aliasFor(offer.sellerIdentity).name}
                 {rep && ` · ${rep.completedAsBuyer} ${rep.completedAsBuyer === 1 ? 'trade' : 'trades'} completed`}
               </dd>
               {doc.terms && (
@@ -499,15 +553,12 @@ function TakeBuyOffer({ offer }: { offer: Offer }) {
                   </dd>
                 </>
               )}
-              <dt>Offer</dt>
-              <dd>
-                <HashLink value={offer.offerTxid} kind="transaction" />
-                {offer.sponsored && <span className="cf-small cf-subtle"> Publishing fee paid by Campfire</span>}
-              </dd>
             </dl>
           </div>
         </div>
       </section>
+
+      <OfferDetails offer={offer} party="Buyer" priceBy="buyer" quote={verified} payout={null} />
 
       {offer.status !== 'Published' ? (
         <section className="cf-card">
@@ -544,16 +595,14 @@ function TakeBuyOffer({ offer }: { offer: Offer }) {
                 The price was not refreshed for over 10 minutes. Get a new quote to continue.
               </Notice>
             ) : (
-              <QuoteWell
-                seller
-                youPay={youReceive}
+              <TakeWell
+                label="You get"
+                big={youReceive && `≈ ${youReceive}`}
                 unitPrice={unitPrice}
                 marginBps={marginBps}
                 fiat={doc.fiat}
                 asset={asset}
-                quote={verified}
-                oracle={doc.oracle}
-                fixed={price.type === 'fixed'}
+                lockWhen="you send the request"
                 loading={price.type === 'floating' && quote.loading && !quote.data}
               />
             )}
@@ -632,53 +681,87 @@ function TakeBuyOffer({ offer }: { offer: Offer }) {
   );
 }
 
-function QuoteWell(props: {
-  youPay: string | null;
-  /** On a buy offer the seller receives the fiat and the buyer accepts. */
-  seller?: boolean;
+const priceUnavailable = 'The price could not be loaded or verified. It is retried every 30 s.';
+
+// The big figure is the answer to "what do I get / pay"; the small line says which price made it and how long it holds.
+function TakeWell(props: {
+  label: string;
+  big: string | null;
   unitPrice: string | null;
   marginBps: number;
   fiat: string;
   asset: AssetInfo;
-  quote: PriceQuote | null;
-  oracle?: string;
-  fixed: boolean;
+  /** "you take it" or "you send the request". */
+  lockWhen: string;
   loading: boolean;
 }) {
-  const priceText = props.unitPrice
-    ? `${formatFiat(applyMargin(props.unitPrice, props.marginBps), props.fiat)}/${props.asset.symbol}`
-    : null;
   return (
-    <div className="cf-well cf-stack" data-gap="3">
-      <div className="s-quote">
-        <div className="s-cell">
-          <span className="cf-label">{props.seller ? 'You receive' : 'You pay'}</span>
-          <span className="cf-amount">{props.youPay ?? (props.loading ? <Skeleton width={96} height={20} /> : '—')}</span>
-        </div>
-        <div className="s-cell">
-          <span className="cf-label">Price</span>
-          <span className="cf-mono">{priceText ?? (props.loading ? <Skeleton width={120} /> : '—')}</span>
-        </div>
-      </div>
-      {props.fixed ? (
+    <div className="cf-well cf-stack" data-gap="2">
+      <span className="cf-label">{props.label}</span>
+      <span className="tk-big">{props.big ?? (props.loading ? <Skeleton width={140} height={28} /> : '—')}</span>
+      {props.unitPrice ? (
         <p className="cf-small cf-muted">
-          {props.seller
-            ? 'Fixed price set by the buyer. It is locked when you send the request, and the buyer has '
-            : 'Fixed price set by the seller. It is locked when you take the offer and the seller has '}
-          <strong>10:00</strong> to accept it.
-        </p>
-      ) : props.quote && props.oracle ? (
-        <p className="cf-small cf-muted">
-          {props.seller && `${describeMargin(props.marginBps)}, `}
-          {props.seller ? 'signed' : 'Quote signed'} by oracle <HashLink value={props.oracle} kind="plain" /> at{' '}
-          {formatClock(new Date(props.quote.timestamp * 1000))}.
-          {props.seller ? ' The price is locked when you send the request, and the buyer has ' : ' It refreshes every 30 s. The price is locked when you take the offer and the seller has '}
-          <strong>10:00</strong> to accept it.
+          1 {props.asset.symbol} = {formatFiat(applyMargin(props.unitPrice, props.marginBps), props.fiat)} · Price locked for{' '}
+          <strong>10:00</strong> once {props.lockWhen}
         </p>
       ) : props.loading ? null : (
-        <p className="cf-small cf-muted">The price could not be loaded or verified. It is retried every 30 s.</p>
+        <p className="cf-small cf-muted">{priceUnavailable}</p>
       )}
     </div>
+  );
+}
+
+// Technical identifiers, folded: the On-chain tag stays visible in the summary.
+function OfferDetails(props: {
+  offer: Offer;
+  /** "Seller" on a sell offer, "Buyer" on a buy offer: whoever published it. */
+  party: 'Seller' | 'Buyer';
+  priceBy: 'seller' | 'buyer';
+  quote: PriceQuote | null;
+  payout: { address: string | null; fresh: boolean } | null;
+}) {
+  const { offer } = props;
+  const doc = offer.document;
+  return (
+    <Details summary="Offer details" tag={<ProvenanceTag kind="chain">On-chain</ProvenanceTag>}>
+      <dl className="cf-dl">
+        <dt>Offer</dt>
+        <dd>
+          <HashLink value={offer.offerTxid} kind="transaction" />
+          {offer.sponsored && <span className="cf-small cf-subtle"> Publishing fee paid by Campfire</span>}
+        </dd>
+        <dt>{props.party} ID</dt>
+        <dd>
+          <HashLink value={offer.sellerIdentity} kind="plain" />
+        </dd>
+        <dt>Arbiter</dt>
+        <dd>
+          <HashLink value={doc.arbiter} kind="plain" />
+        </dd>
+        <dt>Price source</dt>
+        <dd>
+          {doc.price.type === 'fixed' ? (
+            `Fixed by the ${props.priceBy}`
+          ) : doc.oracle ? (
+            <>
+              Oracle <HashLink value={doc.oracle} kind="plain" />
+              {props.quote && `, signed ${formatClock(new Date(props.quote.timestamp * 1000))}`}
+            </>
+          ) : (
+            '—'
+          )}
+        </dd>
+        {props.payout && (
+          <>
+            <dt>Payout address</dt>
+            <dd>
+              {props.payout.address ? <HashLink value={props.payout.address} kind="address" /> : <Skeleton width={160} style={{ display: 'inline-block' }} />}
+              <span className="cf-small cf-subtle">{props.payout.fresh ? ' A fresh address of your wallet.' : ' An address of your wallet.'}</span>
+            </dd>
+          </>
+        )}
+      </dl>
+    </Details>
   );
 }
 
