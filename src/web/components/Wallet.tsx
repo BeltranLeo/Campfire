@@ -187,6 +187,7 @@ function PairingDialog({ uri, qrUri, onClose }: { uri: string; qrUri: string; on
   const titleId = useId();
   const dialogRef = useRef<HTMLDivElement>(null);
   const [onPhone] = useState(() => window.matchMedia('(hover: none) and (pointer: coarse)').matches);
+  const [slow, setSlow] = useState(false);
 
   useEffect(() => {
     dialogRef.current?.focus();
@@ -196,6 +197,14 @@ function PairingDialog({ uri, qrUri, onClose }: { uri: string; qrUri: string; on
     document.addEventListener('keydown', onKey);
     return () => document.removeEventListener('keydown', onKey);
   }, [onClose]);
+
+  // If the wallet has not answered after 20 seconds, remind the user to open the app and scan again.
+  useEffect(() => {
+    const timer = setTimeout(() => setSlow(true), 20_000);
+    return () => clearTimeout(timer);
+  }, []);
+
+  const steps = ['Open your wallet app', 'Tap Scan', 'Approve Campfire'];
 
   return (
     <div
@@ -218,8 +227,7 @@ function PairingDialog({ uri, qrUri, onClose }: { uri: string; qrUri: string; on
           <>
             {/* The phone may pause this page while the wallet is open; coming back lets it finish the pairing. */}
             <p className="cf-small cf-muted">
-              Open Selene or Paytaca on this phone to pair. If the wallet keeps saying it is connecting, come back to
-              this tab.
+              Open your wallet app on this phone to pair. If it keeps saying it is connecting, come back to this tab.
             </p>
             <a className="cf-btn" data-variant="primary" data-block href={uri}>
               Open in wallet
@@ -236,22 +244,38 @@ function PairingDialog({ uri, qrUri, onClose }: { uri: string; qrUri: string; on
           </>
         ) : (
           <>
-            <p className="cf-small cf-muted">Scan with Selene or Paytaca. Pairing uses WizardConnect.</p>
-            <div style={{ display: 'grid', placeItems: 'center' }}>
+            <div className="pr-scan">
+              <ol className="pr-steps">
+                {steps.map((step, i) => (
+                  <li key={step} className="pr-step">
+                    <span className="pr-dot" aria-hidden="true">
+                      {i + 1}
+                    </span>{' '}
+                    <span>{step}</span>
+                  </li>
+                ))}
+              </ol>
               <PairingQr value={qrUri} />
             </div>
-            <div className="cf-well cf-row" data-between data-nowrap>
-              <span className="cf-mono" style={{ overflowWrap: 'anywhere' }} title={uri}>
-                {uri.length > 28 ? `${uri.slice(0, 20)}…${uri.slice(-4)}` : uri}
-              </span>
-              <CopyButton value={uri} />
-            </div>
+            <details className="pr-fold">
+              <summary className="cf-small pr-fold__summary">Can't scan?</summary>
+              <div className="pr-fold__body">
+                <p className="cf-small cf-muted">Copy this link into your wallet instead.</p>
+                <div className="cf-well cf-row" data-between data-nowrap>
+                  <span className="cf-mono" style={{ overflowWrap: 'anywhere' }} title={uri}>
+                    {uri.length > 28 ? `${uri.slice(0, 20)}…${uri.slice(-4)}` : uri}
+                  </span>
+                  <CopyButton value={uri} />
+                </div>
+              </div>
+            </details>
           </>
         )}
         <div className="cf-row">
           <Skeleton width={10} height={10} style={{ borderRadius: '50%' }} />
           <span className="cf-small cf-muted">Waiting for the wallet…</span>
         </div>
+        {slow && <Notice>Nothing yet? Make sure the wallet app is open, then {onPhone ? 'try again' : 'scan again'}.</Notice>}
         <p className="cf-small cf-subtle">
           Connecting is your only sign-in. Campfire sees public keys, never private keys, and the wallet asks you
           before every transaction.
