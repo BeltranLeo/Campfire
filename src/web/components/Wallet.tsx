@@ -10,6 +10,7 @@ import { CopyButton } from './CopyButton';
 import { Icon, type IconName } from './Icon';
 import { HashLink, shorten } from './Provenance';
 import { Notice, Skeleton } from './States';
+import { AdvancedSwitch } from './AdvancedSwitch';
 
 // The WizardConnect button at the top right, in its four states (Shell-* screens):
 // disconnected, pairing, connecting and connected with its menu.
@@ -172,6 +173,7 @@ function WalletMenu({ onClose }: { onClose: () => void }) {
           Transparency
         </Link>
       </div>
+      <AdvancedSwitch />
       <button type="button" className="cf-btn" data-variant="ghost" data-block onClick={wallet.disconnect}>
         Disconnect
       </button>

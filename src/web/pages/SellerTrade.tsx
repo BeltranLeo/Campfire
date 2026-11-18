@@ -5,6 +5,7 @@ import { apiGet, apiPost, type Offer, type Reputation, type Trade } from '../api
 import { ActionCard } from '../components/ActionCard';
 import { Button } from '../components/Button';
 import { DisputeForm } from '../components/DisputeForm';
+import { useAdvanced } from '../advanced';
 import { Details } from '../components/Details';
 import { HashLink, ProvenanceTag } from '../components/Provenance';
 import { Notice, Skeleton } from '../components/States';
@@ -585,6 +586,7 @@ function PaymentFieldsForm(props: {
 function RequestCard({ trade, fiat }: { trade: Trade; fiat: string }) {
   const reputation = usePoll(() => apiGet<Reputation>(`/api/identities/${trade.buyerIdentity}/reputation`), trade.buyerIdentity);
   const rep = reputation.data;
+  const advanced = useAdvanced();
   return (
     <section className="cf-card" data-flush>
       <div className="cf-card__section">
@@ -632,10 +634,15 @@ function RequestCard({ trade, fiat }: { trade: Trade; fiat: string }) {
           <dd>
             <span className="cf-amount">{fiat}</span>
           </dd>
-          <dt>Pays to</dt>
-          <dd>
-            {trade.buyerPayoutPkh && <HashLink value={pkhToCashAddress(trade.buyerPayoutPkh)} kind="address" />}
-          </dd>
+          {/* The buyer's payout address is checked before you lock; read it here with technical details on. */}
+          {advanced && (
+            <>
+              <dt>Pays to</dt>
+              <dd>
+                {trade.buyerPayoutPkh && <HashLink value={pkhToCashAddress(trade.buyerPayoutPkh)} kind="address" />}
+              </dd>
+            </>
+          )}
         </dl>
       </div>
     </section>

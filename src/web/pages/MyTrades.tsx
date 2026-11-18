@@ -3,7 +3,8 @@ import { Link, useSearchParams } from 'react-router';
 import { ApiError, apiGet, apiPost, type Offer, type Trade } from '../api';
 import { assetInfo } from '../assets';
 import { Button, WALLET_DECLINED } from '../components/Button';
-import { HashLink, shorten } from '../components/Provenance';
+import { useAdvanced } from '../advanced';
+import { HashLink, ProvenanceTag, shorten } from '../components/Provenance';
 import { EmptyState, Notice, Skeleton } from '../components/States';
 import { StatusPill } from '../components/StatusPill';
 import { Countdown } from '../components/Timeline';
@@ -206,6 +207,7 @@ function OffersTab({ identity, trades }: { identity: string; trades: Trade[] }) 
   const config = useConfig();
   const offers = usePoll(() => apiGet<{ offers: Offer[] }>('/api/offers').then((r) => r.offers), 'all-offers', REFRESH_MS);
   const [closing, setClosing] = useState<string | null>(null);
+  const advanced = useAdvanced();
   const [failure, setFailure] = useState<string | null>(null);
 
   async function close(offer: Offer) {
@@ -301,8 +303,14 @@ function OffersTab({ identity, trades }: { identity: string; trades: Trade[] }) 
                   <span className="cf-pill" data-tone={offer.status === 'Published' ? 'done' : undefined}>
                     {offer.status === 'Published' ? 'Open' : offer.status}
                   </span>{' '}
-                  {n} {n === 1 ? 'trade' : 'trades'} · {offer.status === 'Expired' ? 'expired' : 'expires'} {formatDayMonth(doc.expiresAt)} · Offer{' '}
-                  <HashLink value={offer.offerTxid} kind="transaction" />
+                  {n} {n === 1 ? 'trade' : 'trades'} · {offer.status === 'Expired' ? 'expired' : 'expires'} {formatDayMonth(doc.expiresAt)} ·{' '}
+                  {advanced ? (
+                    <>
+                      Offer <HashLink value={offer.offerTxid} kind="transaction" />
+                    </>
+                  ) : (
+                    <ProvenanceTag kind="chain" />
+                  )}
                 </span>
                 {offer.sponsored && <span className="cf-small cf-subtle">Publishing fee paid by Campfire</span>}
                 {offer.status === 'Expired' && (

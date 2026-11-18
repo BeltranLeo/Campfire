@@ -4,6 +4,7 @@ import { BANNER_LINKS, PROTOCOL_SPEC_URL, REPO_URL, VOTING_ADDRESS } from '../li
 import { getThemePref, setThemePref, type ThemePref } from '../theme';
 import { useWalletCoinsSync } from '../walletCoins';
 import { useWallet } from '../wallet';
+import { AdvancedSwitch } from './AdvancedSwitch';
 import { CopyButton } from './CopyButton';
 import { BottomNav, WalletButton, WalletError } from './Wallet';
 
@@ -103,6 +104,8 @@ function Footer() {
           <a href={PROTOCOL_SPEC_URL}>Protocol spec</a>
           <span>Mainnet. Real funds.</span>
           <ThemeSwitch />
+          {/* Also here, so a visitor without a wallet (a judge, say) can open every technical detail at once. */}
+          <AdvancedSwitch compact />
         </div>
       </div>
     </footer>

@@ -76,6 +76,15 @@
 .s-term > details[open] > summary { border-color: var(--ink); color: var(--ink); }
 /* A small bubble under the "?": it floats, so opening it never widens the column the word sits in. */
 .s-term__text { position: absolute; left: 0; top: calc(100% + var(--space-1)); z-index: 5; width: min(260px, 75vw); padding: var(--space-2) var(--space-3); border: 1px solid var(--line-strong); border-radius: var(--radius-md); background: var(--surface); box-shadow: 0 4px 16px rgb(0 0 0 / 0.18); font: 400 13px/18px var(--font-sans); color: var(--ink); text-transform: none; letter-spacing: 0; }
+/* "Show technical details": the label and a switch drawn from a real checkbox. */
+.s-switch { display: flex; align-items: center; justify-content: space-between; gap: var(--space-3); cursor: pointer; }
+.s-switch__text { display: flex; flex-direction: column; min-width: 0; font-size: 13px; line-height: 18px; }
+.s-switch > input { appearance: none; flex: none; width: 40px; height: 24px; margin: 0; border-radius: 12px; background: var(--line-strong); position: relative; cursor: pointer; }
+.s-switch > input::after { content: ""; position: absolute; top: 3px; left: 3px; width: 18px; height: 18px; border-radius: 50%; background: var(--surface); transition: left 0.15s; }
+.s-switch > input:checked { background: var(--accent); }
+.s-switch > input:checked::after { left: 19px; }
+.s-switch > input:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+@media (prefers-reduced-motion: reduce) { .s-switch > input::after { transition: none; } }
 .s-stat { display: flex; flex-direction: column; gap: 2px; }
 .s-stat > strong { font: 600 28px/32px var(--font-mono); font-variant-numeric: tabular-nums; }
 .s-home { display: grid; grid-template-columns: minmax(0, 1fr) 360px; gap: var(--space-5); align-items: start; }

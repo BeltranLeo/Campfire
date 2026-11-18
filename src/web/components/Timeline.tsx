@@ -1,4 +1,5 @@
 import { formatCountdown, formatHourMinute } from '../format';
+import { useAdvanced } from '../advanced';
 import { useNow } from '../hooks/useNow';
 import type { Step } from '../trade';
 import { HashLink, ProvenanceTag } from './Provenance';
@@ -22,11 +23,14 @@ export function Timeline({ steps }: { steps: Step[] }) {
   );
 }
 
+// The time and a tick are enough to follow the story; the transaction and its confirmations show with technical
+// details on. An on-chain step keeps its On-chain tag either way.
 function StepMeta({ step }: { step: Step }) {
+  const advanced = useAdvanced();
   const parts = [
     step.at !== undefined && formatHourMinute(new Date(step.at * 1000)),
-    step.txid && <HashLink value={step.txid} kind="transaction" />,
-    step.txid && step.confirmations !== undefined && confirmationsText(step.confirmations),
+    step.txid && (advanced ? <HashLink value={step.txid} kind="transaction" /> : <ProvenanceTag kind="chain" />),
+    advanced && step.txid && step.confirmations !== undefined && confirmationsText(step.confirmations),
     step.offchain && <ProvenanceTag kind="offchain" />,
     step.simulated && <ProvenanceTag kind="sim">Simulated fiat</ProvenanceTag>,
     step.note,
