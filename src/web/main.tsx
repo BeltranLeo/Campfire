@@ -8,6 +8,8 @@ import './styles/components.css';
 import './styles/screens.css';
 import './styles/offers.css';
 import './styles/take.css';
+import './styles/create.css';
+import './styles/welcome.css';
 import './styles/app.css';
 
 // Resume a wallet paired on an earlier visit before the first render.

@@ -11,7 +11,6 @@ import { useConfig } from '../config';
 import { DSPROOF_WATCH_SEC } from '../dsproof';
 import { formatRange, fromBaseUnits, paymentMethodLabel } from '../format';
 import { usePoll } from '../hooks/usePoll';
-import { GET_A_WALLET_ID } from '../links';
 
 // The front page (Landing-* screens): the two intentions and where to get a wallet, the demo, how a trade works
 // (with why nobody waits for blocks folded under it), the latest offers and Campfire's numbers. Every number is real.
@@ -42,7 +41,8 @@ export function Landing() {
             I want to sell BCH<small>Get pesos or dollars for your coins</small>
           </Link>
           <p className="s-walletlink">
-            New to Bitcoin Cash? <Link to={{ pathname: '/about', hash: GET_A_WALLET_ID }}>Get a free wallet in 2 minutes →</Link>
+            {/* Welcome asks what the person wants first, then shows how to get a wallet, then connects it. */}
+            New to Bitcoin Cash? <Link to="/welcome">Get a free wallet in 2 minutes →</Link>
           </p>
         </div>
       </section>
