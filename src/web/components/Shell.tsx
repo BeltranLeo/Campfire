@@ -10,7 +10,8 @@ import { BottomNav, WalletButton, WalletError } from './Wallet';
 // Visitors without a wallet see the public pages; the logo leads back to the landing page at "/".
 const PUBLIC_NAV = [
   { to: '/offers', label: 'Offers' },
-  { to: '/about', label: 'About' },
+  // The page is About, but a newcomer looks for how it works.
+  { to: '/about', label: 'How it works' },
   { to: '/transparency', label: 'Transparency' },
 ];
 

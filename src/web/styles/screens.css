@@ -68,6 +68,14 @@
 /* The seller's payment details: three fields under one caption, no fieldset frame. */
 .s-paymentfields { border: 0; margin: 0; padding: 0; min-width: 0; display: flex; flex-direction: column; gap: var(--space-3); }
 .s-paymentfields > legend { padding: 0; margin-bottom: var(--space-2); font: 600 15px/22px var(--font-sans); }
+/* An unavoidable word with a "?" that unfolds one sentence under it. */
+.s-term { display: inline; }
+.s-term > details { display: inline; position: relative; }
+.s-term > details > summary { display: inline-grid; place-items: center; width: 18px; height: 18px; margin-left: var(--space-1); border-radius: 50%; border: 1.5px solid var(--ink-subtle); color: var(--ink-subtle); font: 700 11px/1 var(--font-sans); vertical-align: 1px; cursor: pointer; list-style: none; }
+.s-term > details > summary::-webkit-details-marker { display: none; }
+.s-term > details[open] > summary { border-color: var(--ink); color: var(--ink); }
+/* A small bubble under the "?": it floats, so opening it never widens the column the word sits in. */
+.s-term__text { position: absolute; left: 0; top: calc(100% + var(--space-1)); z-index: 5; width: min(260px, 75vw); padding: var(--space-2) var(--space-3); border: 1px solid var(--line-strong); border-radius: var(--radius-md); background: var(--surface); box-shadow: 0 4px 16px rgb(0 0 0 / 0.18); font: 400 13px/18px var(--font-sans); color: var(--ink); text-transform: none; letter-spacing: 0; }
 .s-stat { display: flex; flex-direction: column; gap: 2px; }
 .s-stat > strong { font: 600 28px/32px var(--font-mono); font-variant-numeric: tabular-nums; }
 .s-home { display: grid; grid-template-columns: minmax(0, 1fr) 360px; gap: var(--space-5); align-items: start; }
@@ -109,6 +117,14 @@
   .s-filters { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
   .s-filters > :last-child { grid-column: 1 / -1; }
   .s-cell > .cf-label { display: block; }
+  /* Wide tables become one card per row on a phone: each cell shows its column name, nothing scrolls sideways. */
+  .s-stacktable, .s-stacktable tbody, .s-stacktable tr, .s-stacktable td { display: block; width: 100%; }
+  .s-stacktable thead { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
+  .s-stacktable tr { padding: var(--space-3) var(--space-4); border-bottom: 1px solid var(--line); }
+  .s-stacktable tr:last-child { border-bottom: 0; }
+  .s-stacktable td { display: grid; grid-template-columns: 112px minmax(0, 1fr); gap: var(--space-3); padding: var(--space-1) 0; border: 0; overflow-wrap: anywhere; }
+  .s-stacktable td::before { content: attr(data-label); font: 600 12px/18px var(--font-sans); letter-spacing: 0.04em; text-transform: uppercase; color: var(--ink-muted); }
+  .s-stacktable td:empty { display: none; }
   .s-actions { flex-direction: column; align-items: stretch; }
   .s-actions .cf-btn { display: flex; width: 100%; }
   .s-2 { grid-template-columns: minmax(0, 1fr); }

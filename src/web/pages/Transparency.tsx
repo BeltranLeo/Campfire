@@ -47,7 +47,7 @@ export function Transparency() {
           <ProvenanceTag kind="chain" />
         </div>
         <div className="s-tablewrap">
-          <table className="cf-table">
+          <table className="cf-table s-stacktable">
             <thead>
               <tr>
                 <th>Path</th>
@@ -60,13 +60,13 @@ export function Transparency() {
             <tbody>
               {CONTRACT_PATHS.map((p) => (
                 <tr key={p.path}>
-                  <td>
+                  <td data-label="Path">
                     <strong className="cf-mono">{p.path}</strong>
                   </td>
-                  <td>{p.what}</td>
-                  <td>{p.who}</td>
-                  <td>{p.txid ? <HashLink value={p.txid} kind="transaction" /> : <span className="cf-muted">Not run on mainnet yet</span>}</td>
-                  <td className="cf-muted">{p.at ? formatDate(p.at) : '—'}</td>
+                  <td data-label="What it does">{p.what}</td>
+                  <td data-label="Who authorises it">{p.who}</td>
+                  <td data-label="Transaction">{p.txid ? <HashLink value={p.txid} kind="transaction" /> : <span className="cf-muted">Not run on mainnet yet</span>}</td>
+                  <td data-label="Date" className="cf-muted">{p.at ? formatDate(p.at) : '—'}</td>
                 </tr>
               ))}
             </tbody>
@@ -124,7 +124,7 @@ export function Transparency() {
           </EmptyState>
         ) : (
           <div className="s-tablewrap">
-            <table className="cf-table">
+            <table className="cf-table s-stacktable">
               <thead>
                 <tr>
                   <th>Trade</th>
@@ -138,28 +138,28 @@ export function Transparency() {
               <tbody>
                 {recent.map((t) => (
                   <tr key={t.id}>
-                    <td>
+                    <td data-label="Trade">
                       <Link to={`/trade/${t.id}`} className="cf-mono">
                         {`${t.id.slice(0, 6)}…${t.id.slice(-4)}`}
                       </Link>
                     </td>
-                    <td className="cf-mono">{formatAmount(t.amount, assetInfo(t.asset, t.assetDecimals, config))}</td>
-                    <td>
+                    <td data-label="Amount" className="cf-mono">{formatAmount(t.amount, assetInfo(t.asset, t.assetDecimals, config))}</td>
+                    <td data-label="State">
                       <StatusPill state={t.status} role="visitor" side={t.side} />
                     </td>
-                    <td>
+                    <td data-label="Settlement">
                       {t.settlementTxid ? (
                         <HashLink value={t.settlementTxid} kind="transaction" />
                       ) : t.fundingTxid && t.escrowAddress ? (
                         <>
-                          <span className="cf-muted">In escrow</span> <HashLink value={t.escrowAddress} kind="address" />
+                          <span className="cf-muted">Locked at</span> <HashLink value={t.escrowAddress} kind="address" />
                         </>
                       ) : (
                         <span className="cf-muted">Nothing on-chain yet</span>
                       )}
                     </td>
-                    <td>{t.isDemo && <ProvenanceTag kind="sim">Simulated fiat</ProvenanceTag>}</td>
-                    <td className="cf-muted">
+                    <td data-label="Fiat">{t.isDemo && <ProvenanceTag kind="sim">Simulated fiat</ProvenanceTag>}</td>
+                    <td data-label="Updated" className="cf-muted">
                       {formatDayMonth(t.updatedAt)}, {formatHourMinute(new Date(t.updatedAt * 1000))}
                     </td>
                   </tr>

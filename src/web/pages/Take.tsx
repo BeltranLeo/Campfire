@@ -7,6 +7,8 @@ import { assetInfo, type AssetInfo } from '../assets';
 import { Button } from '../components/Button';
 import { CoinIcon } from '../components/CoinIcon';
 import { Details } from '../components/Details';
+import { noWalletNote } from '../components/NoWalletNote';
+import { Term } from '../components/Term';
 import { HashLink, ProvenanceTag } from '../components/Provenance';
 import { EmptyState, Notice, Skeleton } from '../components/States';
 import { useConfig } from '../config';
@@ -367,7 +369,7 @@ function TakeOffer({ offer }: { offer: Offer }) {
                   variant="primary"
                   busy={wallet.status === 'pairing' || wallet.status === 'connecting'}
                   onClick={wallet.connect}
-                  note="Pairs with Selene or Paytaca through WizardConnect."
+                  note={noWalletNote}
                 >
                   Connect wallet to take this offer
                 </Button>
@@ -652,7 +654,7 @@ function TakeBuyOffer({ offer }: { offer: Offer }) {
                   variant="primary"
                   busy={wallet.status === 'pairing' || wallet.status === 'connecting'}
                   onClick={wallet.connect}
-                  note="Pairs with Selene or Paytaca through WizardConnect."
+                  note={noWalletNote}
                 >
                   Connect wallet to sell
                 </Button>
@@ -734,7 +736,9 @@ function OfferDetails(props: {
         <dd>
           <HashLink value={offer.sellerIdentity} kind="plain" />
         </dd>
-        <dt>Arbiter</dt>
+        <dt>
+          <Term word="arbiter">Arbiter</Term>
+        </dt>
         <dd>
           <HashLink value={doc.arbiter} kind="plain" />
         </dd>
