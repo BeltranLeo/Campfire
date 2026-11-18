@@ -151,22 +151,22 @@ describe('how a buy trade reads', () => {
   it('puts the buyer first while the request waits', () => {
     expect(nextStep(t({}), 'buyer', 1100)).toMatchObject({ step: 'Accept or decline the request', turn: true, deadline: 1600 });
     expect(nextStep(t({}), 'seller', 1100)).toMatchObject({ step: 'Waiting for the buyer to accept', turn: false });
-    expect(steps(t({}), 'buyer').slice(0, 2)).toEqual(['done:A seller answered your offer', 'current:You accept, then the seller locks the coins']);
-    expect(steps(t({}), 'seller').slice(0, 2)).toEqual(['done:You answered the buyer’s offer', 'current:Buyer accepts, then you lock the coins']);
+    expect(steps(t({}), 'buyer').slice(0, 2)).toEqual(['done:A seller answered your offer', 'current:You accept, then the seller locks the BCH']);
+    expect(steps(t({}), 'seller').slice(0, 2)).toEqual(['done:You answered the buyer’s offer', 'current:Buyer accepts, then you lock the BCH']);
   });
 
-  it('then the seller locks the coins', () => {
+  it('then the seller locks the BCH', () => {
     const accepted = t({ status: 'Accepted', fundingDeadline: 3000 });
-    expect(steps(accepted, 'seller')[1]).toBe('current:Buyer accepted. You lock the coins');
-    expect(steps(accepted, 'buyer').slice(1, 3)).toEqual(['done:You accepted', 'current:Seller locks the coins']);
+    expect(steps(accepted, 'seller')[1]).toBe('current:Buyer accepted. You lock the BCH');
+    expect(steps(accepted, 'buyer').slice(1, 3)).toEqual(['done:You accepted', 'current:Seller locks the BCH']);
     expect(nextStep(accepted, 'seller', 1300)).toMatchObject({ turn: true });
   });
 
   it('says why a dropped request ended', () => {
     expect(steps(t({ status: 'Dropped' }), 'buyer')[1]).toBe('failed:You did not accept the request');
-    expect(steps(t({ status: 'Dropped', fundingDeadline: 3000 }), 'buyer')[1]).toBe('failed:The seller did not lock the coins in time');
+    expect(steps(t({ status: 'Dropped', fundingDeadline: 3000 }), 'buyer')[1]).toBe('failed:The seller did not lock the BCH in time');
     expect(historyNote(t({ status: 'Dropped', updatedAt: 1_794_900_000 }), 'seller')).toMatch(/not accepted in time$/);
-    expect(historyNote(t({ status: 'Dropped', fundingDeadline: 3000, updatedAt: 1_794_900_000 }), 'buyer')).toMatch(/not funded in time$/);
+    expect(historyNote(t({ status: 'Dropped', fundingDeadline: 3000, updatedAt: 1_794_900_000 }), 'buyer')).toMatch(/not locked in time$/);
   });
 });
 

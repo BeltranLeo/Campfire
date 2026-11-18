@@ -5,6 +5,7 @@ import { apiGet, apiPost, type Offer, type Reputation, type Trade } from '../api
 import { ActionCard } from '../components/ActionCard';
 import { Button } from '../components/Button';
 import { DisputeForm } from '../components/DisputeForm';
+import { Details } from '../components/Details';
 import { HashLink, ProvenanceTag } from '../components/Provenance';
 import { Notice, Skeleton } from '../components/States';
 import { Countdown } from '../components/Timeline';
@@ -33,7 +34,7 @@ import {
   type SealedDetails,
 } from '../seller';
 import { browserStore, commitSession, generateSessionKeyPair, loadPendingSession, payoutAddress, readSessionKey, savePendingSession } from '../take';
-import { TradeActionError, disputeKeyHex, signedPayoutPkh } from '../trade';
+import { RELEASE_CHECKS, TradeActionError, actionProgress, disputeKeyHex, lockedCoins, releaseReady, signedPayoutPkh, type ReleaseCheck } from '../trade';
 import { refreshWalletCoins, useWalletCoins } from '../walletCoins';
 import { WalletDeclined, useWallet } from '../wallet';
 
@@ -63,7 +64,10 @@ export function SellerAction(props: { trade: Trade; amount: string; fiat: string
   const { busy, error, run } = useTradeAction<Action>(trade, identity, props.onUpdate);
   const [details, setDetails] = useState('');
   const [disputing, setDisputing] = useState(false);
+  const [ticked, setTicked] = useState<ReadonlySet<ReleaseCheck>>(new Set());
   const now = useNow(1000);
+  const progress = actionProgress(trade.status, 'seller', trade.side);
+  const locked = lockedCoins(trade.asset);
 
   // Keys and coins are looked up while a request waits, so the buttons are ready when the seller decides.
   const preparing = trade.status === 'Requested' || trade.status === 'Accepted';
@@ -164,8 +168,8 @@ export function SellerAction(props: { trade: Trade; amount: string; fiat: string
     const saved = store && loadSavedDetails(store, t.id);
     if (details.trim() === '' && saved) return saved;
     const key = readSessionKey(t.id);
-    if (!key) throw new TradeActionError('This browser does not have the key for this trade, so it cannot encrypt the payment details. Nothing was deposited.');
-    if (!t.buyerSessionPk || !t.tradeId) throw new TradeActionError('The buyer has not accepted yet. Nothing was deposited.');
+    if (!key) throw new TradeActionError('This browser does not have the key for this trade, so it cannot encrypt the payment details. Nothing was locked.');
+    if (!t.buyerSessionPk || !t.tradeId) throw new TradeActionError('The buyer has not accepted yet. Nothing was locked.');
     const sealedNow = await sealPaymentDetails({ sessionPrivateKey: key, buyerSessionPk: t.buyerSessionPk, tradeId: t.tradeId, details });
     if (store) saveDetails(store, t.id, sealedNow);
     return sealedNow;
@@ -180,10 +184,10 @@ export function SellerAction(props: { trade: Trade; amount: string; fiat: string
       const pending = loadPendingSession(store, trade.id);
       if (pending && pending.publicKey === accepted.sellerSessionPk) commitSession(store, accepted.id, pending);
     }
-    await run('deposit', 'The deposit was not made', () => makeDeposit(accepted), accepted);
+    await run('deposit', `${capitalize(locked)} ${trade.asset === 'BCH' ? 'was' : 'were'} not locked`, () => makeDeposit(accepted), accepted);
   }
 
-  const depositOnly = () => run('deposit', 'The deposit was not made', () => makeDeposit(trade));
+  const depositOnly = () => run('deposit', `${capitalize(locked)} ${trade.asset === 'BCH' ? 'was' : 'were'} not locked`, () => makeDeposit(trade));
 
   const decline = () =>
     run('decline', 'The request was not declined', () =>
@@ -228,7 +232,7 @@ export function SellerAction(props: { trade: Trade; amount: string; fiat: string
     <>
       {short && coins.data && (
         <Notice tone="warn" title="Your wallet does not have enough BCH">
-          The deposit needs about {formatBch(depositNeeds(trade))} and Campfire can see{' '}
+          Locking needs about {formatBch(depositNeeds(trade))} and Campfire can see{' '}
           {formatBch(spendableBch(coins.data.coins))} in this wallet. {describeScan(coins.data)} Send some BCH to it: this page checks
           again every few seconds.{' '}
           <button type="button" className="cf-copy" onClick={coins.reload}>
@@ -245,11 +249,54 @@ export function SellerAction(props: { trade: Trade; amount: string; fiat: string
         </Notice>
       )}
       {!isBch && (
-        <Notice tone="warn" title="Depositing PUSD is not available yet">
-          This trade is for a token. Only BCH trades can be funded from this page for now.
+        <Notice tone="warn" title="Locking PUSD is not available yet">
+          This trade is for a token. Only BCH trades can be locked from this page for now.
         </Notice>
       )}
     </>
+  );
+
+  // Releasing cannot be undone: the button waits for both checks, which stop the fake-screenshot scam.
+  const tick = (check: ReleaseCheck, on: boolean) =>
+    setTicked((current) => {
+      const next = new Set(current);
+      if (on) next.add(check);
+      else next.delete(check);
+      return next;
+    });
+  const checkLabels: Record<ReleaseCheck, ReactNode> = {
+    bankApp: 'I opened my bank app, not a screenshot',
+    exactAmount: (
+      <>
+        I see exactly <strong>{props.fiat}</strong> from this buyer
+      </>
+    ),
+  };
+  const releaseChecks = (
+    <>
+      <Notice tone="warn" title="Only your bank app counts">
+        Don't trust screenshots or messages. Once you release, {locked} can't come back.
+      </Notice>
+      <div className="cf-stack" data-gap="2">
+        {RELEASE_CHECKS.map((check) => (
+          <label key={check} className="s-tick">
+            <input type="checkbox" checked={ticked.has(check)} disabled={busy !== null} onChange={(e) => tick(check, e.target.checked)} />
+            <span>{checkLabels[check]}</span>
+          </label>
+        ))}
+      </div>
+    </>
+  );
+  const releaseButton = (variant?: 'primary') => (
+    <Button
+      variant={variant}
+      signs
+      busy={busy === 'release'}
+      disabled={!releaseReady(ticked) || (busy !== null && busy !== 'release')}
+      onClick={release}
+    >
+      {`Release ${props.amount} to the buyer`}
+    </Button>
   );
 
   const savedDetails = trade.side === 'buy' ? loadSavedDetails(browserStore() ?? NO_STORE, trade.id) : null;
@@ -258,7 +305,8 @@ export function SellerAction(props: { trade: Trade; amount: string; fiat: string
     // Invented copy: the design shows the buyer's side of this wait only.
     return (
       <ActionCard
-        step="Step 2 of 4 · Waiting"
+        step="Waiting"
+        progress={progress}
         title="Waiting for the buyer to accept"
         reassurance="Nothing is locked yet. You sign only when you lock the coins."
         deadline={
@@ -282,14 +330,15 @@ export function SellerAction(props: { trade: Trade; amount: string; fiat: string
   if (trade.side === 'buy' && trade.status === 'Accepted') {
     return (
       <ActionCard
-        step="Step 2 of 4 · Your turn"
-        title="The buyer accepted. Lock the coins and share how to pay you."
+        step="Your turn"
+        progress={progress}
+        title={`The buyer accepted. Lock ${locked} and share how to pay you.`}
         reassurance="The contract can only pay the buyer or return the coins to you. Campfire cannot move them."
         deadline={
           trade.fundingDeadline && (
             <>
               <Countdown deadline={trade.fundingDeadline} windowSec={1800} />
-              <span className="cf-small cf-muted">left to lock the coins. After that the trade is dropped.</span>
+              <span className="cf-small cf-muted">left to lock {locked}. After that the trade is dropped.</span>
             </>
           )
         }
@@ -305,7 +354,7 @@ export function SellerAction(props: { trade: Trade; amount: string; fiat: string
             value={details}
             onChange={(e) => setDetails(e.target.value)}
           />
-          <span className="cf-hint">Encrypted in your browser for this buyer only. Shown once your coins are locked. Campfire cannot read it.</span>
+          <span className="cf-hint">Encrypted in your browser for this buyer only. Shown once {locked} {lockVerb(trade.asset)} locked. Campfire cannot read it.</span>
         </div>
         {deposit && (
           <p className="cf-small cf-muted">
@@ -322,7 +371,7 @@ export function SellerAction(props: { trade: Trade; amount: string; fiat: string
             disabled={!isBch || short || (details.trim() === '' && !savedDetails) || (busy !== null && busy !== 'deposit')}
             onClick={depositOnly}
           >
-            {deposit ? `Lock ${deposit}` : 'Lock the coins'}
+            {deposit ? `Lock ${deposit} for this trade` : `Lock ${locked}`}
           </Button>
         </div>
       </ActionCard>
@@ -334,8 +383,9 @@ export function SellerAction(props: { trade: Trade; amount: string; fiat: string
       return (
         <>
           <ActionCard
-            step="Step 2 of 4 · Your turn"
-            title="Accept and deposit into escrow"
+            step="Your turn"
+            progress={progress}
+            title="Accept this buyer"
             deadline={
               trade.quoteExpiresAt && (
                 <>
@@ -357,11 +407,11 @@ export function SellerAction(props: { trade: Trade; amount: string; fiat: string
                 onChange={(e) => setDetails(e.target.value)}
               />
               <span className="cf-hint">
-                Encrypted in your browser for this buyer only. Shown to them once your deposit is seen on the network. Campfire cannot read it.
+                Encrypted in your browser for this buyer only. Shown to them once {locked} {lockVerb(trade.asset)} locked. Campfire cannot read it.
               </span>
             </div>
             {deposit && (
-              <Notice title={`You will deposit ${deposit}.`}>
+              <Notice title={`You will lock ${deposit}.`}>
                 {formatAmount(trade.amount, BCH)} for the buyer plus a {formatBch(1000n)} fee budget for the closing transaction. The contract can only pay the
                 buyer or return to you.
               </Notice>
@@ -381,7 +431,7 @@ export function SellerAction(props: { trade: Trade; amount: string; fiat: string
                 disabled={!isBch || expired || details.trim() === '' || !prep.data || short || (busy !== null && busy !== 'accept' && busy !== 'deposit')}
                 onClick={acceptAndDeposit}
               >
-                {deposit ? `Accept and deposit ${deposit}` : 'Accept and deposit'}
+                {deposit ? `Accept and lock ${deposit}` : 'Accept and lock'}
               </Button>
               <Button busy={busy === 'decline'} disabled={busy !== null && busy !== 'decline'} onClick={decline}>
                 Decline
@@ -395,27 +445,28 @@ export function SellerAction(props: { trade: Trade; amount: string; fiat: string
     case 'Accepted':
       return (
         <ActionCard
-          step="Step 2 of 4 · Your turn"
-          title={deposit ? `Deposit ${deposit} into the escrow` : 'Deposit into the escrow'}
+          step="Your turn"
+          progress={progress}
+          title={deposit ? `Lock ${deposit} for this trade` : `Lock ${locked} for this trade`}
           reassurance="The contract can only pay the buyer or return the coins to you. Campfire cannot move them."
           deadline={
             trade.fundingDeadline && (
               <>
                 <Countdown deadline={trade.fundingDeadline} windowSec={1800} />
-                <span className="cf-small cf-muted">left to fund. If you do not deposit in time the trade is dropped and nothing is charged.</span>
+                <span className="cf-small cf-muted">left to lock. If you do not lock in time the trade is dropped and nothing is charged.</span>
               </>
             )
           }
         >
           <p className="cf-muted">
             {formatAmount(trade.amount, BCH)} for the buyer plus a {formatBch(1000n)} fee budget for the closing transaction. Your payment details are shown to the
-            buyer once this deposit is seen on the network.
+            buyer once {locked} {lockVerb(trade.asset)} locked.
           </p>
           {walletNotices}
           {failure}
           <div className="s-actions">
             <Button variant="primary" signs busy={busy === 'deposit'} disabled={!isBch || short || (busy !== null && busy !== 'deposit')} onClick={depositOnly}>
-              {deposit ? `Deposit ${deposit}` : 'Deposit'}
+              {deposit ? `Lock ${deposit}` : 'Lock'}
             </Button>
           </div>
         </ActionCard>
@@ -424,9 +475,10 @@ export function SellerAction(props: { trade: Trade; amount: string; fiat: string
       const windowSec = trade.paymentDeadline && trade.fundedAt ? trade.paymentDeadline - trade.fundedAt : 0;
       return (
         <ActionCard
-          step="Step 3 of 4 · Waiting"
+          step="Waiting"
+          progress={progress}
           title="Waiting for the buyer's payment"
-          reassurance="Your coins are locked in the escrow. They can only go to the buyer or back to you."
+          reassurance={`${capitalize(locked)} ${lockVerb(trade.asset)} locked. It can only go to the buyer or back to you.`}
           deadline={
             trade.paymentDeadline && (
               <>
@@ -437,7 +489,7 @@ export function SellerAction(props: { trade: Trade; amount: string; fiat: string
           }
         >
           <p className="cf-muted">
-            When the buyer marks the payment as sent, check your account and release. Do not release before the money is there.
+            When the buyer marks the payment as sent, check your bank app and release. Do not release before the money is there.
           </p>
           {failure}
           {disputeForm}
@@ -448,27 +500,24 @@ export function SellerAction(props: { trade: Trade; amount: string; fiat: string
     case 'Paid':
       return (
         <ActionCard
-          step="Step 4 of 4 · Your turn"
-          title="The buyer says the payment was sent. Check, then release."
-          reassurance="Your coins stay locked until you release them. Take the time to check your account."
+          step="Your turn"
+          progress={progress}
+          title="The buyer says they paid. Check your bank."
+          reassurance={`${capitalize(locked)} ${lockVerb(trade.asset)} locked until you release. Take the time to check.`}
         >
-          <Notice tone="warn" title="Release only after the money is in your account">
-            Check your bank for {props.fiat}. A release cannot be undone.
-          </Notice>
+          {releaseChecks}
           {failure}
           {disputeForm}
           <div className="s-actions">
-            <Button
-              variant="primary"
-              signs
-              busy={busy === 'release'}
-              disabled={busy !== null && busy !== 'release'}
-              onClick={release}
-            >
-              {`Release ${props.amount} to buyer`}
-            </Button>
+            {releaseButton('primary')}
             {disputeButton}
           </div>
+          <Details summary="Not received yet?" tag={null}>
+            <p className="cf-small cf-muted">
+              Transfers can take a few minutes. {capitalize(locked)} {lockVerb(trade.asset)} still locked while you wait. If the money doesn't arrive,
+              open a dispute and the arbiter will help.
+            </p>
+          </Details>
         </ActionCard>
       );
     case 'Disputed': {
@@ -480,12 +529,9 @@ export function SellerAction(props: { trade: Trade; amount: string; fiat: string
             {opened ? ` on ${opened}` : ''}. The arbiter can now read the chat and will decide for the buyer or the seller. If you receive the payment
             meanwhile, you can still release.
           </p>
+          {releaseChecks}
           {failure}
-          <div className="s-actions">
-            <Button signs busy={busy === 'release'} disabled={busy !== null && busy !== 'release'} onClick={release}>
-              {`Release ${props.amount} to buyer`}
-            </Button>
-          </div>
+          <div className="s-actions">{releaseButton()}</div>
         </ActionCard>
       );
     }
@@ -534,7 +580,7 @@ function RequestCard({ trade, fiat }: { trade: Trade; fiat: string }) {
                 <br />
                 <span className="cf-small cf-muted">
                   Oracle price {formatFiat(Number(trade.quote.price), trade.fiat)} · {describeMargin(trade.marginBps ?? 0)}. The signature is checked
-                  before you deposit.
+                  before you lock.
                 </span>
               </>
             ) : (
@@ -614,7 +660,7 @@ export function SellerResult({ trade, amount }: { trade: Trade; amount: string }
       );
       break;
     case 'Cancelled':
-      notice = <Notice title="The buyer cancelled the trade">The escrow returned the {amount} to you.</Notice>;
+      notice = <Notice title="The buyer cancelled the trade">The {amount} came back to you.</Notice>;
       rows = (
         <>
           {row('Cancel')}
@@ -623,7 +669,7 @@ export function SellerResult({ trade, amount }: { trade: Trade; amount: string }
       );
       break;
     case 'Refunded':
-      notice = <Notice title="The coins came back to you">The escrow returned the {amount} after the refund time.</Notice>;
+      notice = <Notice title="The coins came back to you">The {amount} came back after the refund time.</Notice>;
       rows = (
         <>
           {row('Refund')}
@@ -653,3 +699,7 @@ export function SellerResult({ trade, amount }: { trade: Trade; amount: string }
     </section>
   );
 }
+
+const capitalize = (text: string) => text.charAt(0).toUpperCase() + text.slice(1);
+/** "is" for the BCH, "are" for the coins of a token. */
+const lockVerb = (asset: string) => (asset === 'BCH' ? 'is' : 'are');

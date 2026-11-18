@@ -7,7 +7,21 @@ import { derivePayoutPkhFromXpub, derivePubkeyFromXpub } from '../src/protocol/k
 import { computeTradeId, signPriceQuote, type TradeTerms } from '../src/protocol/trades.js';
 import type { Trade } from '../src/web/api.js';
 import { generateSessionKeyPair } from '../src/web/take.js';
-import { TradeActionError, buildBuyerCancel, checkForArbiter, disputeKeyHex, newerTrade, readPaymentDetails, roleOf, timeline, tradeTitle } from '../src/web/trade.js';
+import {
+  TradeActionError,
+  actionProgress,
+  buildBuyerCancel,
+  checkForArbiter,
+  disputeKeyHex,
+  lockedCoins,
+  newerTrade,
+  readPaymentDetails,
+  releaseReady,
+  roleOf,
+  timeline,
+  tradeTitle,
+  type ReleaseCheck,
+} from '../src/web/trade.js';
 
 const base: Trade = {
   id: 'rec',
@@ -62,20 +76,20 @@ describe('trade page model (web)', () => {
   it('follows the happy path', () => {
     expect(titles({ ...base, status: 'Requested', fundingTxid: undefined })).toEqual([
       'done:You took the offer',
-      'current:Seller accepts and funds the escrow',
+      'current:Seller accepts and locks the BCH',
       'todo:You send the payment and mark it as paid',
       'todo:Seller releases 15,000 sats to your wallet',
     ]);
     expect(titles(base)).toEqual([
       'done:You took the offer',
-      'done:Seller funded the escrow',
+      'done:Seller locked the BCH',
       'current:You send the payment and mark it as paid',
       'todo:Seller releases 15,000 sats to your wallet',
     ]);
     const released = { ...base, status: 'Released' as const, paidAt: 1100, completedAt: 1110, settlementTxid: 'a'.repeat(64) };
     expect(titles(released)).toEqual([
       'done:You took the offer',
-      'done:Seller funded the escrow',
+      'done:Seller locked the BCH',
       'done:You marked the payment as sent',
       'done:Seller released 15,000 sats to your wallet',
     ]);
@@ -87,12 +101,12 @@ describe('trade page model (web)', () => {
     const expired = { ...base, status: 'ResolvedSeller' as const, verdictIssuedAt: 1360, settlementTxid: 'e'.repeat(64) };
     expect(titles(expired)).toEqual([
       'done:You took the offer',
-      'done:Seller funded the escrow',
+      'done:Seller locked the BCH',
       'failed:Payment window ended without a payment',
       'done:Arbiter returned 15,000 sats to the seller',
     ]);
     const dropped = { ...base, status: 'Dropped' as const, fundingTxid: undefined };
-    expect(titles(dropped)).toEqual(['done:You took the offer', 'failed:The seller did not accept and fund in time']);
+    expect(titles(dropped)).toEqual(['done:You took the offer', 'failed:The seller did not accept and lock the BCH in time']);
   });
 });
 
@@ -103,7 +117,7 @@ describe('a dispute in the progress steps', () => {
   it('pauses at the arbiter while the dispute is open', () => {
     expect(titles(disputed)).toEqual([
       'done:You took the offer',
-      'done:Seller funded the escrow',
+      'done:Seller locked the BCH',
       'done:You marked the payment as sent',
       'current:Dispute opened by you',
       'todo:Arbiter decides: funds go to buyer or seller',
@@ -116,7 +130,7 @@ describe('a dispute in the progress steps', () => {
   it('says the payment was not marked when the dispute comes before it', () => {
     expect(titles({ ...disputed, paidAt: undefined })).toEqual([
       'done:You took the offer',
-      'done:Seller funded the escrow',
+      'done:Seller locked the BCH',
       'failed:You had not marked the payment as sent',
       'current:Dispute opened by you',
       'todo:Arbiter decides: funds go to buyer or seller',
@@ -142,16 +156,16 @@ describe('a dispute in the progress steps', () => {
     ]);
     expect(titles({ ...disputed, status: 'Cancelled', settlementTxid: txid }).slice(3)).toEqual([
       'done:Dispute opened by you',
-      'done:You cancelled: the escrow returned 15,000 sats to the seller',
+      'done:You cancelled: 15,000 sats went back to the seller',
     ]);
   });
 
   it('shows a plain cancel without a dispute step', () => {
     expect(titles({ ...paid, status: 'Cancelled' as const })).toEqual([
       'done:You took the offer',
-      'done:Seller funded the escrow',
+      'done:Seller locked the BCH',
       'done:You marked the payment as sent',
-      'done:You cancelled: the escrow returned 15,000 sats to the seller',
+      'done:You cancelled: 15,000 sats went back to the seller',
     ]);
   });
 });
@@ -311,5 +325,60 @@ describe('reading the seller payment details', () => {
     for (const typed of ['0110599520', '[1,2]', 'null', '"alias"', 'true']) {
       expect(readPaymentDetails(typed)).toEqual({ kind: 'text', text: typed });
     }
+  });
+});
+
+describe('named steps above the action card', () => {
+  const at = (status: Trade['status'], role: 'buyer' | 'seller', side: 'sell' | 'buy' = 'sell') => {
+    const progress = actionProgress(status, role, side);
+    return progress ? progress.labels[progress.current] : null;
+  };
+
+  it('names the four steps for each side', () => {
+    expect(actionProgress('Funded', 'buyer')?.labels).toEqual(['Confirm', 'Lock', 'Pay', 'Receive']);
+    expect(actionProgress('Funded', 'seller')?.labels).toEqual(['Accept', 'Lock', 'Paid', 'Release']);
+  });
+
+  it('keeps the buyer of a sell offer on Lock while the seller accepts and locks', () => {
+    expect(at('Requested', 'buyer')).toBe('Lock');
+    expect(at('Accepted', 'buyer')).toBe('Lock');
+    expect(at('Funded', 'buyer')).toBe('Pay');
+    expect(at('Paid', 'buyer')).toBe('Receive');
+  });
+
+  it('starts the seller on Accept and ends on Release', () => {
+    expect(at('Requested', 'seller')).toBe('Accept');
+    expect(at('Accepted', 'seller')).toBe('Lock');
+    expect(at('Funded', 'seller')).toBe('Paid');
+    expect(at('Paid', 'seller')).toBe('Release');
+  });
+
+  it('asks the buyer of a buy offer to confirm the request first', () => {
+    expect(at('Requested', 'buyer', 'buy')).toBe('Confirm');
+    expect(at('Accepted', 'buyer', 'buy')).toBe('Lock');
+    expect(at('Requested', 'seller', 'buy')).toBe('Accept');
+    expect(at('Accepted', 'seller', 'buy')).toBe('Lock');
+  });
+
+  it('shows no step during a dispute or after the end', () => {
+    for (const status of ['Disputed', 'Released', 'Cancelled', 'Refunded', 'ResolvedBuyer', 'ResolvedSeller', 'Dropped'] as const) {
+      expect(actionProgress(status, 'buyer')).toBeNull();
+      expect(actionProgress(status, 'seller')).toBeNull();
+    }
+  });
+});
+
+describe('the checks before a release', () => {
+  it('needs both checks', () => {
+    const ticked = (...checks: ReleaseCheck[]) => new Set<ReleaseCheck>(checks);
+    expect(releaseReady(ticked())).toBe(false);
+    expect(releaseReady(ticked('bankApp'))).toBe(false);
+    expect(releaseReady(ticked('exactAmount'))).toBe(false);
+    expect(releaseReady(ticked('bankApp', 'exactAmount'))).toBe(true);
+  });
+
+  it('names what is locked by the coin', () => {
+    expect(lockedCoins('BCH')).toBe('the BCH');
+    expect(lockedCoins('ab'.repeat(32))).toBe('the coins');
   });
 });

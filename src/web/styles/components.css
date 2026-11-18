@@ -129,6 +129,16 @@
 .cf-step[data-state="todo"] .cf-step__title { color: var(--ink-subtle); font-weight: 400; }
 .cf-step__meta { font-size: 13px; line-height: 18px; color: var(--ink-muted); display: flex; flex-wrap: wrap; gap: 2px var(--space-2); align-items: center; }
 
+/* Named steps above a trade's action card: a bar per step with its name under it. Done is chain colour, the current
+   step is accent and bold, so the state does not rely on colour alone. */
+.cf-steps { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: var(--space-1); }
+.cf-steps > li { display: flex; flex-direction: column; gap: var(--space-1); font: 600 12px/16px var(--font-sans); color: var(--ink-subtle); min-width: 0; overflow-wrap: anywhere; }
+.cf-steps > li::before { content: ""; height: 4px; border-radius: 2px; background: var(--line); }
+.cf-steps > li[data-state="done"] { color: var(--chain); }
+.cf-steps > li[data-state="done"]::before { background: var(--chain); }
+.cf-steps > li[data-state="current"] { color: var(--accent); font-weight: 700; }
+.cf-steps > li[data-state="current"]::before { background: var(--accent); }
+
 /* Horizontal variant for desktop headers */
 .cf-progress { display: flex; gap: var(--space-1); }
 .cf-progress > i { flex: 1; height: 4px; border-radius: 2px; background: var(--line); }

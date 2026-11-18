@@ -37,11 +37,13 @@ import { prepareIndices } from '../indices';
 import { browserStore, buildBuyerAcceptBody, commitSession, generateSessionKeyPair, loadPendingSession, readSessionKey, savePendingSession } from '../take';
 import {
   TradeActionError,
+  actionProgress,
   buildBuyerCancel,
   checkBuyRequest,
   checkEscrow,
   disputeKeyHex,
   isFinal,
+  lockedCoins,
   newerTrade,
   readPaymentDetails,
   roleOf,
@@ -218,6 +220,8 @@ function BuyerAction(props: {
   const { trade } = props;
   const wallet = useWallet();
   const { busy, error, run } = useTradeAction<'paid' | 'dispute' | 'cancel'>(trade, wallet.identity, props.onUpdate);
+  const progress = actionProgress(trade.status, 'buyer', trade.side);
+  const coins = lockedCoins(trade.asset);
   // The dispute asks for a reason first, so it opens a small form.
   const [disputing, setDisputing] = useState(false);
 
@@ -277,7 +281,8 @@ function BuyerAction(props: {
       if (trade.side === 'buy') return <BuyRequest trade={trade} amount={props.amount} fiat={props.fiat} onUpdate={props.onUpdate} />;
       return (
         <ActionCard
-          step="Step 2 of 4 · Waiting"
+          step="Waiting"
+          progress={progress}
           title="Waiting for the seller to accept"
           reassurance="You have not paid anything. Nothing is charged if the seller does not answer."
           deadline={
@@ -298,14 +303,15 @@ function BuyerAction(props: {
     case 'Accepted':
       return (
         <ActionCard
-          step="Step 2 of 4 · Waiting"
-          title={trade.side === 'buy' ? 'Waiting for the seller to lock the coins' : 'Waiting for the seller to fund the escrow'}
-          reassurance="You have not paid anything. Do not pay until the escrow is funded."
+          step="Waiting"
+          progress={progress}
+          title={`Waiting for the seller to lock ${coins}`}
+          reassurance={`Don't pay yet. We'll tell you when ${coins} ${trade.asset === 'BCH' ? 'is' : 'are'} locked.`}
           deadline={
             trade.fundingDeadline && (
               <>
                 <Countdown deadline={trade.fundingDeadline} windowSec={1800} />
-                <span className="cf-small cf-muted">left for the seller to fund the escrow</span>
+                <span className="cf-small cf-muted">left for the seller to lock {coins}</span>
               </>
             )
           }
@@ -319,7 +325,8 @@ function BuyerAction(props: {
       const windowSec = trade.paymentDeadline && trade.fundedAt ? trade.paymentDeadline - trade.fundedAt : 0;
       return (
         <ActionCard
-          step="Step 3 of 4 · Your turn"
+          step="Your turn"
+          progress={progress}
           title="Send the payment, then mark it as paid"
           reassurance={props.check && props.check !== 'error' && props.check.funding === 'match' ? "The seller's coins are locked for you. They can only go to you or back to the seller." : undefined}
           deadline={
@@ -355,7 +362,8 @@ function BuyerAction(props: {
     case 'Paid':
       return (
         <ActionCard
-          step="Step 4 of 4 · Waiting"
+          step="Waiting"
+          progress={progress}
           title="Waiting for the seller to release"
           reassurance={props.check && props.check !== 'error' && props.check.funding === 'match' ? "The seller's coins are locked for you. They can only go to you or back to the seller." : undefined}
         >
@@ -440,7 +448,8 @@ function BuyRequest(props: { trade: Trade; amount: string; fiat: string; onUpdat
 
   return (
     <ActionCard
-      step="Step 2 of 4 · Your turn"
+      step="Your turn"
+      progress={actionProgress(trade.status, 'buyer', trade.side)}
       title={`A seller wants to sell you ${props.amount}`}
       reassurance="Accepting is free and needs no signature. You pay only after the coins are locked for you."
       deadline={
@@ -493,7 +502,7 @@ function ZeroConfNotice({ ds, isDemo }: { ds: DoubleSpendState; isDemo: boolean 
       return (
         <div className="cf-notice">
           <div>
-            <strong>Deposit seen · watching for double spends</strong>
+            <strong>Checking the lock… ready in a few seconds</strong>
             Bitcoin Cash nodes publish a double-spend proof (DSProof) within seconds if anyone tries to spend these coins
             twice. Ready in about {ds.secondsLeft} s.
           </div>
@@ -502,14 +511,14 @@ function ZeroConfNotice({ ds, isDemo }: { ds: DoubleSpendState; isDemo: boolean 
     case 'clear':
       return (
         <Notice tone="chain" title="Safe at 0-conf">
-          The deposit reached the network and no double-spend attempt was seen in {DSPROOF_WATCH_SEC} seconds. On Bitcoin Cash
+          The locked coins reached the network and no double-spend attempt was seen in {DSPROOF_WATCH_SEC} seconds. On Bitcoin Cash
           you can rely on it now, without waiting for a block.
         </Notice>
       );
     case 'proof':
       return (
         <Notice tone="danger" title="Double-spend attempt detected">
-          Do not pay. The network saw an attempt to spend the deposit twice. Wait until the escrow is confirmed in a block.
+          Do not pay. The network saw an attempt to spend the locked coins twice. Wait until they are confirmed in a block.
         </Notice>
       );
     case 'error':
@@ -717,7 +726,7 @@ function BuyerResult({ trade, amount, payout }: { trade: Trade; amount: string; 
     }
     case 'Dropped':
       notice = (
-        <Notice title="The trade was dropped">The seller did not accept and fund the escrow in time. Nothing was charged.</Notice>
+        <Notice title="The trade was dropped">The seller did not accept and lock the coins in time. Nothing was charged.</Notice>
       );
       rows = (
         <>
@@ -730,9 +739,9 @@ function BuyerResult({ trade, amount, payout }: { trade: Trade; amount: string; 
       const cancelled = trade.status === 'Cancelled';
       notice = cancelled ? (
         // Invented copy: the design has no screen for a cancelled trade.
-        <Notice title="Trade cancelled">You cancelled the trade. The escrow returned the funds to the seller. You were not charged.</Notice>
+        <Notice title="Trade cancelled">You cancelled the trade. The coins went back to the seller. You were not charged.</Notice>
       ) : (
-        <Notice title="The funds went back to the seller">The escrow returned the funds to the seller.</Notice>
+        <Notice title="The coins went back to the seller">The locked coins went back to the seller.</Notice>
       );
       rows = (
         <>

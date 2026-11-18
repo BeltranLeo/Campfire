@@ -65,6 +65,9 @@
 .s-bannerfold > summary::after { content: " ▾"; }
 .s-bannerfold[open] > summary::after { content: " ▴"; }
 .s-bannerfold > .cf-banner__links { padding-top: var(--space-1); }
+/* A check the seller ticks before releasing: a big target, the box aligned with the first line. */
+.s-tick { display: grid; grid-template-columns: 24px minmax(0, 1fr); gap: var(--space-2); align-items: start; min-height: 44px; padding: var(--space-2) 0; cursor: pointer; }
+.s-tick > input { width: 20px; height: 20px; margin: 1px 0 0; accent-color: var(--accent); }
 .s-stat { display: flex; flex-direction: column; gap: 2px; }
 .s-stat > strong { font: 600 28px/32px var(--font-mono); font-variant-numeric: tabular-nums; }
 .s-home { display: grid; grid-template-columns: minmax(0, 1fr) 360px; gap: var(--space-5); align-items: start; }

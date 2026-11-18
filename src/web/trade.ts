@@ -29,6 +29,51 @@ export function newerTrade<T extends Pick<Trade, 'id' | 'updatedAt'>>(current: T
 export const isFinal = (trade: Pick<Trade, 'status'>) => isFinalState(trade.status);
 
 /** "Buy 15,000 sats for 0.07 USD", "Bought …" once the buyer has the coins; "Sell …" / "Sold …" for the seller; no verb for visitors. */
+/** What the seller locks, in the words of every screen: "the BCH", or "the coins" for a token. */
+export function lockedCoins(asset: string): string {
+  return asset === 'BCH' ? 'the BCH' : 'the coins';
+}
+
+/** The four named steps above a trade's action card, and which one the person is on. */
+export interface Progress {
+  labels: readonly string[];
+  current: number;
+}
+
+const BUYER_STEPS = ['Confirm', 'Lock', 'Pay', 'Receive'] as const;
+const SELLER_STEPS = ['Accept', 'Lock', 'Paid', 'Release'] as const;
+
+/**
+ * Where an open trade stands, for the buyer or the seller. For the buyer of a sell offer, Requested and Accepted are
+ * one step: waiting for the seller to lock. On a buy offer the buyer confirms the seller's request first. A dispute
+ * or an ending has no step (null): the card says what happened instead.
+ */
+export function actionProgress(status: TradeState, role: 'buyer' | 'seller', side: 'sell' | 'buy' = 'sell'): Progress | null {
+  const labels = role === 'buyer' ? BUYER_STEPS : SELLER_STEPS;
+  switch (status) {
+    case 'Requested':
+      return { labels, current: role === 'buyer' && side === 'sell' ? 1 : 0 };
+    case 'Accepted':
+      return { labels, current: 1 };
+    case 'Funded':
+      return { labels, current: 2 };
+    case 'Paid':
+      return { labels, current: 3 };
+    default:
+      return null;
+  }
+}
+
+/**
+ * Releasing cannot be undone, so the seller confirms both checks first: the bank app was opened (a screenshot proves
+ * nothing) and the exact amount from this buyer is there. The button stays off until both are ticked.
+ */
+export const RELEASE_CHECKS = ['bankApp', 'exactAmount'] as const;
+export type ReleaseCheck = (typeof RELEASE_CHECKS)[number];
+export function releaseReady(ticked: ReadonlySet<ReleaseCheck>): boolean {
+  return RELEASE_CHECKS.every((check) => ticked.has(check));
+}
+
 export function tradeTitle(status: TradeState, role: Role, amount: string, fiat: string): string {
   const what = `${amount} for ${fiat}`;
   if (role === 'visitor') return what;
@@ -67,6 +112,7 @@ export function timeline(trade: Trade, role: Role, amount: string): Step[] {
 
   // On a buy offer the seller takes the offer and the buyer accepts; the deposit is still the seller's (section 2.2).
   const buyOffer = trade.side === 'buy';
+  const coins = lockedCoins(trade.asset);
   const firstTitle = buyOffer
     ? mine
       ? 'You answered the buyer’s offer'
@@ -80,11 +126,11 @@ export function timeline(trade: Trade, role: Role, amount: string): Step[] {
   // Accepting opens the 30-minute funding window, so its start is when the trade was accepted.
   const acceptedAt = trade.fundingDeadline !== undefined ? trade.fundingDeadline - 1800 : undefined;
 
-  // Step 2: the trade is accepted and the seller funds the escrow.
+  // Step 2: the trade is accepted and the seller locks the coins in the escrow.
   if (funded) {
     steps.push({
       state: 'done',
-      title: buyOffer ? (mine ? 'You locked the coins' : 'Seller locked the coins') : mine ? 'You funded the escrow' : 'Seller funded the escrow',
+      title: mine ? `You locked ${coins}` : `Seller locked ${coins}`,
       at: trade.fundedAt,
       txid: trade.fundingTxid,
       confirmations: trade.fundingConfirmations,
@@ -92,15 +138,15 @@ export function timeline(trade: Trade, role: Role, amount: string): Step[] {
   } else if (buyOffer && s === 'Requested') {
     steps.push({
       state: 'current',
-      title: you ? 'You accept, then the seller locks the coins' : mine ? 'Buyer accepts, then you lock the coins' : 'Buyer accepts, then the seller locks the coins',
+      title: you ? `You accept, then the seller locks ${coins}` : mine ? `Buyer accepts, then you lock ${coins}` : `Buyer accepts, then the seller locks ${coins}`,
       note: 'Up to 10 min to accept, then 30 min to lock',
     });
   } else if (buyOffer && s === 'Accepted') {
     if (mine) {
-      steps.push({ state: 'current', title: 'Buyer accepted. You lock the coins', at: acceptedAt, offchain: true, note: 'Locking window: 30 min' });
+      steps.push({ state: 'current', title: `Buyer accepted. You lock ${coins}`, at: acceptedAt, offchain: true, note: 'Locking window: 30 min' });
     } else {
       steps.push({ state: 'done', title: you ? 'You accepted' : 'Buyer accepted', at: acceptedAt, offchain: true });
-      steps.push({ state: 'current', title: 'Seller locks the coins', note: 'Up to 30 min to lock' });
+      steps.push({ state: 'current', title: `Seller locks ${coins}`, note: 'Up to 30 min to lock' });
     }
   } else if (buyOffer) {
     // Dropped before any deposit: either the buyer never accepted, or the seller did not lock the coins in time.
@@ -109,22 +155,22 @@ export function timeline(trade: Trade, role: Role, amount: string): Step[] {
         ? 'You did not accept the request'
         : 'The buyer did not accept'
       : mine
-        ? 'You did not lock the coins in time'
-        : 'The seller did not lock the coins in time';
+        ? `You did not lock ${coins} in time`
+        : `The seller did not lock ${coins} in time`;
     steps.push({ state: 'failed', title, at: trade.updatedAt });
     return steps;
   } else if (mine && s === 'Accepted') {
     steps.push({ state: 'done', title: 'You accepted', offchain: true, note: 'Payment details encrypted for the buyer' });
-    steps.push({ state: 'current', title: 'You fund the escrow', note: 'Funding window: 30 min' });
+    steps.push({ state: 'current', title: `You lock ${coins}`, note: 'Locking window: 30 min' });
   } else if (s === 'Requested' || s === 'Accepted') {
     steps.push({
       state: 'current',
-      title: mine ? 'You accept and fund the escrow' : 'Seller accepts and funds the escrow',
-      note: 'Up to 10 min to accept, then 30 min to fund',
+      title: mine ? `You accept and lock ${coins}` : `Seller accepts and locks ${coins}`,
+      note: 'Up to 10 min to accept, then 30 min to lock',
     });
   } else {
     // Dropped before any deposit: nothing reached the chain.
-    steps.push({ state: 'failed', title: mine ? 'The trade was dropped' : 'The seller did not accept and fund in time', at: trade.updatedAt });
+    steps.push({ state: 'failed', title: mine ? 'The trade was dropped' : `The seller did not accept and lock ${coins} in time`, at: trade.updatedAt });
     return steps;
   }
 
@@ -179,7 +225,7 @@ export function timeline(trade: Trade, role: Role, amount: string): Step[] {
       steps.push({ state: 'done', title: `Arbiter returned ${amount} to ${mine ? 'you' : 'the seller'}`, at: trade.completedAt ?? trade.verdictIssuedAt, txid: trade.settlementTxid });
       break;
     case 'Cancelled':
-      steps.push({ state: 'done', title: `${buyer} cancelled: the escrow returned ${amount} to ${mine ? 'you' : 'the seller'}`, at: trade.completedAt, txid: trade.settlementTxid });
+      steps.push({ state: 'done', title: `${buyer} cancelled: ${amount} went back to ${mine ? 'you' : 'the seller'}`, at: trade.completedAt, txid: trade.settlementTxid });
       break;
     case 'Refunded':
       steps.push({ state: 'done', title: `${mine ? 'You' : 'The seller'} recovered ${amount} after the refund time`, at: trade.completedAt, txid: trade.settlementTxid });

@@ -24,7 +24,7 @@ const trade = (status: TradeState, extra: Partial<Trade> = {}): Trade => ({
 describe('what each trade needs next', () => {
   it('tells the seller to act on a request, a deposit and a payment', () => {
     expect(nextStep(trade('Requested', { quoteExpiresAt: 1600 }), 'seller', 1000)).toEqual({ step: 'Accept or decline the request', turn: true, deadline: 1600, windowSec: 600 });
-    expect(nextStep(trade('Accepted', { fundingDeadline: 2800 }), 'seller', 1000)).toMatchObject({ step: 'Deposit into the escrow', turn: true, deadline: 2800 });
+    expect(nextStep(trade('Accepted', { fundingDeadline: 2800 }), 'seller', 1000)).toMatchObject({ step: 'Lock the BCH for this trade', turn: true, deadline: 2800 });
     expect(nextStep(trade('Paid'), 'seller')).toMatchObject({ step: 'Check the payment, then release', turn: true });
     expect(nextStep(trade('Funded', { fundedAt: 1000, paymentDeadline: 4600 }), 'seller')).toMatchObject({ turn: false, windowSec: 3600 });
   });
@@ -39,7 +39,7 @@ describe('what each trade needs next', () => {
   it('shows a window that already ended as over, so it does not ask for a turn that is gone', () => {
     expect(nextStep(trade('Requested', { quoteExpiresAt: 1600 }), 'seller', 1600)).toEqual({ step: 'The request expired', turn: false });
     expect(nextStep(trade('Requested', { quoteExpiresAt: 1600 }), 'seller', 1599).turn).toBe(true);
-    expect(nextStep(trade('Accepted', { fundingDeadline: 2800 }), 'buyer', 2900)).toEqual({ step: 'The funding window ended', turn: false });
+    expect(nextStep(trade('Accepted', { fundingDeadline: 2800 }), 'buyer', 2900)).toEqual({ step: 'The time to lock ended', turn: false });
   });
 
   it('waits for the arbiter in a dispute, for either side', () => {
@@ -78,7 +78,7 @@ describe('rows', () => {
     expect(how('Cancelled', 'seller')).toBe('cancelled by the buyer');
     expect(how('Refunded', 'seller')).toBe('returned after the refund time');
     expect(how('Dropped', 'buyer')).toBe('not accepted in time');
-    expect(how('Dropped', 'seller')).toBe('declined or not funded in time');
+    expect(how('Dropped', 'seller')).toBe('declined or not locked in time');
   });
 
   it('lists finished trades most recent first', () => {

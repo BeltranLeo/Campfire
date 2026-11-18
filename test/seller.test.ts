@@ -291,21 +291,21 @@ describe("the seller's view of the story", () => {
   it('shows the acceptance as its own step until the deposit is made', () => {
     expect(titles({ ...trade, status: 'Requested', termsJson: undefined })).toEqual([
       'done:Buyer took your offer',
-      'current:You accept and fund the escrow',
+      'current:You accept and lock the BCH',
       'todo:Buyer sends the payment and marks it as paid',
       'todo:You confirm the payment and release',
     ]);
     expect(titles(trade)).toEqual([
       'done:Buyer took your offer',
       'done:You accepted',
-      'current:You fund the escrow',
+      'current:You lock the BCH',
       'todo:Buyer sends the payment and marks it as paid',
       'todo:You confirm the payment and release',
     ]);
     const paid = { ...trade, status: 'Paid' as const, fundingTxid: 'f'.repeat(64), paidAt: NOW };
     expect(titles(paid)).toEqual([
       'done:Buyer took your offer',
-      'done:You funded the escrow',
+      'done:You locked the BCH',
       'done:Buyer marked the payment as sent',
       'current:You confirm the payment and release',
     ]);
@@ -318,7 +318,7 @@ describe("the seller's view of the story", () => {
       'done:Dispute opened by you',
       'done:Arbiter returned 250,000 sats to you',
     ]);
-    expect(titles({ ...base, status: 'Cancelled' }).at(-1)).toBe('done:Buyer cancelled: the escrow returned 250,000 sats to you');
+    expect(titles({ ...base, status: 'Cancelled' }).at(-1)).toBe('done:Buyer cancelled: 250,000 sats went back to you');
   });
 
   it('derives the dispute key from the OTHER side session key', () => {

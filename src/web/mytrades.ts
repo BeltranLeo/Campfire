@@ -4,6 +4,7 @@
 import type { Offer, Trade } from './api';
 import { isFinalState } from './api';
 import { formatDayMonth, formatHourMinute } from './format';
+import { lockedCoins } from './trade';
 
 export interface NextStep {
   /** What happens next, in a few words. */
@@ -25,7 +26,7 @@ export function nextStep(trade: Trade, role: 'buyer' | 'seller', now = Math.floo
     return { step: 'The request expired', turn: false };
   }
   if (trade.status === 'Accepted' && trade.fundingDeadline !== undefined && now >= trade.fundingDeadline) {
-    return { step: 'The funding window ended', turn: false };
+    return { step: 'The time to lock ended', turn: false };
   }
   switch (trade.status) {
     case 'Requested':
@@ -41,12 +42,12 @@ export function nextStep(trade: Trade, role: 'buyer' | 'seller', now = Math.floo
     case 'Accepted':
       return seller
         ? {
-            step: trade.side === 'buy' ? 'Lock the coins and share how to pay you' : 'Deposit into the escrow',
+            step: trade.side === 'buy' ? `Lock ${lockedCoins(trade.asset)} and share how to pay you` : `Lock ${lockedCoins(trade.asset)} for this trade`,
             turn: true,
             deadline: trade.fundingDeadline,
             windowSec: 1800,
           }
-        : { step: 'Waiting for the seller to deposit', turn: false, deadline: trade.fundingDeadline, windowSec: 1800 };
+        : { step: `Waiting for the seller to lock ${lockedCoins(trade.asset)}`, turn: false, deadline: trade.fundingDeadline, windowSec: 1800 };
     case 'Funded': {
       const windowSec = trade.paymentDeadline && trade.fundedAt ? trade.paymentDeadline - trade.fundedAt : undefined;
       return seller
@@ -104,9 +105,9 @@ export function historyNote(trade: Trade, role: 'buyer' | 'seller'): string {
     case 'Dropped':
       if (trade.side === 'buy') {
         // Accepting opens the funding window, so a deadline means the buyer accepted and the deposit never came.
-        how = trade.fundingDeadline !== undefined ? 'not funded in time' : role === 'buyer' ? 'declined or not accepted in time' : 'not accepted in time';
+        how = trade.fundingDeadline !== undefined ? 'not locked in time' : role === 'buyer' ? 'declined or not accepted in time' : 'not accepted in time';
       } else {
-        how = role === 'buyer' ? 'not accepted in time' : 'declined or not funded in time';
+        how = role === 'buyer' ? 'not accepted in time' : 'declined or not locked in time';
       }
       break;
   }
