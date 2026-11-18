@@ -7,7 +7,7 @@ import type { NetworkProvider } from 'cashscript';
 import { buildCloseOfferTransaction, isPositiveDecimalString, validateOfferDocument, type OfferDocument } from '../protocol/offers.js';
 import { cashAddressToPkh, derivePayoutPkhFromXpub, pkhToLockingBytecode, type WalletSpendableUtxo, type WalletTransactionRequest } from '../protocol/keys.js';
 import type { Offer as ListedOffer, OfferDocument as ListedOfferDocument } from './api';
-import { formatBch } from './format';
+import { applyMargin, formatBch, formatFiat } from './format';
 import { parseAmount } from './take';
 import { TradeActionError } from './trade';
 
@@ -75,6 +75,70 @@ export function parseMethods(input: string): string[] | null {
   const names = [...new Set(input.split(/[,\n]/).map((m) => m.trim()).filter(Boolean))];
   if (names.length === 0 || names.length > MAX_METHODS || names.some((m) => m.length > MAX_METHOD_LENGTH)) return null;
   return names;
+}
+
+// --- Payment method chips (the wizard writes them into `form.methods`, so the document builder is unchanged) ---
+
+const METHOD_CHIPS: Record<string, readonly string[]> = {
+  ARS: ['Bank transfer', 'Mercado Pago', 'Ualá', 'Brubank', 'Cash in person'],
+  USD: ['Bank transfer', 'Zelle', 'Wise', 'Cash in person'],
+};
+
+/** The suggested payment methods for a currency. */
+export const methodChips = (fiat: string): readonly string[] => METHOD_CHIPS[fiat] ?? METHOD_CHIPS.ARS;
+
+const sameName = (a: string, b: string) => a.toLowerCase() === b.toLowerCase();
+
+/** The names in a comma-separated string, trimmed and without repeats (case aside). */
+export function selectedMethods(methods: string): string[] {
+  const names: string[] = [];
+  for (const raw of methods.split(/[,\n]/)) {
+    const name = raw.trim();
+    if (name && !names.some((n) => sameName(n, name))) names.push(name);
+  }
+  return names;
+}
+
+/** Adds the name if it is not chosen, removes it if it is. */
+export function toggleMethod(methods: string, name: string): string {
+  const names = selectedMethods(methods);
+  return (names.some((n) => sameName(n, name)) ? names.filter((n) => !sameName(n, name)) : [...names, name]).join(', ');
+}
+
+/** Adds the comma-separated names someone typed in "Other". */
+export function addMethods(methods: string, typed: string): string {
+  return selectedMethods(`${methods},${typed}`).join(', ');
+}
+
+/** Drops the suggested names of another currency (Zelle on a peso offer) and keeps what was typed by hand. */
+export function keepMethodsFor(methods: string, fiat: string): string {
+  const here = methodChips(fiat);
+  const known = Object.values(METHOD_CHIPS).flat();
+  return selectedMethods(methods)
+    .filter((n) => here.some((h) => sameName(h, n)) || !known.some((k) => sameName(k, n)))
+    .join(', ');
+}
+
+/** What is wrong with the chosen payment methods, in words that fit chips. Null if nothing. */
+export function methodsProblem(methods: string, reserved = 0): string | null {
+  const names = selectedMethods(methods);
+  if (names.length === 0 && reserved === 0) return 'Choose at least one way to pay.';
+  if (names.length > MAX_METHODS - reserved) return `Choose up to ${MAX_METHODS - reserved} ways to pay.`;
+  if (names.some((n) => n.length > MAX_METHOD_LENGTH)) return `Each name can have up to ${MAX_METHOD_LENGTH} characters.`;
+  return null;
+}
+
+/**
+ * "Market + 2.5%", "market − 1%" or "market price", and the price today; or "368,765 ARS per BCH" for a fixed price.
+ * Null while there is nothing to say yet (no valid margin or price, or no market price).
+ */
+export function describeYourPrice(p: { priceType: PriceType; marginBps: number | null; fixedPrice: string | null; marketPrice: string | null; fiat: string }): string | null {
+  const money = (v: number) => formatFiat(v, p.fiat).replace('.00 ', ' ');
+  if (p.priceType === 'fixed') return p.fixedPrice === null ? null : `Your price: ${money(Number(p.fixedPrice))} per BCH`;
+  if (p.marginBps === null || p.marketPrice === null) return null;
+  const percent = Math.abs(p.marginBps) / 100;
+  const label = p.marginBps === 0 ? 'market price' : `market ${p.marginBps > 0 ? '+' : '−'} ${percent}%`;
+  return `Your price: ${label} (1 BCH ≈ ${money(applyMargin(p.marketPrice, p.marginBps))} today)`;
 }
 
 export type OfferBuild = { ok: true; document: OfferDocument; json: string } | { ok: false; errors: FormErrors };

@@ -1,10 +1,11 @@
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router';
 import { verifyPriceQuote, computeFiatAmount } from '../../protocol/trades.js';
 import { MARKER_SATOSHIS, buildPublishOfferTransaction } from '../../protocol/offers.js';
 import { ApiError, apiGet, apiPost, type DemoInfo, type Offer, type PriceQuote, type SponsorshipStatus, type TradeSummary } from '../api';
 import { Button, WALLET_DECLINED } from '../components/Button';
 import { Details } from '../components/Details';
+import { noWalletNote } from '../components/NoWalletNote';
 import { HashLink, ProvenanceTag, SimBox } from '../components/Provenance';
 import { Notice, Skeleton } from '../components/States';
 import { describeScan, scanWalletCoins, spendableBch } from '../coins';
@@ -15,6 +16,13 @@ import { usePoll } from '../hooks/usePoll';
 import { refreshWalletCoins, useWalletCoins } from '../walletCoins';
 import {
   EXPIRIES_SEC,
+  addMethods,
+  describeYourPrice,
+  keepMethodsFor,
+  methodChips,
+  methodsProblem,
+  selectedMethods,
+  toggleMethod,
   PAYMENT_WINDOWS_SEC,
   SELL_FIATS,
   buildOfferDocument,
@@ -28,8 +36,8 @@ import {
 import { parseAmount, payoutAddress } from '../take';
 import { WalletDeclined, useWallet } from '../wallet';
 
-// Create an offer (Create-Sell-* and Create-Buy-* screens), chosen as a pair: "I give BCH, I get pesos" is a sell
-// offer, "I give pesos, I get BCH" a buy offer. A sell offer is one wallet signature: a transaction with the offer's
+// Create an offer in three steps and a review (Create-Sell-* and Create-Buy-* screens): sell or buy, price and amounts,
+// ways to pay, then the one publish button. A sell offer is one wallet signature: a transaction with the offer's
 // hash in an OP_RETURN and a 1,000-sat marker the seller gets back by closing it. A buy offer needs no signature and
 // no BCH: Campfire builds and pays for the same transaction, with the marker on a fresh address of the buyer.
 
@@ -66,6 +74,21 @@ export function CreateOffer() {
   const [limitHit, setLimitHit] = useState<string | null>(null);
   const [declined, setDeclined] = useState(false);
   const [published, setPublished] = useState<Offer | null>(null);
+  // The wizard step; the form above stays one piece of state whichever step shows it.
+  const [step, setStep] = useState<1 | 2 | 3 | 'review'>(1);
+  const [otherOpen, setOtherOpen] = useState(false);
+  const [other, setOther] = useState('');
+  const heading = useRef<HTMLHeadingElement>(null);
+  const firstStep = useRef(true);
+  // A new step starts at its title, for people on a phone and for screen readers.
+  useEffect(() => {
+    if (firstStep.current) {
+      firstStep.current = false;
+      return;
+    }
+    window.scrollTo(0, 0);
+    heading.current?.focus({ preventScroll: true });
+  }, [step]);
   const set = (patch: Partial<OfferForm>) => setForm((f) => ({ ...f, ...patch }));
   const edit = (field: FormField, patch: Partial<OfferForm>) => {
     set(patch);
@@ -216,342 +239,484 @@ export function CreateOffer() {
   };
   const nextSlot = status?.nextSlotAt ? formatDateTime(status.nextSlotAt) : null;
 
+  // The wizard only decides which part of the one form is on screen.
+  const priceFields: FormField[] = [form.priceType === 'market' ? 'margin' : 'fixedPrice', 'min', 'max'];
+  const priceOk = priceFields.every((f) => !errors[f]);
+  const demoOn = buying && form.demo === true;
+  const chosen = selectedMethods(form.methods);
+  const chipNames = methodChips(form.fiat);
+  const customNames = chosen.filter((n) => !chipNames.some((c) => c.toLowerCase() === n.toLowerCase()));
+  const methodsMessage = shown('methods') ? methodsProblem(form.methods, demoOn ? 1 : 0) ?? shown('methods') : undefined;
+
+  const priceLine = describeYourPrice({
+    priceType: form.priceType,
+    marginBps,
+    fixedPrice: parseFixedPrice(form.fixedPrice),
+    marketPrice: verifiedQuote?.price ?? null,
+    fiat: form.fiat,
+  });
+  // While the market price is missing the line says why, in the words the hint always used.
+  const priceStatus =
+    form.priceType === 'market' && !verifiedQuote ? (quote.loading ? 'Loading the market price…' : 'The market price could not be loaded or verified.') : null;
+
+  const chooseSide = (side: 'sell' | 'buy') => {
+    // The margin follows the side's default only while the person has not typed their own.
+    const margin = form.margin === defaultMargin(form.side) ? defaultMargin(side) : form.margin;
+    set({ side, margin, demo: side === 'buy' ? form.demo : false });
+  };
+  const chooseFiat = (fiat: string) => set({ fiat, methods: keepMethodsFor(form.methods, fiat) });
+  const toggleChip = (name: string) => edit('methods', { methods: toggleMethod(form.methods, name) });
+  const addOther = () => {
+    if (!other.trim()) return;
+    edit('methods', { methods: addMethods(form.methods, other) });
+    setOther('');
+  };
+  const nextFromPrice = () => {
+    if (priceOk) setStep(3);
+    else setTouched((t) => new Set([...t, ...priceFields]));
+  };
+  const nextFromMethods = () => {
+    if (errors.methods) setTouched((t) => new Set(t).add('methods'));
+    else if (!priceOk) {
+      // Something from the price step broke since (the demo switch lowers the smallest trade): show it there.
+      setTouched((t) => new Set([...t, ...priceFields]));
+      setStep(2);
+    } else setStep('review');
+  };
+
+  const rangeText = `${toAmountInput(parseAmount(form.min, 8) ?? 0n, { decimals: 8, isBch: true })} to ${toAmountInput(parseAmount(form.max, 8) ?? 0n, { decimals: 8, isBch: true })} BCH`;
+  const payNames = [...chosen, ...(demoOn ? ['Simulated (demo)'] : [])];
+  const windowMinutes = form.paymentWindowSec / 60;
+  const openFor = form.expirySec === 86_400 ? '1 day' : `${form.expirySec / 86_400} days`;
+
+  const priceHint = (
+    <p className="co-price" aria-live="polite">
+      {priceLine ?? priceStatus ?? ' '}
+    </p>
+  );
+
   return (
     <main className="s-main" data-narrow>
       <div className="s-pagehead">
         <Link className="s-back" to="/trades">
           ← My trades
         </Link>
+        <span className="cf-stepper">{step === 'review' ? 'Review' : `Step ${step} of 3`}</span>
+        <div className="cf-progress" aria-hidden="true">
+          {[1, 2, 3].map((n) => (
+            <i key={n} data-state={step === 'review' || n < step ? 'done' : n === step ? 'current' : undefined} />
+          ))}
+        </div>
         <h1 className="cf-title">Create an offer</h1>
       </div>
 
       <section className="cf-card" data-pad>
         <div className="s-form">
-          <div className="s-2">
-            <div className="cf-field">
-              <label>I give</label>
-              <div className="cf-seg" role="group" aria-label="I give">
-                <button type="button" aria-pressed={!buying} onClick={() => set({ side: 'sell' })}>
-                  BCH
-                </button>
-                <button type="button" aria-pressed="false" disabled title="PUSD offers are coming soon">
-                  PUSD
-                </button>
-                {SELL_FIATS.map((f) => (
-                  <button key={f.code} type="button" aria-pressed={buying && form.fiat === f.code} onClick={() => set({ side: 'buy', fiat: f.code })}>
-                    {f.label}
-                  </button>
-                ))}
-              </div>
-            </div>
-            <div className="cf-field">
-              <label>I get</label>
-              <div className="cf-seg" role="group" aria-label="I get">
-                {SELL_FIATS.map((f) => (
-                  <button key={f.code} type="button" aria-pressed={!buying && form.fiat === f.code} onClick={() => set({ side: 'sell', fiat: f.code })}>
-                    {f.label}
-                  </button>
-                ))}
-                <button type="button" aria-pressed={buying} onClick={() => set({ side: 'buy' })}>
-                  BCH
-                </button>
-                <button type="button" aria-pressed="false" disabled title="PUSD offers are coming soon">
-                  PUSD
-                </button>
-              </div>
-            </div>
-          </div>
-          <span className="cf-small cf-subtle">PUSD offers are coming soon.</span>
+          <h2 className="co-step" tabIndex={-1} ref={heading}>
+            {step === 1 ? 'What do you want to do?' : step === 2 ? 'Price and amounts' : step === 3 ? (buying ? 'How can you pay?' : 'How can buyers pay you?') : 'Review your offer'}
+          </h2>
 
-          {buying ? (
-            <Notice title={`You are buying BCH with ${fiatInfo.name}.`}>You don’t need any BCH: a seller will lock the coins for you.</Notice>
-          ) : (
-            <Notice title={`You are selling BCH for ${fiatInfo.name}.`}>Buyers will pay you in {fiatInfo.label.toLowerCase()}.</Notice>
-          )}
-
-          <div className="cf-field">
-            <label>Price</label>
-            <div className="cf-seg" role="group" aria-label="Price">
-              <button type="button" aria-pressed={form.priceType === 'market'} onClick={() => set({ priceType: 'market' })}>
-                Market price
-              </button>
-              <button type="button" aria-pressed={form.priceType === 'fixed'} onClick={() => set({ priceType: 'fixed' })}>
-                Fixed price
-              </button>
-            </div>
-          </div>
-
-          {form.priceType === 'market' ? (
-            <div className="cf-field" data-invalid={shown('margin') ? true : undefined}>
-              <label htmlFor="margin">{buying ? 'I pay up to this much over the market price' : 'Over the market price'}</label>
-              <div className="cf-inputgroup">
-                <input
-                  id="margin"
-                  className="cf-input"
-                  data-mono
-                  inputMode="decimal"
-                  value={form.margin}
-                  aria-invalid={shown('margin') ? true : undefined}
-                  onChange={(e) => edit('margin', { margin: e.target.value })}
-                />
-                <span className="cf-addon">%</span>
-              </div>
-              <span className="cf-hint">
-                {shown('margin') ??
-                  [
-                    verifiedQuote && marginBps !== null
-                      ? `${buying ? 'You pay' : 'Buyers pay'} ${formatFiat(applyMargin(verifiedQuote.price, marginBps), form.fiat)} per BCH today.`
-                      : verifiedQuote
-                        ? null
-                        : quote.loading
-                        ? 'Loading the market price…'
-                        : 'The market price could not be loaded or verified.',
-                    range ? `${buying ? 'Similar offers pay' : 'Open offers use'} ${describeRange(range)}.` : null,
-                  ]
-                    .filter(Boolean)
-                    .join(' ')}
-              </span>
-            </div>
-          ) : (
-            <div className="cf-field" data-invalid={shown('fixedPrice') ? true : undefined}>
-              <label htmlFor="fixed">Price per BCH</label>
-              <div className="cf-inputgroup">
-                <input
-                  id="fixed"
-                  className="cf-input"
-                  data-mono
-                  inputMode="decimal"
-                  value={form.fixedPrice}
-                  aria-invalid={shown('fixedPrice') ? true : undefined}
-                  onChange={(e) => edit('fixedPrice', { fixedPrice: e.target.value })}
-                />
-                <span className="cf-addon">{form.fiat}</span>
-              </div>
-              <span className="cf-hint">
-                {shown('fixedPrice') ??
-                  (verifiedQuote ? `The market price is ${formatFiat(Number(verifiedQuote.price), form.fiat)} today. A fixed price does not follow it.` : 'The price stays the same until you close the offer.')}
-              </span>
-            </div>
-          )}
-
-          <div className="s-2">
-            <div className="cf-field" data-invalid={shown('min') ? true : undefined}>
-              <label htmlFor="min">Smallest trade</label>
-              <div className="cf-inputgroup">
-                <input
-                  id="min"
-                  className="cf-input"
-                  data-mono
-                  inputMode="decimal"
-                  value={form.min}
-                  aria-invalid={shown('min') ? true : undefined}
-                  onChange={(e) => edit('min', { min: e.target.value })}
-                />
-                <span className="cf-addon">BCH</span>
-              </div>
-              <span className="cf-hint">{shown('min') ?? (approx(form.min) ? `≈ ${approx(form.min)}` : ' ')}</span>
-            </div>
-            <div className="cf-field" data-invalid={shown('max') ? true : undefined}>
-              <label htmlFor="max">Largest trade</label>
-              <div className="cf-inputgroup">
-                <input
-                  id="max"
-                  className="cf-input"
-                  data-mono
-                  inputMode="decimal"
-                  value={form.max}
-                  aria-invalid={shown('max') ? true : undefined}
-                  onChange={(e) => edit('max', { max: e.target.value })}
-                />
-                <span className="cf-addon">BCH</span>
-              </div>
-              <span className="cf-hint">{shown('max') ?? (approx(form.max) ? `≈ ${approx(form.max)}` : ' ')}</span>
-            </div>
-          </div>
-
-          <div className="cf-field" data-invalid={shown('methods') ? true : undefined}>
-            <label htmlFor="methods">{buying ? 'How you can pay' : 'How buyers can pay you'}</label>
-            <input
-              id="methods"
-              className="cf-input"
-              placeholder="bank-transfer, mercadopago"
-              value={form.methods}
-              aria-invalid={shown('methods') ? true : undefined}
-              onChange={(e) => edit('methods', { methods: e.target.value })}
-            />
-            <span className="cf-hint">
-              {shown('methods') ?? 'Names only. Account details are shared per trade, encrypted for the other person.'}
-            </span>
-          </div>
-
-          {/* The demo is chosen, not discovered: a visible switch instead of typing a magic payment method. */}
-          {buying && demoMax !== undefined && (
-            <SimBox label="Demo">
-              <label className="s-tick">
-                <input type="checkbox" checked={form.demo === true} onChange={(e) => toggleDemo(e.target.checked)} />
-                <span className="cf-stack" data-gap="1">
-                  <strong>Get a demo answer (simulated {fiatInfo.label.toLowerCase()})</strong>
-                  <span className="cf-small cf-muted">
-                    The demo seller answers right away for trades up to {formatBch(demoMax)}. The payment is simulated: no
-                    money moves, and the BCH you get is real.
+          {step === 1 && (
+            <>
+              <div className="cf-stack" data-gap="3">
+                <button type="button" className="cf-choice" aria-pressed={!buying} onClick={() => chooseSide('sell')}>
+                  <span>
+                    Sell BCH
+                    <small>Buyers pay you in pesos or dollars</small>
                   </span>
-                </span>
-              </label>
-            </SimBox>
-          )}
-
-          <div className="s-2">
-            <div className="cf-field">
-              <label htmlFor="window">Time to pay</label>
-              <select id="window" className="cf-select" value={form.paymentWindowSec} onChange={(e) => set({ paymentWindowSec: Number(e.target.value) })}>
-                {PAYMENT_WINDOWS_SEC.map((s) => (
-                  <option key={s} value={s}>
-                    {s / 60} minutes
-                  </option>
-                ))}
-              </select>
-            </div>
-            <div className="cf-field">
-              <label htmlFor="expires">Offer stays open for</label>
-              <select id="expires" className="cf-select" value={form.expirySec} onChange={(e) => set({ expirySec: Number(e.target.value) })}>
-                {expiries.map((s) => (
-                  <option key={s} value={s}>
-                    {s === 86_400 ? '1 day' : `${s / 86_400} days`}
-                  </option>
-                ))}
-              </select>
-              {buying && maxExpirySec !== undefined && (
-                <span className="cf-hint">{Math.round(maxExpirySec / 86_400)} days at most for offers Campfire pays for.</span>
-              )}
-            </div>
-          </div>
-
-          <Details summary="Arbiter and price source" tag={null}>
-            <div className="cf-well cf-small">
-              Campfire arbiter {config ? <HashLink value={config.arbiterPk} kind="plain" /> : <Skeleton width={90} style={{ display: 'inline-block' }} />}
-              <br />
-              <span className="cf-muted">Decides disputes by choosing buyer or seller. It can never take the coins.</span>
-            </div>
-            {form.priceType === 'market' && (
-              <div className="cf-well cf-small">
-                Campfire oracle {config ? <HashLink value={config.oraclePk} kind="plain" /> : <Skeleton width={90} style={{ display: 'inline-block' }} />}
-                <br />
-                <span className="cf-muted">Signs the market price each time someone takes the offer.</span>
+                </button>
+                <button type="button" className="cf-choice" aria-pressed={buying} onClick={() => chooseSide('buy')}>
+                  <span>
+                    Buy BCH
+                    <small>Sellers send you BCH, you pay them</small>
+                  </span>
+                </button>
               </div>
-            )}
-          </Details>
-
-          {buying ? (
-            blocked === 'daily' ? (
-              <Notice tone="warn" title="Today’s free offers are used up">
-                Campfire pays the network fee for {status?.dailyOffers} buy offers per day across all users. Please try again
-                {nextSlot ? ` after ${nextSlot}.` : ' tomorrow.'}
-              </Notice>
-            ) : blocked === 'open' ? (
-              // Invented copy: the design has a screen for the daily limit only.
-              <Notice tone="warn" title={`You already have ${status?.openNow} open offers paid for by Campfire`}>
-                Close one in My trades to publish another. Campfire pays for {status?.openOffersPerIdentity} open offers per wallet.
-              </Notice>
-            ) : blocked === 'disabled' ? (
-              // Invented copy.
-              <Notice tone="warn" title="Campfire is not paying for buy offers right now">Please try again later.</Notice>
-            ) : limitHit ? (
-              <Notice tone="warn" title="Campfire could not pay for this offer">
-                {limitHit}
-              </Notice>
-            ) : (
-              <Notice tone="chain" title="Publishing is free for you">
-                Campfire pays the network fee. It is still a real mainnet transaction, and you can close the offer anytime.
-              </Notice>
-            )
-          ) : (
-            <Notice title="Publishing locks no coins.">
-              The offer is a mainnet transaction with a {formatBch(MARKER_SATOSHIS)} marker you get back when you close it, plus the
-              network fee. You lock coins only when you accept a buyer.
-            </Notice>
+              <div className="cf-field">
+                <label id="co-money">In which money?</label>
+                <div className="cf-seg" role="group" aria-labelledby="co-money">
+                  {SELL_FIATS.map((f) => (
+                    <button key={f.code} type="button" aria-pressed={form.fiat === f.code} onClick={() => chooseFiat(f.code)}>
+                      {f.name}
+                    </button>
+                  ))}
+                </div>
+              </div>
+              <div className="s-actions">
+                <Button variant="primary" block onClick={() => setStep(2)}>
+                  Continue
+                </Button>
+              </div>
+            </>
           )}
 
-          {!buying && Boolean(scan.error) && !scan.data && (
-            <Notice tone="danger" title="We could not read your wallet's coins">
-              The network did not answer.{' '}
-              <button type="button" className="cf-copy" onClick={scan.reload}>
-                Try again
-              </button>
-            </Notice>
-          )}
-          {short && scan.data && (
-            <Notice tone="warn" title="Your wallet does not have enough BCH">
-              Publishing needs about {formatBch(needed)} for the marker and the fee. This wallet has {bch !== null && formatBch(bch)}
-              that Campfire can see. {describeScan(scan.data)} Send some BCH to it: this page checks again every few seconds.{' '}
-              <button type="button" className="cf-copy" onClick={scan.reload}>
-                Check again
-              </button>
-            </Notice>
-          )}
-          {prep.data && prep.data.markerIndex === null && (
-            <Notice tone="warn" title="We could not find a fresh address in your wallet">
-              The lookup took too long.{' '}
-              <button type="button" className="cf-copy" onClick={prep.reload}>
-                Try again
-              </button>
-            </Notice>
-          )}
-          {declined && (
-            <Notice tone="warn" title="Nothing was published">
-              {WALLET_DECLINED}
-            </Notice>
-          )}
-          {failure && (
-            <Notice tone="danger" title="The offer was not published">
-              {failure}
-            </Notice>
+          {step === 2 && (
+            <>
+              <div className="cf-field">
+                <label id="co-price">Price</label>
+                <div className="cf-seg" role="group" aria-labelledby="co-price">
+                  <button type="button" aria-pressed={form.priceType === 'market'} onClick={() => set({ priceType: 'market' })}>
+                    Market price
+                  </button>
+                  <button type="button" aria-pressed={form.priceType === 'fixed'} onClick={() => set({ priceType: 'fixed' })}>
+                    Fixed price
+                  </button>
+                </div>
+              </div>
+
+              {form.priceType === 'market' ? (
+                <div className="cf-field" data-invalid={shown('margin') ? true : undefined}>
+                  <label htmlFor="margin">{buying ? 'I pay up to this much over the market price' : 'Over the market price'}</label>
+                  <div className="cf-inputgroup">
+                    <input
+                      id="margin"
+                      className="cf-input"
+                      data-mono
+                      inputMode="decimal"
+                      value={form.margin}
+                      aria-invalid={shown('margin') ? true : undefined}
+                      onChange={(e) => edit('margin', { margin: e.target.value })}
+                    />
+                    <span className="cf-addon">%</span>
+                  </div>
+                  <span className="cf-hint">
+                    {shown('margin') ??
+                      [
+                        verifiedQuote && marginBps !== null
+                          ? `${buying ? 'You pay' : 'Buyers pay'} ${formatFiat(applyMargin(verifiedQuote.price, marginBps), form.fiat)} per BCH today.`
+                          : verifiedQuote
+                            ? null
+                            : quote.loading
+                              ? 'Loading the market price…'
+                              : 'The market price could not be loaded or verified.',
+                        range ? `${buying ? 'Similar offers pay' : 'Open offers use'} ${describeRange(range)}.` : null,
+                      ]
+                        .filter(Boolean)
+                        .join(' ')}
+                  </span>
+                </div>
+              ) : (
+                <div className="cf-field" data-invalid={shown('fixedPrice') ? true : undefined}>
+                  <label htmlFor="fixed">Price per BCH</label>
+                  <div className="cf-inputgroup">
+                    <input
+                      id="fixed"
+                      className="cf-input"
+                      data-mono
+                      inputMode="decimal"
+                      value={form.fixedPrice}
+                      aria-invalid={shown('fixedPrice') ? true : undefined}
+                      onChange={(e) => edit('fixedPrice', { fixedPrice: e.target.value })}
+                    />
+                    <span className="cf-addon">{form.fiat}</span>
+                  </div>
+                  <span className="cf-hint">
+                    {shown('fixedPrice') ??
+                      (verifiedQuote ? `The market price is ${formatFiat(Number(verifiedQuote.price), form.fiat)} today. A fixed price does not follow it.` : 'The price stays the same until you close the offer.')}
+                  </span>
+                </div>
+              )}
+              {priceHint}
+
+              <div className="s-2">
+                <div className="cf-field" data-invalid={shown('min') ? true : undefined}>
+                  <label htmlFor="min">Smallest trade</label>
+                  <div className="cf-inputgroup">
+                    <input
+                      id="min"
+                      className="cf-input"
+                      data-mono
+                      inputMode="decimal"
+                      value={form.min}
+                      aria-invalid={shown('min') ? true : undefined}
+                      onChange={(e) => edit('min', { min: e.target.value })}
+                    />
+                    <span className="cf-addon">BCH</span>
+                  </div>
+                  <span className="cf-hint">{shown('min') ?? (approx(form.min) ? `≈ ${approx(form.min)}` : ' ')}</span>
+                </div>
+                <div className="cf-field" data-invalid={shown('max') ? true : undefined}>
+                  <label htmlFor="max">Largest trade</label>
+                  <div className="cf-inputgroup">
+                    <input
+                      id="max"
+                      className="cf-input"
+                      data-mono
+                      inputMode="decimal"
+                      value={form.max}
+                      aria-invalid={shown('max') ? true : undefined}
+                      onChange={(e) => edit('max', { max: e.target.value })}
+                    />
+                    <span className="cf-addon">BCH</span>
+                  </div>
+                  <span className="cf-hint">{shown('max') ?? (approx(form.max) ? `≈ ${approx(form.max)}` : ' ')}</span>
+                </div>
+              </div>
+
+              <div className="s-actions">
+                <Button variant="primary" block onClick={nextFromPrice}>
+                  Continue
+                </Button>
+                <Button variant="ghost" onClick={() => setStep(1)}>
+                  Back
+                </Button>
+              </div>
+            </>
           )}
 
-          <div className="s-actions">
-            {wallet.status !== 'connected' ? (
-              <Button variant="primary" busy={wallet.status === 'pairing' || wallet.status === 'connecting'} onClick={wallet.connect} note="Pairs with Selene or Paytaca through WizardConnect.">
-                Connect wallet to publish
-              </Button>
-            ) : buying && (blocked === 'daily' || blocked === 'disabled') ? (
-              <Button variant="primary" to="/offers">
-                Back to offers
-              </Button>
-            ) : buying && blocked === 'open' ? (
-              <Button variant="primary" to="/trades?tab=offers">
-                Go to My offers
-              </Button>
-            ) : buying ? (
-              <Button
-                variant="primary"
-                busy={publishing}
-                disabled={!config || !prep.data || prep.data.markerIndex === null || !status}
-                onClick={publish}
-                note="No signature needed."
-              >
-                Publish offer
-              </Button>
-            ) : (
-              <Button
-                variant="primary"
-                signs
-                busy={publishing}
-                disabled={!config || !prep.data || !scan.data || prep.data.markerIndex === null || short}
-                onClick={publish}
-              >
-                Publish offer
-              </Button>
-            )}
-            {!(buying && blocked) && (
-              <Button variant="ghost" to={buying ? '/offers' : '/offers?side=sell'}>
-                Cancel
-              </Button>
-            )}
-          </div>
+          {step === 3 && (
+            <>
+              <div className="cf-field" data-invalid={methodsMessage ? true : undefined}>
+                <label id="co-methods">{buying ? 'Ways you can pay' : 'Ways buyers can pay you'}</label>
+                <div className="co-chips" role="group" aria-labelledby="co-methods">
+                  {[...chipNames, ...customNames].map((name) => (
+                    <button key={name} type="button" className="co-chip" aria-pressed={chosen.some((n) => n.toLowerCase() === name.toLowerCase())} onClick={() => toggleChip(name)}>
+                      {name}
+                    </button>
+                  ))}
+                  <button type="button" className="co-chip" aria-pressed={otherOpen} aria-expanded={otherOpen} onClick={() => setOtherOpen((o) => !o)}>
+                    + Other
+                  </button>
+                </div>
+                {otherOpen && (
+                  <div className="co-other">
+                    <input
+                      className="cf-input"
+                      aria-label="Other ways to pay, separated by commas"
+                      placeholder="Revolut, Payoneer"
+                      value={other}
+                      onChange={(e) => setOther(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') {
+                          e.preventDefault();
+                          addOther();
+                        }
+                      }}
+                    />
+                    <Button onClick={addOther} disabled={!other.trim()}>
+                      Add
+                    </Button>
+                  </div>
+                )}
+                <span className="cf-hint">{methodsMessage ?? 'Only the names are public. You share your account details with each buyer, encrypted, after you accept them.'}</span>
+              </div>
+
+              <div className="s-2">
+                <div className="cf-field">
+                  <label htmlFor="window">Time to pay</label>
+                  <select id="window" className="cf-select" value={form.paymentWindowSec} onChange={(e) => set({ paymentWindowSec: Number(e.target.value) })}>
+                    {PAYMENT_WINDOWS_SEC.map((s) => (
+                      <option key={s} value={s}>
+                        {s / 60} minutes
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div className="cf-field">
+                  <label htmlFor="expires">Offer stays open for</label>
+                  <select id="expires" className="cf-select" value={form.expirySec} onChange={(e) => set({ expirySec: Number(e.target.value) })}>
+                    {expiries.map((s) => (
+                      <option key={s} value={s}>
+                        {s === 86_400 ? '1 day' : `${s / 86_400} days`}
+                      </option>
+                    ))}
+                  </select>
+                  {buying && maxExpirySec !== undefined && (
+                    <span className="cf-hint">{Math.round(maxExpirySec / 86_400)} days at most for offers Campfire pays for.</span>
+                  )}
+                </div>
+              </div>
+
+              {/* The demo is chosen, not discovered: a visible switch instead of typing a magic payment method. */}
+              {buying && demoMax !== undefined && (
+                <SimBox label="Demo">
+                  <label className="s-tick">
+                    <input type="checkbox" checked={form.demo === true} onChange={(e) => toggleDemo(e.target.checked)} />
+                    <span className="cf-stack" data-gap="1">
+                      <strong>Get a demo answer (simulated {fiatInfo.label.toLowerCase()})</strong>
+                      <span className="cf-small cf-muted">
+                        The demo seller answers right away for trades up to {formatBch(demoMax)}. The payment is simulated: no
+                        money moves, and the BCH you get is real.
+                      </span>
+                    </span>
+                  </label>
+                </SimBox>
+              )}
+
+              <div className="s-actions">
+                <Button variant="primary" block onClick={nextFromMethods}>
+                  Review offer
+                </Button>
+                <Button variant="ghost" onClick={() => setStep(2)}>
+                  Back
+                </Button>
+              </div>
+            </>
+          )}
+
+          {step === 'review' && (
+            <>
+              <div className="cf-card" data-pad>
+                <dl className="cf-dl">
+                  <dt>{buying ? 'You buy' : 'You sell'}</dt>
+                  <dd className="co-num">
+                    {rangeText} <EditLink onClick={() => setStep(2)} />
+                  </dd>
+                  <dt>Price</dt>
+                  <dd className="co-num">
+                    {priceLine?.replace(/^Your price: /, '') ?? priceStatus ?? '—'} <EditLink onClick={() => setStep(2)} />
+                  </dd>
+                  <dt>{buying ? 'You pay by' : 'Buyers pay by'}</dt>
+                  <dd>
+                    {payNames.join(', ') || '—'} <EditLink onClick={() => setStep(3)} />
+                  </dd>
+                  <dt>Time to pay</dt>
+                  <dd className="co-num">{windowMinutes} minutes</dd>
+                  <dt>Open for</dt>
+                  <dd className="co-num">{openFor}</dd>
+                </dl>
+              </div>
+
+              {buying ? (
+                blocked === 'daily' ? (
+                  <Notice tone="warn" title="Today’s free offers are used up">
+                    Campfire pays the network fee for {status?.dailyOffers} buy offers per day across all users. Please try again
+                    {nextSlot ? ` after ${nextSlot}.` : ' tomorrow.'}
+                  </Notice>
+                ) : blocked === 'open' ? (
+                  // Invented copy: the design has a screen for the daily limit only.
+                  <Notice tone="warn" title={`You already have ${status?.openNow} open offers paid for by Campfire`}>
+                    Close one in My trades to publish another. Campfire pays for {status?.openOffersPerIdentity} open offers per wallet.
+                  </Notice>
+                ) : blocked === 'disabled' ? (
+                  // Invented copy.
+                  <Notice tone="warn" title="Campfire is not paying for buy offers right now">Please try again later.</Notice>
+                ) : limitHit ? (
+                  <Notice tone="warn" title="Campfire could not pay for this offer">
+                    {limitHit}
+                  </Notice>
+                ) : (
+                  <Notice tone="chain" title="Publishing is free for you">
+                    Campfire pays the network fee. It is still a real mainnet transaction, and you can close the offer anytime.
+                  </Notice>
+                )
+              ) : (
+                <Notice title="Publishing costs less than a cent">
+                  No coins are locked until someone takes your offer. You choose whether to accept each buyer.
+                </Notice>
+              )}
+
+              {!buying && Boolean(scan.error) && !scan.data && (
+                <Notice tone="danger" title="We could not read your wallet's coins">
+                  The network did not answer.{' '}
+                  <button type="button" className="cf-copy" onClick={scan.reload}>
+                    Try again
+                  </button>
+                </Notice>
+              )}
+              {short && scan.data && (
+                <Notice tone="warn" title="Your wallet does not have enough BCH">
+                  Publishing needs about {formatBch(needed)} for the marker and the fee. This wallet has {bch !== null && formatBch(bch)}
+                  that Campfire can see. {describeScan(scan.data)} Send some BCH to it: this page checks again every few seconds.{' '}
+                  <button type="button" className="cf-copy" onClick={scan.reload}>
+                    Check again
+                  </button>
+                </Notice>
+              )}
+              {prep.data && prep.data.markerIndex === null && (
+                <Notice tone="warn" title="We could not find a fresh address in your wallet">
+                  The lookup took too long.{' '}
+                  <button type="button" className="cf-copy" onClick={prep.reload}>
+                    Try again
+                  </button>
+                </Notice>
+              )}
+              {declined && (
+                <Notice tone="warn" title="Nothing was published">
+                  {WALLET_DECLINED}
+                </Notice>
+              )}
+              {failure && (
+                <Notice tone="danger" title="The offer was not published">
+                  {failure}
+                </Notice>
+              )}
+
+              <div className="s-actions">
+                {wallet.status !== 'connected' ? (
+                  <Button variant="primary" busy={wallet.status === 'pairing' || wallet.status === 'connecting'} onClick={wallet.connect} note={noWalletNote}>
+                    Connect wallet to publish
+                  </Button>
+                ) : buying && (blocked === 'daily' || blocked === 'disabled') ? (
+                  <Button variant="primary" to="/offers">
+                    Back to offers
+                  </Button>
+                ) : buying && blocked === 'open' ? (
+                  <Button variant="primary" to="/trades?tab=offers">
+                    Go to My offers
+                  </Button>
+                ) : buying ? (
+                  <Button
+                    variant="primary"
+                    busy={publishing}
+                    disabled={!config || !prep.data || prep.data.markerIndex === null || !status}
+                    onClick={publish}
+                    note="No signature needed."
+                  >
+                    Publish offer
+                  </Button>
+                ) : (
+                  <Button
+                    variant="primary"
+                    signs
+                    busy={publishing}
+                    disabled={!config || !prep.data || !scan.data || prep.data.markerIndex === null || short}
+                    onClick={publish}
+                  >
+                    Publish offer
+                  </Button>
+                )}
+                <Button variant="ghost" onClick={() => setStep(3)}>
+                  Back
+                </Button>
+              </div>
+
+              <Details summary="Arbiter and price source" tag={null}>
+                <div className="cf-well cf-small">
+                  Campfire arbiter {config ? <HashLink value={config.arbiterPk} kind="plain" /> : <Skeleton width={90} style={{ display: 'inline-block' }} />}
+                  <br />
+                  <span className="cf-muted">Decides disputes by choosing buyer or seller. It can never take the coins.</span>
+                </div>
+                {form.priceType === 'market' && (
+                  <div className="cf-well cf-small">
+                    Campfire oracle {config ? <HashLink value={config.oraclePk} kind="plain" /> : <Skeleton width={90} style={{ display: 'inline-block' }} />}
+                    <br />
+                    <span className="cf-muted">Signs the market price each time someone takes the offer.</span>
+                  </div>
+                )}
+                <div className="cf-well cf-small">
+                  The offer is a mainnet transaction with a {formatBch(MARKER_SATOSHIS)} marker
+                  {buying ? ' on a fresh address of yours' : ''}. It comes back to you when you close the offer
+                  {buying ? '' : ', and the network fee is the only cost'}.
+                </div>
+              </Details>
+            </>
+          )}
         </div>
       </section>
     </main>
   );
 }
+
+function EditLink({ onClick }: { onClick: () => void }) {
+  return (
+    <button type="button" className="co-edit" onClick={onClick}>
+      Edit
+    </button>
+  );
+}
+
+const defaultMargin = (side: 'sell' | 'buy') => (side === 'buy' ? '0.5' : INITIAL.margin);
 
 /** 250 → "+2.5%", -100 → "-1%". */
 const signedPercent = (bps: number) => `${bps > 0 ? '+' : bps < 0 ? '-' : ''}${Math.abs(bps) / 100}%`;

@@ -6,8 +6,15 @@ import { derivePayoutPkhFromXpub, pkhToCashAddress } from '../src/protocol/keys.
 import { describeScan, loadWalletCoins, scanWalletCoins, spendableBch } from '../src/web/coins.js';
 import {
   buildCloseOffer,
+  addMethods,
   buildOfferDocument,
+  describeYourPrice,
+  keepMethodsFor,
   marginRange,
+  methodChips,
+  methodsProblem,
+  selectedMethods,
+  toggleMethod,
   parseFixedPrice,
   parseMarginBps,
   parseMethods,
@@ -319,5 +326,56 @@ describe('the demo switch on a buy offer', () => {
   it('is ignored on a sell offer', () => {
     const built = buildOfferDocument({ form: { ...form, demo: true }, arbiter, oracle, now: 1_800_000_000, demoMaxSats: 20_000n });
     expect(built.ok && built.document.paymentMethods).toEqual(['bank-transfer', 'mercadopago']);
+  });
+});
+
+describe('payment method chips', () => {
+  it('suggests names per currency', () => {
+    expect(methodChips('ARS')).toContain('Mercado Pago');
+    expect(methodChips('USD')).toContain('Zelle');
+    expect(methodChips('USD')).not.toContain('Mercado Pago');
+  });
+
+  it('toggles a name on and off, in order', () => {
+    expect(toggleMethod('', 'Zelle')).toBe('Zelle');
+    expect(toggleMethod('Zelle', 'Wise')).toBe('Zelle, Wise');
+    expect(toggleMethod('Zelle, Wise', 'zelle')).toBe('Wise');
+    expect(selectedMethods(' a, ,b,A ')).toEqual(['a', 'b']);
+  });
+
+  it('adds typed names without repeats and feeds the document builder', () => {
+    const methods = addMethods('Wise', 'Revolut, wise ,Payoneer');
+    expect(methods).toBe('Wise, Revolut, Payoneer');
+    const built = buildOfferDocument({ form: { ...form, methods }, arbiter, oracle, now: 1_800_000_000 });
+    expect(built.ok && built.document.paymentMethods).toEqual(['Wise', 'Revolut', 'Payoneer']);
+  });
+
+  it('drops suggestions of the other currency but keeps typed names', () => {
+    expect(keepMethodsFor('Zelle, Mercado Pago, Revolut', 'ARS')).toBe('Mercado Pago, Revolut');
+  });
+
+  it('describes what is wrong in words that fit chips', () => {
+    expect(methodsProblem('')).toMatch(/at least one/);
+    expect(methodsProblem('')).not.toBeNull();
+    expect(methodsProblem('', 1)).toBeNull();
+    expect(methodsProblem('a, b, c, d, e, f')).toMatch(/up to 5/);
+    expect(methodsProblem('a, b, c, d, e', 1)).toMatch(/up to 4/);
+    expect(methodsProblem('x'.repeat(31))).toMatch(/30 characters/);
+    expect(methodsProblem('Zelle')).toBeNull();
+  });
+});
+
+describe('the live price line', () => {
+  const base = { priceType: 'market' as const, fixedPrice: null, marketPrice: '360015.5', fiat: 'ARS' };
+  it('shows the margin sign and the price today', () => {
+    expect(describeYourPrice({ ...base, marginBps: 250 })).toBe('Your price: market + 2.5% (1 BCH ≈ 369,015.89 ARS today)');
+    expect(describeYourPrice({ ...base, marginBps: -100 })).toMatch(/^Your price: market − 1% /);
+    expect(describeYourPrice({ ...base, marginBps: 0, marketPrice: '368765' })).toBe('Your price: market price (1 BCH ≈ 368,765 ARS today)');
+  });
+  it('shows a fixed price and stays silent without data', () => {
+    expect(describeYourPrice({ ...base, priceType: 'fixed', marginBps: null, fixedPrice: '368765' })).toBe('Your price: 368,765 ARS per BCH');
+    expect(describeYourPrice({ ...base, priceType: 'fixed', marginBps: null })).toBeNull();
+    expect(describeYourPrice({ ...base, marginBps: 250, marketPrice: null })).toBeNull();
+    expect(describeYourPrice({ ...base, marginBps: null })).toBeNull();
   });
 });
