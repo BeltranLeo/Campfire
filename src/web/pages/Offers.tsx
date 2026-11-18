@@ -141,7 +141,7 @@ export function Offers() {
   return (
     <main className="s-main">
       <div className="s-pagehead">
-        <h1 className="cf-title">Offers</h1>
+        <h1 className="cf-display">Offers</h1>
       </div>
 
       <div className="s-toolbar">
@@ -163,6 +163,7 @@ export function Offers() {
       {/* Each filter says which side of the trade it describes, in the same words as the columns below. */}
       <div className="s-filters">
         <Filter
+          id="offers-coin"
           label={intent === 'buy' ? 'You get' : 'You give'}
           any="Any coin"
           value={coin}
@@ -170,6 +171,7 @@ export function Offers() {
           onChange={setCoin}
         />
         <Filter
+          id="offers-fiat"
           label={intent === 'buy' ? 'You pay in' : 'You get paid in'}
           any="Any currency"
           value={fiat}
@@ -177,6 +179,7 @@ export function Offers() {
           onChange={setFiat}
         />
         <Filter
+          id="offers-method"
           label={intent === 'buy' ? 'You pay by' : 'You get paid by'}
           any="Any method"
           value={method}
@@ -184,30 +187,30 @@ export function Offers() {
           optionLabel={paymentMethodLabel}
           onChange={setMethod}
         />
-      </div>
-      {!showSkeleton && !failed && sideOffers.length > 0 && (intent === 'sell' || payFiat) && (
-        <div className="cf-field o-amount">
-          <label htmlFor="offers-amount">{intent === 'buy' ? 'I want to pay' : 'I want to sell'}</label>
-          <div className="cf-inputgroup">
-            <input
-              id="offers-amount"
-              className="cf-input o-amountinput"
-              inputMode="decimal"
-              autoComplete="off"
-              placeholder={intent === 'buy' ? '10,000' : '0.01'}
-              value={amount}
-              onChange={(e) => setAmount(e.target.value)}
-              aria-describedby={typed && !hasAmount ? 'offers-amount-hint' : undefined}
-            />
-            <span className="cf-addon">{intent === 'buy' ? payFiat : 'BCH'}</span>
+        {!showSkeleton && !failed && sideOffers.length > 0 && (intent === 'sell' || payFiat) && (
+          <div className="cf-field o-amount">
+            <label htmlFor="offers-amount">{intent === 'buy' ? 'I want to pay' : 'I want to sell'}</label>
+            <div className="cf-inputgroup">
+              <input
+                id="offers-amount"
+                className="cf-input o-amountinput"
+                inputMode="decimal"
+                autoComplete="off"
+                placeholder={intent === 'buy' ? '10,000' : '0.01'}
+                value={amount}
+                onChange={(e) => setAmount(e.target.value)}
+                aria-describedby={typed && !hasAmount ? 'offers-amount-hint' : undefined}
+              />
+              <span className="cf-addon">{intent === 'buy' ? payFiat : 'BCH'}</span>
+            </div>
+            {typed && !hasAmount && (
+              <span id="offers-amount-hint" className="cf-hint">
+                Enter an amount like {intent === 'buy' ? '10,000' : '0.01'}.
+              </span>
+            )}
           </div>
-          {typed && !hasAmount && (
-            <span id="offers-amount-hint" className="cf-hint">
-              Enter an amount like {intent === 'buy' ? '10,000' : '0.01'}.
-            </span>
-          )}
-        </div>
-      )}
+        )}
+      </div>
       {intent === 'sell' && !showSkeleton && !failed && (
         <Link className="o-postlink" to="/offers/new">
           Or post your own offer
@@ -317,6 +320,7 @@ function majority(values: string[]): string {
 }
 
 function Filter(props: {
+  id: string;
   label: string;
   any: string;
   value: string;
@@ -327,17 +331,15 @@ function Filter(props: {
 }) {
   return (
     <div className="cf-field">
-      <label>
-        {props.label}
-        <select className="cf-select" value={props.value} onChange={(e) => props.onChange(e.target.value)}>
-          <option value="">{props.any}</option>
-          {props.options.map((option) => (
-            <option key={option} value={option}>
-              {props.optionLabel ? props.optionLabel(option) : option}
-            </option>
-          ))}
-        </select>
-      </label>
+      <label htmlFor={props.id}>{props.label}</label>
+      <select id={props.id} className="cf-select" value={props.value} onChange={(e) => props.onChange(e.target.value)}>
+        <option value="">{props.any}</option>
+        {props.options.map((option) => (
+          <option key={option} value={option}>
+            {props.optionLabel ? props.optionLabel(option) : option}
+          </option>
+        ))}
+      </select>
     </div>
   );
 }

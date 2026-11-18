@@ -62,13 +62,13 @@ export function OfferRow(props: OfferRowProps) {
 export function OfferRowSkeleton() {
   return (
     <div className="o-row">
-      <Skeleton width={36} height={36} />
+      <Skeleton width={36} height={36} style={{ borderRadius: '50%' }} />
       <div className="o-main">
         <Skeleton width="55%" />
         <Skeleton width="40%" />
         <Skeleton width="70%" />
       </div>
-      <Skeleton width={56} height={36} />
+      <Skeleton width={56} height={32} style={{ borderRadius: 'var(--radius-md)' }} />
     </div>
   );
 }

@@ -10,7 +10,7 @@
 .o-line { font-size: 13px; line-height: 18px; color: var(--ink-muted); font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
 .o-cta { display: flex; }
 
-.o-amount { max-width: 360px; }
+.o-amount { min-width: 0; }
 .o-amountinput { font-variant-numeric: tabular-nums; font-weight: 600; }
 .o-postlink { align-self: flex-start; font-size: 14px; line-height: 20px; font-weight: 600; color: var(--ink); text-decoration: underline; text-underline-offset: 3px; }
 .o-postlink:hover { text-decoration-thickness: 2px; }

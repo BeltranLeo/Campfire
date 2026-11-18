@@ -87,13 +87,13 @@
 .cf-well { background: var(--surface-sunken); border-radius: var(--radius-md); padding: var(--space-3); }
 
 /* Definition rows: label left, value right; stack under 480px via the container. */
-.cf-dl { display: grid; grid-template-columns: minmax(96px, max-content) 1fr; gap: var(--space-2) var(--space-4); margin: 0; }
+.cf-dl { display: grid; grid-template-columns: minmax(96px, max-content) 1fr; gap: var(--space-2) var(--space-4); align-items: baseline; margin: 0; }
 .cf-dl dt { font-size: 13px; line-height: 22px; color: var(--ink-muted); }
 .cf-dl dd { margin: 0; min-width: 0; overflow-wrap: anywhere; }
 
 /* ---------- Notice ---------- */
 .cf-notice { display: flex; gap: var(--space-3); padding: var(--space-3) var(--space-4); border-radius: var(--radius-md); background: var(--surface-sunken); color: var(--ink); font-size: 13px; line-height: 18px; }
-.cf-notice::before { content: "i"; flex: none; width: 18px; height: 18px; border-radius: 50%; border: 1.5px solid currentColor; font: 700 11px/15px var(--font-mono); text-align: center; }
+.cf-notice::before { content: "i"; flex: none; width: 18px; height: 18px; border-radius: 50%; border: 1.5px solid currentColor; display: grid; place-items: center; font: 700 11px/1 var(--font-mono); }
 .cf-notice[data-tone="warn"] { background: var(--warn-soft); } .cf-notice[data-tone="warn"]::before { content: "!"; color: var(--warn); }
 .cf-notice[data-tone="danger"] { background: var(--danger-soft); } .cf-notice[data-tone="danger"]::before { content: "×"; color: var(--danger); }
 .cf-notice[data-tone="chain"] { background: var(--chain-soft); } .cf-notice[data-tone="chain"]::before { content: "✓"; color: var(--chain); }

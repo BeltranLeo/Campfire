@@ -45,7 +45,7 @@ export function MyTrades() {
   return (
     <main className="s-main">
       <div className="s-toolbar">
-        <h1 className="cf-title">My trades</h1>
+        <h1 className="cf-display">My trades</h1>
         <Button to="/offers/new">Create an offer</Button>
       </div>
       <nav className="s-tabs" aria-label="Sections">

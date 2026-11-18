@@ -52,7 +52,7 @@ function HomeBody({ identity, receiveXpub }: { identity: string; receiveXpub: st
   return (
     <main className="s-main">
       <div className="s-pagehead">
-        <h1 className="cf-title">{trades.data && all.length === 0 ? 'Welcome' : 'Welcome back'}</h1>
+        <h1 className="cf-display">{trades.data && all.length === 0 ? 'Welcome' : 'Welcome back'}</h1>
       </div>
 
       <WalletCard receiveXpub={receiveXpub} trades={trades.data ? all : null} />

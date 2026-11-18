@@ -25,8 +25,15 @@ function Front() {
   if (status === 'connecting') {
     return (
       <main className="s-main" aria-busy="true">
-        <Skeleton width="40%" height={28} />
-        <Skeleton height={120} />
+        <div className="s-pagehead">
+          <Skeleton width={180} height={36} />
+        </div>
+        <section className="cf-card" data-pad>
+          <div className="cf-stack" data-gap="2">
+            <Skeleton width="35%" height={18} />
+            <Skeleton width="55%" height={36} />
+          </div>
+        </section>
       </main>
     );
   }

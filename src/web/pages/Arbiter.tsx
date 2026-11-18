@@ -141,7 +141,7 @@ function ConsoleFrame({ trade, open, children }: { trade: Trade; open?: boolean;
   const demo = trade.isDemo === true;
   const token = useArbiterToken();
   return (
-    <main className="s-main">
+    <main className="s-main" data-narrow={!open || undefined}>
       <div className="s-pagehead">
         <Link className="s-back" to={`/trade/${trade.id}`}>
           ← Trade
@@ -642,7 +642,7 @@ function TermsCard(props: { trade: Trade; amount: string; fiat: string; tokenAwa
 
 function ConsoleLoading() {
   return (
-    <main className="s-main">
+    <main className="s-main" data-narrow>
       <div className="s-pagehead" aria-busy="true">
         <span className="cf-small cf-muted">Loading trade…</span>
         <Skeleton width="55%" height={30} />
@@ -664,7 +664,7 @@ function ConsoleLoading() {
 function ConsoleError({ error, id, onRetry }: { error: unknown; id: string; onRetry: () => void }) {
   const notFound = error instanceof ApiError && error.status === 404;
   return (
-    <main className="s-main">
+    <main className="s-main" data-narrow>
       <div className="s-pagehead">
         <Link className="s-back" to="/offers">
           ← Offers

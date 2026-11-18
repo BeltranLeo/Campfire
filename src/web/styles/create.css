@@ -1,5 +1,5 @@
 /* Create-offer wizard. Everything here is prefixed co- so it cannot clash with the shared styles. */
-.co-step { margin: 0; font: 600 20px/28px var(--font-sans); outline: none; }
+.co-step, .co-step:focus-visible { margin: 0; font: 600 20px/28px var(--font-sans); outline: none; }
 .co-price { margin: calc(-1 * var(--space-2)) 0 0; min-height: 22px; font: 600 14px/22px var(--font-sans); font-variant-numeric: tabular-nums; color: var(--ink); }
 .co-num { font-variant-numeric: tabular-nums; }
 .co-chips { display: flex; flex-wrap: wrap; gap: var(--space-2); }

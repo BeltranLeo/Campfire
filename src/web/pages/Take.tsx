@@ -236,12 +236,14 @@ function TakeOffer({ offer }: { offer: Offer }) {
               </dd>
               <dt>Payment</dt>
               <dd>
-                {doc.paymentMethods.map((method) => (
-                  <span key={method} className="s-chip">
-                    {paymentMethodLabel(method)}
-                  </span>
-                ))}{' '}
-                · {formatPaymentWindow(doc.paymentWindowSec)}
+                <span className="s-chips">
+                  {doc.paymentMethods.map((method) => (
+                    <span key={method} className="s-chip">
+                      {paymentMethodLabel(method)}
+                    </span>
+                  ))}
+                  <span>· {formatPaymentWindow(doc.paymentWindowSec)}</span>
+                </span>
               </dd>
               <dt>Seller</dt>
               <dd>
@@ -535,12 +537,14 @@ function TakeBuyOffer({ offer }: { offer: Offer }) {
               </dd>
               <dt>Pays with</dt>
               <dd>
-                {doc.paymentMethods.map((method) => (
-                  <span key={method} className="s-chip">
-                    {paymentMethodLabel(method)}
-                  </span>
-                ))}{' '}
-                · within {formatPaymentWindow(doc.paymentWindowSec).replace(' to pay', '')}
+                <span className="s-chips">
+                  {doc.paymentMethods.map((method) => (
+                    <span key={method} className="s-chip">
+                      {paymentMethodLabel(method)}
+                    </span>
+                  ))}
+                  <span>· within {formatPaymentWindow(doc.paymentWindowSec).replace(' to pay', '')}</span>
+                </span>
               </dd>
               <dt>Buyer</dt>
               <dd>

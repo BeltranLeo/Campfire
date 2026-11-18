@@ -343,7 +343,7 @@ export function CreateOffer() {
                 </div>
               </div>
               <div className="s-actions">
-                <Button variant="primary" block onClick={() => setStep(2)}>
+                <Button variant="primary" onClick={() => setStep(2)}>
                   Continue
                 </Button>
               </div>
@@ -454,7 +454,7 @@ export function CreateOffer() {
               </div>
 
               <div className="s-actions">
-                <Button variant="primary" block onClick={nextFromPrice}>
+                <Button variant="primary" onClick={nextFromPrice}>
                   Continue
                 </Button>
                 <Button variant="ghost" onClick={() => setStep(1)}>
@@ -544,7 +544,7 @@ export function CreateOffer() {
               )}
 
               <div className="s-actions">
-                <Button variant="primary" block onClick={nextFromMethods}>
+                <Button variant="primary" onClick={nextFromMethods}>
                   Review offer
                 </Button>
                 <Button variant="ghost" onClick={() => setStep(2)}>

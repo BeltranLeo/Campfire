@@ -9,8 +9,9 @@ import { ProvenanceTag, SimBox } from '../components/Provenance';
 import { Skeleton } from '../components/States';
 import { useConfig } from '../config';
 import { DSPROOF_WATCH_SEC } from '../dsproof';
-import { formatRange, fromBaseUnits, paymentMethodLabel } from '../format';
+import { formatFiat, formatRange, fromBaseUnits, paymentMethodLabel } from '../format';
 import { usePoll } from '../hooks/usePoll';
+import { loadQuotes, priceOf, unique } from '../offerData';
 
 // The front page (Landing-* screens): the two intentions and where to get a wallet, the demo, how a trade works
 // (with why nobody waits for blocks folded under it), the latest offers and Campfire's numbers. Every number is real.
@@ -19,6 +20,9 @@ export function Landing() {
   const config = useConfig();
   const offers = usePoll(() => apiGet<{ offers: Offer[] }>('/api/offers?onlyOpen=true').then((r) => r.offers), 'offers');
   const trades = usePoll(() => apiGet<{ trades: Trade[] }>('/api/trades').then((r) => r.trades), 'trades');
+  const latest = offers.data?.slice(0, 3) ?? [];
+  const pairs = unique(latest.flatMap((o) => (o.document.price.type === 'floating' ? [o.document.price.pair] : [])));
+  const quotes = usePoll(() => loadQuotes(pairs), pairs.join(','), pairs.length ? 30_000 : undefined);
   const demoOffer = offers.data?.find((o) => o.isDemo && o.document.asset === 'BCH') ?? offers.data?.find((o) => o.isDemo);
 
   return (
@@ -99,12 +103,13 @@ export function Landing() {
           <Link to="/offers">See all offers</Link>
         </div>
         {offers.data ? (
-          offers.data.slice(0, 3).map((offer) => {
+          latest.map((offer) => {
             const doc = offer.document;
             const asset = assetInfo(doc.asset, doc.assetDecimals, config);
             // Say what the visitor does: a buy offer is where *you* sell.
             const verb = doc.side === 'sell' ? 'Buy' : 'Sell';
             const deal = doc.side === 'sell' ? `pay ${doc.fiat}` : `get ${doc.fiat}`;
+            const price = priceOf(offer, quotes.data?.byPair);
             return (
               <Link key={offer.offerTxid} className="s-item" to={`/offers/${offer.offerTxid}`}>
                 <span className="s-cell">
@@ -112,12 +117,16 @@ export function Landing() {
                     <strong>
                       You {verb.toLowerCase()} {asset.symbol}
                     </strong>{' '}
-                    · {deal}
-                    {offer.isDemo && ' · demo'}
+                    · <span className="cf-num">{price === null ? deal : formatFiat(price, doc.fiat)}</span>
                   </span>
                   <span className="cf-small cf-muted">
                     {formatRange(doc.min, doc.max, asset)} · {doc.paymentMethods.map(paymentMethodLabel).join(', ')}
                   </span>
+                  {offer.isDemo && (
+                    <span>
+                      <ProvenanceTag kind="sim">Simulated fiat</ProvenanceTag>
+                    </span>
+                  )}
                 </span>
                 <span className="cf-btn" data-size="sm">
                   {verb}

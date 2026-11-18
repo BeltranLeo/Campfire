@@ -1051,36 +1051,38 @@ function TradeError({ error, id, onRetry }: { error: unknown; id: string; onRetr
   const notFound = error instanceof ApiError && error.status === 404;
   return (
     <main className="s-main">
-      <div className="s-pagehead">
-        <Link className="s-back" to="/offers">
-          ← Offers
-        </Link>
-        <h1 className="cf-title">Trade</h1>
-      </div>
-      <section className="cf-card" data-flush>
-        <div className="cf-card__section">
-          {notFound ? (
-            <EmptyState title="Trade not found" action={<Button to="/offers">Back to offers</Button>}>
-              No trade has the ID <span className="cf-mono">{id.length > 12 ? `${id.slice(0, 6)}…${id.slice(-4)}` : id}</span>. Check the link,
-              or find your trades in the wallet menu.
-            </EmptyState>
-          ) : (
-            <div className="cf-stack">
-              <Notice tone="danger" title="We could not load this trade">
-                {error instanceof ApiError && error.status >= 400 && error.status < 500
-                  ? error.message
-                  : 'The server did not answer. Your funds are not affected: the escrow lives on-chain, not on this server.'}
-              </Notice>
-              <div className="s-actions">
-                <Button variant="primary" onClick={onRetry}>
-                  Try again
-                </Button>
-                <Button to="/offers">Back to offers</Button>
-              </div>
-            </div>
-          )}
+      <div className="s-trade">
+        <div className="s-pagehead">
+          <Link className="s-back" to="/offers">
+            ← Offers
+          </Link>
+          <h1 className="cf-title">Trade</h1>
         </div>
-      </section>
+        <section className="cf-card" data-flush>
+          <div className="cf-card__section">
+            {notFound ? (
+              <EmptyState title="Trade not found" action={<Button to="/offers">Back to offers</Button>}>
+                No trade has the ID <span className="cf-mono">{id.length > 12 ? `${id.slice(0, 6)}…${id.slice(-4)}` : id}</span>. Check the link,
+                or find your trades in the wallet menu.
+              </EmptyState>
+            ) : (
+              <div className="cf-stack">
+                <Notice tone="danger" title="We could not load this trade">
+                  {error instanceof ApiError && error.status >= 400 && error.status < 500
+                    ? error.message
+                    : 'The server did not answer. Your funds are not affected: the escrow lives on-chain, not on this server.'}
+                </Notice>
+                <div className="s-actions">
+                  <Button variant="primary" onClick={onRetry}>
+                    Try again
+                  </Button>
+                  <Button to="/offers">Back to offers</Button>
+                </div>
+              </div>
+            )}
+          </div>
+        </section>
+      </div>
     </main>
   );
 }
