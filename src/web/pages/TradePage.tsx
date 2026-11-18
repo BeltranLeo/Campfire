@@ -256,14 +256,39 @@ function BuyerAction(props: {
       {error.message}
     </Notice>
   );
-  const disputeButton = !disputing && (
-    <Button disabled={busy !== null} onClick={() => setDisputing(true)}>
-      Open dispute
-    </Button>
-  );
   const disputeForm = disputing && (
     <DisputeForm reasons={DISPUTE_REASONS} busy={busy === 'dispute'} locked={busy !== null} onSend={openDispute} onBack={() => setDisputing(false)} />
   );
+  // Cancelling signs and ends the trade, so while the buyer can still pay it sits in the fold, away from the main button.
+  // The fold stays open while the dispute form is showing, so the person does not lose what they typed.
+  const somethingWrong = (arbiterLine: string) => (
+    <Details summary="Something wrong?" tag={null} open={disputing || undefined}>
+      <div className="cf-stack">
+        {disputeForm || (
+          <div className="cf-stack" data-gap="2">
+            <Button block disabled={busy !== null} onClick={() => setDisputing(true)}>
+              Ask the arbiter for help
+            </Button>
+            <p className="cf-small cf-muted">{arbiterLine}</p>
+          </div>
+        )}
+        <div className="cf-stack" data-gap="2">
+          <Button
+            block
+            variant="danger"
+            signs="Signs in your wallet. Only if you have not paid."
+            busy={busy === 'cancel'}
+            disabled={busy !== null && busy !== 'cancel'}
+            onClick={cancelTrade}
+          >
+            Cancel and return {coins}
+          </Button>
+          <p className="cf-small cf-muted">Ends the trade and sends the locked {trade.asset === 'BCH' ? 'BCH' : 'coins'} back to the seller.</p>
+        </div>
+      </div>
+    </Details>
+  );
+  // In a dispute the cancel button stays in plain sight.
   const cancelButton = (
     <Button
       variant="danger"
@@ -342,20 +367,18 @@ function BuyerAction(props: {
           <ZeroConfNotice ds={props.ds} isDemo={trade.isDemo === true} />
           <PaymentDetails trade={trade} fiat={props.fiat} />
           {failure}
-          {disputeForm}
           <div className="s-actions">
             <Button
               variant="primary"
               busy={busy === 'paid'}
               disabled={props.ds.phase === 'proof' || (busy !== null && busy !== 'paid')}
               onClick={markPaid}
-              note="No signature needed. This step is off-chain."
+              note="No signature needed"
             >
-              Mark as paid
+              I've sent the payment
             </Button>
-            {disputeButton}
-            {cancelButton}
           </div>
+          {somethingWrong("The seller isn't answering, or the payment details don't work.")}
         </ActionCard>
       );
     }
@@ -369,11 +392,7 @@ function BuyerAction(props: {
         >
           <p className="cf-muted">You marked the payment as sent. When the seller confirms it, {props.amount} go to your wallet.</p>
           {failure}
-          {disputeForm}
-          <div className="s-actions">
-            {disputeButton}
-            {cancelButton}
-          </div>
+          {somethingWrong("The seller hasn't released after you paid.")}
         </ActionCard>
       );
     case 'Disputed': {
