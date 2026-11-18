@@ -30,7 +30,12 @@ export interface OfferForm {
   methods: string;
   paymentWindowSec: number;
   expirySec: number;
+  /** Buy offers only: ask the demo seller to answer, with a simulated fiat payment. */
+  demo?: boolean;
 }
+
+/** The payment method the demo seller answers to (src/server/demo.ts). The fiat payment is simulated. */
+export const DEMO_METHOD = 'simulated';
 
 export type FormField = 'margin' | 'fixedPrice' | 'min' | 'max' | 'methods';
 export type FormErrors = Partial<Record<FormField, string>>;
@@ -86,6 +91,8 @@ export function buildOfferDocument(params: {
   now: number;
   /** The longest expiry Campfire pays for, for buy offers. */
   maxExpirySec?: number;
+  /** The largest trade the demo seller takes, in sats: above it the demo seller silently skips the offer. */
+  demoMaxSats?: bigint;
 }): OfferBuild {
   const { form } = params;
   const errors: FormErrors = {};
@@ -107,8 +114,16 @@ export function buildOfferDocument(params: {
   if (max === null || max <= 0n) errors.max = 'Enter the largest trade in BCH, for example 0.02.';
   else if (min !== null && max < min) errors.max = 'The largest trade cannot be below the smallest.';
 
-  const methods = parseMethods(form.methods);
-  if (!methods) errors.methods = `Name 1 to ${MAX_METHODS} payment methods, separated by commas, up to ${MAX_METHOD_LENGTH} characters each.`;
+  // A demo buy offer carries the simulated method the demo seller looks for; real methods are optional then.
+  const demo = form.side === 'buy' && form.demo === true;
+  const typed = demo && form.methods.trim() === '' ? [] : parseMethods(form.methods);
+  const methods = typed && demo && !typed.includes(DEMO_METHOD) ? [...typed, DEMO_METHOD] : typed;
+  if (!methods || methods.length > MAX_METHODS) {
+    errors.methods = `Name 1 to ${MAX_METHODS - (demo ? 1 : 0)} payment methods, separated by commas, up to ${MAX_METHOD_LENGTH} characters each.`;
+  }
+  if (demo && params.demoMaxSats !== undefined && min !== null && min > params.demoMaxSats && !errors.min) {
+    errors.min = `For a demo answer, keep the smallest trade at ${formatBch(params.demoMaxSats)} or less.`;
+  }
 
   if (Object.keys(errors).length > 0 || !price || min === null || max === null || !methods) return { ok: false, errors };
 

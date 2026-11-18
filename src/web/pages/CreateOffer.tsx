@@ -5,12 +5,12 @@ import { MARKER_SATOSHIS, buildPublishOfferTransaction } from '../../protocol/of
 import { ApiError, apiGet, apiPost, type DemoInfo, type Offer, type PriceQuote, type SponsorshipStatus, type TradeSummary } from '../api';
 import { Button, WALLET_DECLINED } from '../components/Button';
 import { Details } from '../components/Details';
-import { HashLink, ProvenanceTag } from '../components/Provenance';
+import { HashLink, ProvenanceTag, SimBox } from '../components/Provenance';
 import { Notice, Skeleton } from '../components/States';
 import { describeScan, scanWalletCoins, spendableBch } from '../coins';
 import { useConfig } from '../config';
 import { findUnusedReceiveIndex, withKeptElectrum } from '../electrum';
-import { applyMargin, formatBch, formatDateTime, formatFiat, formatFiatAmount } from '../format';
+import { applyMargin, formatBch, formatDateTime, formatFiat, formatFiatAmount, toAmountInput } from '../format';
 import { usePoll } from '../hooks/usePoll';
 import { refreshWalletCoins, useWalletCoins } from '../walletCoins';
 import {
@@ -121,8 +121,11 @@ export function CreateOffer() {
   const status = sponsorship.data ?? null;
   const maxExpirySec = buying ? status?.maxExpirySec : undefined;
   const expiries = EXPIRIES_SEC.filter((s) => maxExpirySec === undefined || s <= maxExpirySec);
+  // The demo seller's limit, known before the form is built so a demo offer it would skip is caught here.
+  const demoMaxText = demo.data?.limits.maxBchSats;
+  const demoMaxSats = demoMaxText !== undefined ? BigInt(demoMaxText) : undefined;
   const built = config
-    ? buildOfferDocument({ form, arbiter: config.arbiterPk, oracle: config.oraclePk, now: Math.floor(Date.now() / 1000), maxExpirySec })
+    ? buildOfferDocument({ form, arbiter: config.arbiterPk, oracle: config.oraclePk, now: Math.floor(Date.now() / 1000), maxExpirySec, demoMaxSats })
     : null;
   const errors: FormErrors = built && !built.ok ? built.errors : {};
   const shown = (field: FormField) => (touched.has(field) ? errors[field] : undefined);
@@ -204,7 +207,13 @@ export function CreateOffer() {
 
   if (published) return <Published offer={published} />;
 
-  const demoMax = demo.data?.limits.maxBchSats;
+  const demoMax = demoMaxSats;
+  // Turning the demo on brings the smallest trade within the demo seller's reach, and says so under the switch.
+  const toggleDemo = (on: boolean) => {
+    const min = parseAmount(form.min, 8);
+    if (on && demoMax !== undefined && (min === null || min > demoMax)) edit('min', { demo: on, min: toAmountInput(demoMax, { decimals: 8, isBch: true }) });
+    else set({ demo: on });
+  };
   const nextSlot = status?.nextSlotAt ? formatDateTime(status.nextSlotAt) : null;
 
   return (
@@ -372,16 +381,24 @@ export function CreateOffer() {
             />
             <span className="cf-hint">
               {shown('methods') ?? 'Names only. Account details are shared per trade, encrypted for the other person.'}
-              {/* Invented copy: how a visitor with one wallet gets the demo seller to answer a buy offer. */}
-              {buying && demoMax && (
-                <>
-                  {' '}
-                  To try it with the demo seller, add <span className="cf-mono">simulated</span> and keep the smallest trade at{' '}
-                  {formatBch(demoMax)} or less: it answers right away, and no money moves.
-                </>
-              )}
             </span>
           </div>
+
+          {/* The demo is chosen, not discovered: a visible switch instead of typing a magic payment method. */}
+          {buying && demoMax !== undefined && (
+            <SimBox label="Demo">
+              <label className="s-tick">
+                <input type="checkbox" checked={form.demo === true} onChange={(e) => toggleDemo(e.target.checked)} />
+                <span className="cf-stack" data-gap="1">
+                  <strong>Get a demo answer (simulated {fiatInfo.label.toLowerCase()})</strong>
+                  <span className="cf-small cf-muted">
+                    The demo seller answers right away for trades up to {formatBch(demoMax)}. The payment is simulated: no
+                    money moves, and the BCH you get is real.
+                  </span>
+                </span>
+              </label>
+            </SimBox>
+          )}
 
           <div className="s-2">
             <div className="cf-field">

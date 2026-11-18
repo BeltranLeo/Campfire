@@ -288,3 +288,36 @@ describe('closing an offer', () => {
     await expect(buildCloseOffer({ offer: { offerTxid, markerAddress, markerVout: 1 }, provider: empty, receiveXpub: keys.receive })).rejects.toThrow(/already spent/);
   });
 });
+
+describe('the demo switch on a buy offer', () => {
+  const buy = { side: 'buy' as const, min: '0.0001', max: '0.0002' };
+  const demoBuild = (patch: Partial<OfferForm> = {}) =>
+    buildOfferDocument({ form: { ...form, ...buy, demo: true, ...patch }, arbiter, oracle, now: 1_800_000_000, demoMaxSats: 20_000n });
+
+  it('adds the simulated method the demo seller answers to', () => {
+    const built = demoBuild();
+    expect(built.ok && built.document.paymentMethods).toEqual(['bank-transfer', 'mercadopago', 'simulated']);
+  });
+
+  it('needs no real payment method and never repeats the simulated one', () => {
+    const empty = demoBuild({ methods: '' });
+    expect(empty.ok && empty.document.paymentMethods).toEqual(['simulated']);
+    const typed = demoBuild({ methods: 'simulated, bank' });
+    expect(typed.ok && typed.document.paymentMethods).toEqual(['simulated', 'bank']);
+  });
+
+  it('says when the smallest trade is above what the demo seller takes', () => {
+    const built = demoBuild({ min: '0.001', max: '0.02' });
+    expect(!built.ok && built.errors.min).toMatch(/demo answer/);
+  });
+
+  it('keeps room for the simulated method among the five allowed', () => {
+    const built = demoBuild({ methods: 'a, b, c, d, e' });
+    expect(!built.ok && built.errors.methods).toMatch(/1 to 4/);
+  });
+
+  it('is ignored on a sell offer', () => {
+    const built = buildOfferDocument({ form: { ...form, demo: true }, arbiter, oracle, now: 1_800_000_000, demoMaxSats: 20_000n });
+    expect(built.ok && built.document.paymentMethods).toEqual(['bank-transfer', 'mercadopago']);
+  });
+});
