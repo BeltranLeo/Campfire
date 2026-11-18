@@ -329,3 +329,27 @@ describe("the seller's view of the story", () => {
     expect(disputeKeyHex(sellerSession.privateKey, sellerSession.publicKey)).not.toBe(mine);
   });
 });
+
+describe('payment details typed in fields', () => {
+  const fields = { account: ' leo.campfire.mp ', holder: 'Leo B', note: '' };
+
+  it('sends them as labelled fields the buyer page already shows', async () => {
+    const { composePaymentDetails } = await import('../src/web/seller.js');
+    const { readPaymentDetails } = await import('../src/web/trade.js');
+    const text = composePaymentDetails(fields, 'ARS');
+    expect(readPaymentDetails(text)).toEqual({ kind: 'fields', fields: { 'Alias, CBU or CVU': 'leo.campfire.mp', 'Account holder': 'Leo B' } });
+    expect(JSON.parse(composePaymentDetails({ ...fields, note: 'Ref 12' }, 'USD'))).toEqual({
+      'Account number or alias': 'leo.campfire.mp',
+      'Account holder': 'Leo B',
+      Note: 'Ref 12',
+    });
+  });
+
+  it('is empty until something is typed, and ready only with the account and the holder', async () => {
+    const { EMPTY_PAYMENT_FIELDS, composePaymentDetails, paymentFieldsReady } = await import('../src/web/seller.js');
+    expect(composePaymentDetails(EMPTY_PAYMENT_FIELDS, 'ARS')).toBe('');
+    expect(paymentFieldsReady({ ...fields, holder: ' ' }, 'ARS')).toBe(false);
+    expect(paymentFieldsReady(fields, 'ARS')).toBe(true);
+    expect(paymentFieldsReady({ ...fields, note: 'x'.repeat(500) }, 'ARS')).toBe(false);
+  });
+});

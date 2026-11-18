@@ -23,14 +23,20 @@ import {
   buildSellerRelease,
   checkAcceptedTrade,
   clearSavedDeposit,
+  EMPTY_PAYMENT_FIELDS,
+  MAX_DETAILS_LENGTH,
+  accountLabel,
   clearSavedDetails,
+  composePaymentDetails,
   depositNeeds,
   findDeposit,
   loadSavedDeposit,
   loadSavedDetails,
   saveDeposit,
   saveDetails,
+  paymentFieldsReady,
   sealPaymentDetails,
+  type PaymentFields,
   type SealedDetails,
 } from '../seller';
 import { browserStore, commitSession, generateSessionKeyPair, loadPendingSession, payoutAddress, readSessionKey, savePendingSession } from '../take';
@@ -62,7 +68,10 @@ export function SellerAction(props: { trade: Trade; amount: string; fiat: string
   const wallet = useWallet();
   const { identity, xpubs } = wallet;
   const { busy, error, run } = useTradeAction<Action>(trade, identity, props.onUpdate);
-  const [details, setDetails] = useState('');
+  const [fields, setFields] = useState<PaymentFields>(EMPTY_PAYMENT_FIELDS);
+  // The fields travel as one text, sealed for the buyer; '' while nothing is typed, so an earlier saved version counts.
+  const details = composePaymentDetails(fields, trade.fiat);
+  const detailsReady = paymentFieldsReady(fields, trade.fiat);
   const [disputing, setDisputing] = useState(false);
   const [ticked, setTicked] = useState<ReadonlySet<ReleaseCheck>>(new Set());
   const now = useNow(1000);
@@ -343,19 +352,14 @@ export function SellerAction(props: { trade: Trade; amount: string; fiat: string
           )
         }
       >
-        <div className="cf-field">
-          <label htmlFor="details">How the buyer should pay you</label>
-          <textarea
-            id="details"
-            className="cf-textarea"
-            rows={3}
-            maxLength={500}
-            placeholder={savedDetails ? 'Your earlier details are kept. Write new ones to replace them.' : 'Bank, account number or alias, reference'}
-            value={details}
-            onChange={(e) => setDetails(e.target.value)}
-          />
-          <span className="cf-hint">Encrypted in your browser for this buyer only. Shown once {locked} {lockVerb(trade.asset)} locked. Campfire cannot read it.</span>
-        </div>
+        <PaymentFieldsForm
+          fields={fields}
+          fiat={trade.fiat}
+          onChange={setFields}
+          title="How the buyer should pay you"
+          saved={savedDetails !== null}
+          hint={<>Encrypted in your browser for this buyer only. Shown once {locked} {lockVerb(trade.asset)} locked. Campfire cannot read it.</>}
+        />
         {deposit && (
           <p className="cf-small cf-muted">
             You lock {deposit}: {formatAmount(trade.amount, BCH)} for the buyer plus a {formatBch(1000n)} fee budget for the closing transaction.
@@ -368,7 +372,7 @@ export function SellerAction(props: { trade: Trade; amount: string; fiat: string
             variant="primary"
             signs
             busy={busy === 'deposit'}
-            disabled={!isBch || short || (details.trim() === '' && !savedDetails) || (busy !== null && busy !== 'deposit')}
+            disabled={!isBch || short || (details === '' ? !savedDetails : !detailsReady) || (busy !== null && busy !== 'deposit')}
             onClick={depositOnly}
           >
             {deposit ? `Lock ${deposit} for this trade` : `Lock ${locked}`}
@@ -395,25 +399,17 @@ export function SellerAction(props: { trade: Trade; amount: string; fiat: string
               )
             }
           >
-            <div className="cf-field">
-              <label htmlFor="details">Payment details for this buyer</label>
-              <textarea
-                id="details"
-                className="cf-textarea"
-                rows={4}
-                maxLength={500}
-                placeholder="Bank, account number or alias, reference"
-                value={details}
-                onChange={(e) => setDetails(e.target.value)}
-              />
-              <span className="cf-hint">
-                Encrypted in your browser for this buyer only. Shown to them once {locked} {lockVerb(trade.asset)} locked. Campfire cannot read it.
-              </span>
-            </div>
+            <PaymentFieldsForm
+              fields={fields}
+              fiat={trade.fiat}
+              onChange={setFields}
+              title="How the buyer should pay you"
+              hint={<>Encrypted in your browser for this buyer only. Shown to them once {locked} {lockVerb(trade.asset)} locked. Campfire cannot read it.</>}
+            />
             {deposit && (
-              <Notice title={`You will lock ${deposit}.`}>
-                {formatAmount(trade.amount, BCH)} for the buyer plus a {formatBch(1000n)} fee budget for the closing transaction. The contract can only pay the
-                buyer or return to you.
+              <Notice title={`This locks ${deposit} now.`}>
+                It can only go to the buyer or back to you: {formatAmount(trade.amount, BCH)} for the buyer plus a {formatBch(1000n)} fee budget for the
+                closing transaction.
               </Notice>
             )}
             {expired && (
@@ -428,7 +424,7 @@ export function SellerAction(props: { trade: Trade; amount: string; fiat: string
                 variant="primary"
                 signs
                 busy={busy === 'accept' || busy === 'deposit'}
-                disabled={!isBch || expired || details.trim() === '' || !prep.data || short || (busy !== null && busy !== 'accept' && busy !== 'deposit')}
+                disabled={!isBch || expired || !detailsReady || !prep.data || short || (busy !== null && busy !== 'accept' && busy !== 'deposit')}
                 onClick={acceptAndDeposit}
               >
                 {deposit ? `Accept and lock ${deposit}` : 'Accept and lock'}
@@ -538,6 +534,51 @@ export function SellerAction(props: { trade: Trade; amount: string; fiat: string
     default:
       return null;
   }
+}
+
+/**
+ * The details a buyer needs to pay, typed in fields: the account, its holder and an optional note. They are written for
+ * this trade only and never stored in clear (the sealed copy kept for a retry is encrypted for the buyer).
+ */
+function PaymentFieldsForm(props: {
+  fields: PaymentFields;
+  fiat: string;
+  onChange: (fields: PaymentFields) => void;
+  title: string;
+  hint: ReactNode;
+  /** An earlier, sealed version exists: empty fields keep it. */
+  saved?: boolean;
+}) {
+  const { fields } = props;
+  const set = (patch: Partial<PaymentFields>) => props.onChange({ ...fields, ...patch });
+  const tooLong = composePaymentDetails(fields, props.fiat).length > MAX_DETAILS_LENGTH;
+  return (
+    <fieldset className="s-paymentfields">
+      <legend>{props.title}</legend>
+      {props.saved && <span className="cf-small cf-muted">Your earlier details are kept. Fill these in only to replace them.</span>}
+      <div className="cf-field">
+        <label htmlFor="pay-account">{accountLabel(props.fiat)}</label>
+        <input id="pay-account" className="cf-input" autoComplete="off" maxLength={120} value={fields.account} onChange={(e) => set({ account: e.target.value })} />
+      </div>
+      <div className="cf-field">
+        <label htmlFor="pay-holder">Account holder</label>
+        <input id="pay-holder" className="cf-input" autoComplete="off" maxLength={120} value={fields.holder} onChange={(e) => set({ holder: e.target.value })} />
+      </div>
+      <div className="cf-field" data-invalid={tooLong || undefined}>
+        <label htmlFor="pay-note">Note for the buyer (optional)</label>
+        <input
+          id="pay-note"
+          className="cf-input"
+          autoComplete="off"
+          maxLength={200}
+          placeholder="Bank name, reference to write"
+          value={fields.note}
+          onChange={(e) => set({ note: e.target.value })}
+        />
+        <span className="cf-hint">{tooLong ? `Keep the details under ${MAX_DETAILS_LENGTH} characters in total.` : props.hint}</span>
+      </div>
+    </fieldset>
+  );
 }
 
 /** What was asked, for the seller deciding on a request (Sell-Accept-*). */

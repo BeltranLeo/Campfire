@@ -82,6 +82,39 @@ export interface SealedDetails {
  * at the deposit. The signature by the seller's session key (committed in the terms) shows the service and the
  * buyer that the seller wrote them; the buyer shares the encryption key and could otherwise write their own.
  */
+/**
+ * How the buyer should pay, typed in fields instead of one free-text box. They travel as a JSON object inside the
+ * same encrypted text as before, and the buyer's page already shows an object as labelled rows (readPaymentDetails
+ * in trade.ts). Nothing is stored: the details are written for one trade.
+ */
+export interface PaymentFields {
+  account: string;
+  holder: string;
+  note: string;
+}
+export const EMPTY_PAYMENT_FIELDS: PaymentFields = { account: '', holder: '', note: '' };
+/** The service and the form both cap the details at 500 characters. */
+export const MAX_DETAILS_LENGTH = 500;
+
+/** "Alias, CBU or CVU" for pesos, where those are what people share; a general name for other money. */
+export function accountLabel(fiat: string): string {
+  return fiat === 'ARS' ? 'Alias, CBU or CVU' : 'Account number or alias';
+}
+
+/** The text to encrypt, or '' while the required fields are empty (so a saved earlier version can still be used). */
+export function composePaymentDetails(fields: PaymentFields, fiat: string): string {
+  const account = fields.account.trim();
+  const holder = fields.holder.trim();
+  const note = fields.note.trim();
+  if (!account && !holder && !note) return '';
+  return JSON.stringify({ [accountLabel(fiat)]: account, 'Account holder': holder, ...(note ? { Note: note } : {}) });
+}
+
+/** Both the account and its holder are needed for a transfer; the note is optional. */
+export function paymentFieldsReady(fields: PaymentFields, fiat: string): boolean {
+  return fields.account.trim() !== '' && fields.holder.trim() !== '' && composePaymentDetails(fields, fiat).length <= MAX_DETAILS_LENGTH;
+}
+
 export async function sealPaymentDetails(params: {
   sessionPrivateKey: string;
   buyerSessionPk: string;
