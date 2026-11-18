@@ -14,3 +14,10 @@ export const BANNER_LINKS: { label: string; url: string | null }[] = [
 
 // CashTokens-aware address for the public vote.
 export const VOTING_ADDRESS: string | null = 'bitcoincash:zrkupj9hdtgk0nc3ygmjzw89e2hyfuwen5dnp77rrq';
+
+// Where a newcomer gets a wallet: the About section that lists the wallets Campfire pairs with, and their sites.
+export const GET_A_WALLET_ID = 'get-a-wallet';
+export const WALLETS: { name: string; url: string; note: string }[] = [
+  { name: 'Selene', url: 'https://selene.cash/', note: 'A Bitcoin Cash wallet for your phone.' },
+  { name: 'Paytaca', url: 'https://www.paytaca.com/', note: 'A Bitcoin Cash wallet for your phone or browser.' },
+];

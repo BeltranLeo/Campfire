@@ -1,18 +1,23 @@
-import type { ReactNode } from 'react';
-import { Link } from 'react-router';
+import { useEffect, type ReactNode } from 'react';
+import { Link, useLocation } from 'react-router';
 import { apiGet, type Offer } from '../api';
 import { Icon } from '../components/Icon';
 import { ProvenanceTag } from '../components/Provenance';
 import { DSPROOF_WATCH_SEC } from '../dsproof';
 import { usePoll } from '../hooks/usePoll';
-import { PROTOCOL_SPEC_URL, REPO_URL } from '../links';
+import { GET_A_WALLET_ID, PROTOCOL_SPEC_URL, REPO_URL, WALLETS } from '../links';
 
-// How Campfire works, in plain words: the steps of a trade, what the contract allows, the arbiter,
+// How Campfire works, in plain words: where to get a wallet, the steps of a trade, what the contract allows, the arbiter,
 // zero-confirmation deposits, privacy and what the demo simulates. The FAQ from the Help screens closes it.
 
 export function About() {
   const offers = usePoll(() => apiGet<{ offers: Offer[] }>('/api/offers?onlyOpen=true').then((r) => r.offers), 'offers');
   const demo = offers.data?.find((o) => o.isDemo && o.document.asset === 'BCH') ?? offers.data?.find((o) => o.isDemo);
+  // The app routes with the URL hash, so the browser cannot jump to "#get-a-wallet" by itself.
+  const { hash } = useLocation();
+  useEffect(() => {
+    if (hash) document.getElementById(hash.slice(1))?.scrollIntoView();
+  }, [hash]);
 
   return (
     <main className="s-main" data-narrow>
@@ -23,6 +28,21 @@ export function About() {
           middle. This page explains how, step by step. Nothing here needs crypto experience.
         </p>
       </div>
+
+      <Section title="Get a wallet" id={GET_A_WALLET_ID}>
+        <p className="cf-muted">
+          A wallet is a free app on your phone. Only you control it: Campfire never holds your money, and your BCH goes
+          straight to your own wallet.
+        </p>
+        <dl className="cf-dl">
+          {WALLETS.map((wallet) => (
+            <WalletRow key={wallet.name} {...wallet} />
+          ))}
+        </dl>
+        <p className="cf-small cf-muted">
+          Install one, create a wallet, write down the recovery words somewhere safe, and come back here to connect it.
+        </p>
+      </Section>
 
       <Section title="A trade, step by step">
         <ol className="cf-timeline">
@@ -175,9 +195,22 @@ export function About() {
   );
 }
 
-function Section({ title, tag, children }: { title: string; tag?: ReactNode; children: ReactNode }) {
+function WalletRow({ name, url, note }: { name: string; url: string; note: string }) {
   return (
-    <section className="cf-card cf-stack" data-pad>
+    <>
+      <dt>
+        <a href={url} target="_blank" rel="noreferrer">
+          {name}
+        </a>
+      </dt>
+      <dd>{note}</dd>
+    </>
+  );
+}
+
+function Section({ title, tag, id, children }: { title: string; tag?: ReactNode; id?: string; children: ReactNode }) {
+  return (
+    <section className="cf-card cf-stack" data-pad id={id}>
       <div className="cf-row" data-between>
         <h2 className="cf-heading">{title}</h2>
         {tag}

@@ -181,7 +181,7 @@
 .cf-quick[data-variant="primary"] > small, .cf-quick[data-variant="primary"] > .cf-icon { color: var(--on-accent); }
 .cf-badge { display: inline-grid; place-items: center; min-width: 20px; height: 20px; padding: 0 6px; border-radius: var(--radius-full); background: var(--accent); color: var(--on-accent); font: 700 11px/1 var(--font-mono); }
 .cf-quick > .cf-badge { position: absolute; top: var(--space-3); right: var(--space-3); }
-.cf-bottomnav { position: sticky; bottom: 0; display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); background: var(--surface); border-top: 1px solid var(--line); padding: 6px var(--space-2) calc(6px + env(safe-area-inset-bottom, 0px)); }
+.cf-bottomnav { position: sticky; bottom: 0; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); background: var(--surface); border-top: 1px solid var(--line); padding: 6px var(--space-2) calc(6px + env(safe-area-inset-bottom, 0px)); }
 .cf-bottomnav > a { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px; min-height: 48px; border-radius: var(--radius-md); color: var(--ink-muted) !important; text-decoration: none; font: 600 11px/14px var(--font-sans); position: relative; }
 .cf-bottomnav > a[aria-current="page"] { color: var(--accent) !important; }
 .cf-bottomnav > a > .cf-badge { position: absolute; top: 2px; left: calc(50% + 6px); min-width: 16px; height: 16px; font-size: 10px; padding: 0 4px; }

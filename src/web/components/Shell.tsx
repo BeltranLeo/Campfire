@@ -15,11 +15,11 @@ const PUBLIC_NAV = [
 ];
 
 // With a wallet, "/" becomes Home. Below 720px this nav is hidden and BottomNav takes over.
+// Chats is left out until the page exists: a link to an unbuilt page reads as a hidden mock-up.
 const APP_NAV = [
   { to: '/', label: 'Home' },
   { to: '/offers', label: 'Offers' },
   { to: '/trades', label: 'Trades' },
-  { to: '/chats', label: 'Chats' },
 ];
 
 export function Shell() {
@@ -56,21 +56,30 @@ export function Shell() {
   );
 }
 
+// The hackathon banner is on every page. On a phone the four links fold behind one line, so the banner takes one
+// row instead of four; it never disappears.
 function Banner() {
+  const links = (
+    <span className="cf-banner__links">
+      {BANNER_LINKS.map((link) =>
+        link.url ? (
+          <a key={link.label} href={link.url} target="_blank" rel="noreferrer">
+            {link.label}
+          </a>
+        ) : (
+          <span key={link.label}>{link.label}</span>
+        ),
+      )}
+    </span>
+  );
   return (
     <div className="cf-banner">
       <strong>BCH BLAZE 2026 · Mainnet track</strong>
-      <span className="cf-banner__links">
-        {BANNER_LINKS.map((link) =>
-          link.url ? (
-            <a key={link.label} href={link.url} target="_blank" rel="noreferrer">
-              {link.label}
-            </a>
-          ) : (
-            <span key={link.label}>{link.label}</span>
-          ),
-        )}
-      </span>
+      <span className="s-desktoponly">{links}</span>
+      <details className="s-bannerfold">
+        <summary>Code &amp; demo</summary>
+        {links}
+      </details>
     </div>
   );
 }

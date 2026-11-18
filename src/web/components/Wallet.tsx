@@ -298,10 +298,9 @@ const BOTTOM_NAV: { to: string; label: string; icon: IconName }[] = [
   { to: '/', label: 'Home', icon: 'home' },
   { to: '/offers', label: 'Offers', icon: 'offers' },
   { to: '/trades', label: 'Trades', icon: 'trades' },
-  { to: '/chats', label: 'Chats', icon: 'chats' },
 ];
 
-// With a wallet and below 720px, the four main sections move to a bar at the bottom (CSS hides it on wider screens).
+// With a wallet and below 720px, the main sections move to a bar at the bottom (CSS hides it on wider screens).
 export function BottomNav() {
   const { activeTrades } = useWallet();
   return (

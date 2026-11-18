@@ -160,12 +160,13 @@ function WalletCard({ receiveXpub, trades }: { receiveXpub: string | null; trade
 function QuickLinks({ activeCount, total }: { activeCount: number | null; total: number | null }) {
   const tradesNote = activeCount === null ? 'Your trades and offers' : activeCount > 0 ? `${activeCount} active` : total ? 'No active trades' : 'None yet';
   return (
-    <div className="s-4">
+    <div className="s-quick3">
       <Link className="cf-quick" to="/offers?side=buy">
         <Icon name="buy" />
         Buy BCH<small>With pesos or dollars</small>
       </Link>
-      <Link className="cf-quick" to="/offers/new">
+      {/* Same place as "I want to sell" on the landing page: the buy offers, with "Or post your own offer" on top. */}
+      <Link className="cf-quick" to="/offers?side=sell">
         <Icon name="sell" />
         Sell BCH<small>For pesos or dollars</small>
       </Link>
@@ -173,10 +174,6 @@ function QuickLinks({ activeCount, total }: { activeCount: number | null; total:
         <Icon name="trades" />
         My trades<small>{tradesNote}</small>
         {activeCount ? <span className="cf-badge">{activeCount}</span> : null}
-      </Link>
-      <Link className="cf-quick" to="/chats">
-        <Icon name="chats" />
-        Chats<small>Talk to the other person</small>
       </Link>
     </div>
   );
