@@ -261,7 +261,8 @@ function BuyerAction(props: {
   );
   // Cancelling signs and ends the trade, so while the buyer can still pay it sits in the fold, away from the main button.
   // The fold stays open while the dispute form is showing, so the person does not lose what they typed.
-  const somethingWrong = (arbiterLine: string) => (
+  // The cancel note depends on the step: before the payment it is a plain exit; after it, cancelling would lose the money.
+  const somethingWrong = (arbiterLine: string, cancelNote: string) => (
     <Details summary="Something wrong?" tag={null} open={disputing || undefined}>
       <div className="cf-stack">
         {disputeForm || (
@@ -276,7 +277,7 @@ function BuyerAction(props: {
           <Button
             block
             variant="danger"
-            signs="Signs in your wallet. Only if you have not paid."
+            signs={cancelNote}
             busy={busy === 'cancel'}
             disabled={busy !== null && busy !== 'cancel'}
             onClick={cancelTrade}
@@ -378,7 +379,7 @@ function BuyerAction(props: {
               I've sent the payment
             </Button>
           </div>
-          {somethingWrong("The seller isn't answering, or the payment details don't work.")}
+          {somethingWrong("The seller isn't answering, or the payment details don't work.", 'Signs in your wallet. Only if you have not paid.')}
         </ActionCard>
       );
     }
@@ -392,7 +393,7 @@ function BuyerAction(props: {
         >
           <p className="cf-muted">You marked the payment as sent. When the seller confirms it, {props.amount} go to your wallet.</p>
           {failure}
-          {somethingWrong("The seller hasn't released after you paid.")}
+          {somethingWrong("The seller hasn't released after you paid.", 'Signs in your wallet. If you already paid, ask the arbiter instead.')}
         </ActionCard>
       );
     case 'Disputed': {

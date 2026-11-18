@@ -153,7 +153,7 @@ States before Funded exist only in the service database. From Funded onward, the
 **Confirmations.** Campfire acts on the escrow deposit at zero confirmations (0-conf), protected by double-spend proofs (DSProofs). Payment details are revealed when the funding transaction reaches the mempool. The buyer's browser then asks its Electrum server for a DSProof of that transaction (`blockchain.transaction.dsproof.get`) and keeps asking until the deposit is in a block:
 
 - No proof after 5 seconds in the mempool: the interface tells the buyer the deposit is safe at 0-conf and they can pay.
-- A proof appears: the interface tells the buyer not to pay and disables "Mark as paid" until the deposit is confirmed.
+- A proof appears: the interface tells the buyer not to pay and disables "I've sent the payment" until the deposit is confirmed.
 - The check is unavailable: the interface asks the buyer to wait for one confirmation.
 
 The same holds for the coins the buyer receives: the release is usable as soon as it reaches the network.
