@@ -1,4 +1,6 @@
+import { useEffect, useState } from 'react';
 import { Link, Navigate } from 'react-router';
+import QRCode from 'qrcode';
 import { ApiError, apiGet, type Offer, type PriceQuote, type Trade } from '../api';
 import { assetInfo } from '../assets';
 import { Button } from '../components/Button';
@@ -91,6 +93,7 @@ function WalletCard({ receiveXpub, trades }: { receiveXpub: string | null; trade
   const rep = wallet.reputation;
   const completed = rep ? rep.completedAsBuyer + rep.completedAsSeller : null;
   const failed = !scan && coins.error !== null;
+  const [receiving, setReceiving] = useState(false);
 
   return (
     <section className="cf-card" data-pad>
@@ -104,7 +107,7 @@ function WalletCard({ receiveXpub, trades }: { receiveXpub: string | null; trade
                 <span className="cf-muted">
                   {usd !== null && `≈ ${formatFiat(usd, 'USD')}`}
                   {usd !== null && pusd > 0n && ' · '}
-                  {pusd > 0n && config && <span className="cf-mono">{fromBaseUnits(pusd, config.pusdDecimals)} PUSD</span>}
+                  {pusd > 0n && config && <span className="cf-num">{fromBaseUnits(pusd, config.pusdDecimals)} PUSD</span>}
                 </span>
               </>
             ) : failed ? (
@@ -128,16 +131,26 @@ function WalletCard({ receiveXpub, trades }: { receiveXpub: string | null; trade
           )}
         </div>
         <div className="cf-stack" data-gap="2">
-          <div className="cf-stack" data-gap="1">
-            <span className="cf-label">Receive address</span>
-            {address ? (
-              <span className="cf-row" data-nowrap>
-                <HashLink value={address} kind="address" />
-                <CopyButton value={address} />
-              </span>
-            ) : (
-              // Invented text: the design always shows an address. One is only shown once the network has said which is unused.
-              <span className="cf-small cf-muted">Shown once your balance has been read, so it is always an unused one.</span>
+          <div className="hm-receive">
+            <Button size="sm" onClick={() => setReceiving((open) => !open)}>
+              {receiving ? 'Hide' : 'Receive'}
+            </Button>
+            {receiving && (
+              <div className="cf-well hm-well">
+                {address ? (
+                  <>
+                    <AddressQr value={address} />
+                    <span className="cf-row" data-nowrap>
+                      <HashLink value={address} kind="address" />
+                      <CopyButton value={address} />
+                    </span>
+                    <span className="cf-small cf-muted">Send BCH to this address. It belongs to your wallet.</span>
+                  </>
+                ) : (
+                  // Invented text: the design always shows an address. One is only shown once the network has said which is unused.
+                  <span className="cf-small cf-muted">Shown once your balance has been read, so it is always an unused one.</span>
+                )}
+              </div>
             )}
           </div>
           {trades === null || completed === null ? (
@@ -154,6 +167,27 @@ function WalletCard({ receiveXpub, trades }: { receiveXpub: string | null; trade
         </div>
       </div>
     </section>
+  );
+}
+
+function AddressQr({ value }: { value: string }) {
+  const [src, setSrc] = useState<string | null>(null);
+
+  useEffect(() => {
+    let current = true;
+    QRCode.toDataURL(value, { margin: 0, width: 320, color: { dark: '#1f1a15', light: '#ffffff' } }).then(
+      (url) => current && setSrc(url),
+      () => {},
+    );
+    return () => {
+      current = false;
+    };
+  }, [value]);
+
+  return (
+    <div className="cf-qr hm-qr" role="img" aria-label="Receive address QR code">
+      {src && <img src={src} alt="" width={140} height={140} />}
+    </div>
   );
 }
 
@@ -264,7 +298,7 @@ function ForYou() {
                     {verb} {asset.symbol}
                   </strong>
                   {' · '}
-                  <span className="cf-mono">{price === null ? doc.fiat : formatFiat(price, doc.fiat)}</span>
+                  <span className="cf-num">{price === null ? doc.fiat : formatFiat(price, doc.fiat)}</span>
                 </span>
                 <span className="cf-small cf-muted">
                   {formatRange(doc.min, doc.max, asset)} · {doc.paymentMethods.map(paymentMethodLabel).join(', ')}

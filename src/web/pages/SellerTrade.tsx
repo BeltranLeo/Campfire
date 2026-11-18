@@ -1,6 +1,7 @@
 import { useState, type ReactNode } from 'react';
 import { expectedEscrowFunding } from '../../protocol/escrow.js';
 import { pkhToCashAddress } from '../../protocol/keys.js';
+import { aliasFor } from '../alias';
 import { apiGet, apiPost, type Offer, type Reputation, type Trade } from '../api';
 import { ActionCard } from '../components/ActionCard';
 import { Button } from '../components/Button';
@@ -596,7 +597,13 @@ function RequestCard({ trade, fiat }: { trade: Trade; fiat: string }) {
         <dl className="cf-dl">
           <dt>Buyer</dt>
           <dd>
-            <HashLink value={trade.buyerIdentity} kind="plain" />
+            {aliasFor(trade.buyerIdentity).name}
+            {advanced && (
+              <>
+                {' · '}
+                <HashLink value={trade.buyerIdentity} kind="plain" />
+              </>
+            )}
             <br />
             {rep ? (
               <span className="cf-small">
@@ -608,16 +615,18 @@ function RequestCard({ trade, fiat }: { trade: Trade; fiat: string }) {
             )}
             <br />
             <span className="cf-small cf-subtle">Counted by Campfire. It cannot be verified on-chain and can be inflated with a second wallet.</span>
+            <br />
+            <span className="cf-small cf-subtle">The name comes from the buyer's key; nobody chooses it.</span>
           </dd>
           <dt>Amount</dt>
           <dd>
-            <span className="cf-mono">{formatAmount(trade.amount, BCH)}</span>
+            <span className="cf-num">{formatAmount(trade.amount, BCH)}</span>
           </dd>
           <dt>Price</dt>
           <dd>
             {trade.quote ? (
               <>
-                <span className="cf-mono">
+                <span className="cf-num">
                   {formatFiat(applyMargin(trade.quote.price, trade.marginBps ?? 0), trade.fiat)}/BCH
                 </span>
                 <br />

@@ -626,7 +626,7 @@ function PaymentDetails({ trade, fiat }: { trade: Trade; fiat: string }) {
     <>
       <dt>Amount</dt>
       <dd>
-        <span className="cf-mono">{fiat}</span>
+        <span className="cf-num">{fiat}</span>
       </dd>
     </>
   );
@@ -881,7 +881,7 @@ function OnChainDetails(props: {
               </dd>
               <dt>{isFinal(trade) ? 'Held' : 'Holds'}</dt>
               <dd>
-                <span className="cf-mono">
+                <span className="cf-num">
                   {holds}
                   {!expected.token && <span className="cf-subtle"> ({props.amount} + {formatBch(1000n)} fee budget)</span>}
                 </span>
@@ -939,13 +939,13 @@ function OnChainDetails(props: {
           <dl className="cf-dl">
             <dt>Amount</dt>
             <dd>
-              <span className="cf-mono">{props.amount}</span>
+              <span className="cf-num">{props.amount}</span>
             </dd>
             {trade.quote && (
               <>
                 <dt>Price</dt>
                 <dd>
-                  <span className="cf-mono">
+                  <span className="cf-num">
                     {formatFiat(applyMargin(trade.quote.price, trade.marginBps ?? 0), trade.fiat)}/{asset.symbol}
                   </span>
                   <br />
@@ -963,7 +963,7 @@ function OnChainDetails(props: {
             )}
             <dt>Fiat amount</dt>
             <dd>
-              <span className="cf-mono">{props.fiat}</span>
+              <span className="cf-num">{props.fiat}</span>
             </dd>
             <dt>Paid to</dt>
             <dd>

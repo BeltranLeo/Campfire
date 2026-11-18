@@ -86,10 +86,10 @@
 .s-switch > input:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
 @media (prefers-reduced-motion: reduce) { .s-switch > input::after { transition: none; } }
 .s-stat { display: flex; flex-direction: column; gap: 2px; }
-.s-stat > strong { font: 600 28px/32px var(--font-mono); font-variant-numeric: tabular-nums; }
+.s-stat > strong { font: 650 28px/32px var(--font-display); font-variant-numeric: tabular-nums; }
 .s-home { display: grid; grid-template-columns: minmax(0, 1fr) 360px; gap: var(--space-5); align-items: start; }
 .s-balance { display: flex; flex-direction: column; gap: var(--space-1); }
-.s-balance > strong { font: 600 36px/40px var(--font-mono); font-variant-numeric: tabular-nums; letter-spacing: -0.01em; }
+.s-balance > strong { font: 700 36px/40px var(--font-display); font-variant-numeric: tabular-nums; letter-spacing: -0.01em; }
 .s-item { display: flex; align-items: center; justify-content: space-between; gap: var(--space-3); padding: var(--space-3) var(--space-4); border-top: 1px solid var(--line); color: var(--ink) !important; text-decoration: none; }
 .s-item:first-of-type { border-top: 0; }
 .s-item > .s-cell { flex: 1; }
