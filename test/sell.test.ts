@@ -331,9 +331,11 @@ describe('the demo switch on a buy offer', () => {
 
 describe('payment method chips', () => {
   it('suggests names per currency', () => {
-    expect(methodChips('ARS')).toContain('Mercado Pago');
-    expect(methodChips('USD')).toContain('Zelle');
-    expect(methodChips('USD')).not.toContain('Mercado Pago');
+    expect(methodChips('ARS')).toEqual(['Alias transfer', 'Bank transfer (CBU)']);
+    expect(methodChips('USD').slice(0, 5)).toEqual(['Zelle', 'Bank transfer (ACH)', 'Wise', 'Revolut', 'Cash App']);
+    expect(methodChips('USD')).not.toContain('Alias transfer');
+    // Payment in person is not suggested in either currency.
+    expect([...methodChips('ARS'), ...methodChips('USD')].some((n) => /cash in person/i.test(n))).toBe(false);
   });
 
   it('toggles a name on and off, in order', () => {
@@ -344,14 +346,25 @@ describe('payment method chips', () => {
   });
 
   it('adds typed names without repeats and feeds the document builder', () => {
-    const methods = addMethods('Wise', 'Revolut, wise ,Payoneer');
+    const methods = addMethods('Wise', 'revolut, wise ,Payoneer', 'USD');
     expect(methods).toBe('Wise, Revolut, Payoneer');
     const built = buildOfferDocument({ form: { ...form, methods }, arbiter, oracle, now: 1_800_000_000 });
     expect(built.ok && built.document.paymentMethods).toEqual(['Wise', 'Revolut', 'Payoneer']);
   });
 
   it('drops suggestions of the other currency but keeps typed names', () => {
-    expect(keepMethodsFor('Zelle, Mercado Pago, Revolut', 'ARS')).toBe('Mercado Pago, Revolut');
+    expect(keepMethodsFor('Zelle, Alias transfer, Payoneer', 'ARS')).toBe('Alias transfer, Payoneer');
+    expect(keepMethodsFor('Bank transfer (CBU), Wise', 'USD')).toBe('Wise');
+  });
+
+  it('stores a typed spelling of a suggestion as the suggestion, in that currency only', () => {
+    expect(addMethods('', 'Transferencia por alias, CBU', 'ARS')).toBe('Alias transfer, Bank transfer (CBU)');
+    expect(addMethods('', 'cashapp', 'USD')).toBe('Cash App');
+    // "Bank transfer" means a different method in each currency.
+    expect(addMethods('', 'bank transfer', 'ARS')).toBe('Bank transfer (CBU)');
+    expect(addMethods('', 'bank transfer', 'USD')).toBe('Bank transfer (ACH)');
+    // Already chosen under its canonical name: not added twice.
+    expect(addMethods('Zelle', 'ZELLE', 'USD')).toBe('Zelle');
   });
 
   it('describes what is wrong in words that fit chips', () => {

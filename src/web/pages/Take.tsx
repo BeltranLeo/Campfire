@@ -11,6 +11,7 @@ import { noWalletNote } from '../components/NoWalletNote';
 import { Term } from '../components/Term';
 import { HashLink, ProvenanceTag } from '../components/Provenance';
 import { EmptyState, Notice, Skeleton } from '../components/States';
+import { reversibleWarning } from '../paymentMethods';
 import { useConfig } from '../config';
 import { applyMargin, formatAmount, formatBch, formatClock, formatFiat, formatFiatAmount, formatPaymentWindow, formatRange, paymentMethodLabel, toAmountInput } from '../format';
 import { fiatForUnits } from '../fiatAmount';
@@ -493,6 +494,8 @@ function TakeBuyOffer({ offer }: { offer: Offer }) {
         party={`${aliasFor(offer.sellerIdentity).name}${rep ? ` · ${rep.completedAsBuyer} ${rep.completedAsBuyer === 1 ? 'trade' : 'trades'} completed` : ''}`}
         terms={doc.terms}
       />
+      {/* Invented copy: answering a buy offer makes you the one paid in fiat, so the risk of a reversed payment is yours. */}
+      {reversibleWarning(doc.paymentMethods, doc.fiat) && <Notice tone="attention">{reversibleWarning(doc.paymentMethods, doc.fiat)}</Notice>}
 
       {offer.status !== 'Published' ? (
         <section className="cf-card">

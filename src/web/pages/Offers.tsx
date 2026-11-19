@@ -22,6 +22,7 @@ import { parseAmount } from '../take';
 import { usePoll } from '../hooks/usePoll';
 import { usePrefs } from '../prefs';
 import { loadQuotes, loadReputations, priceOf, unique } from '../offerData';
+import { filterOptions, offerTakes } from '../paymentMethods';
 
 // The offer list (Offers-* screens). The visitor starts from an intention: "I want to buy" lists
 // sell offers, "I want to sell" lists buy offers. The choice lives in the URL (?side=sell) so the
@@ -71,14 +72,16 @@ export function Offers() {
 
   const sideOffers = all.filter((o) => o.document.side === offerSide);
 
-  // Filter choices come from the offers on this side, not from a fixed list.
+  // Coin and currency choices come from the offers on this side, not from a fixed list.
   const coinOptions = unique(sideOffers.map((o) => assetInfo(o.document.asset, o.document.assetDecimals, config).symbol));
   const fiatOptions = unique(sideOffers.map((o) => o.document.fiat));
-  const methodOptions = unique(sideOffers.flatMap((o) => o.document.paymentMethods));
   // A choice counts only while it is one of the options. Otherwise the select would show "Any …" while a
   // value left over from the other side (the back button, an onboarding answer) silently hid every offer.
   const coin = coinOptions.includes(chosenCoin) ? chosenCoin : '';
   const fiat = fiatOptions.includes(chosenFiat) ? chosenFiat : '';
+  // Methods come from Campfire's fixed list, for the chosen currency or all of them, so the choices do not depend on
+  // how each author spelled theirs. Offers whose only methods are typed by hand show with "Any method".
+  const methodOptions = filterOptions(fiat);
   const method = methodOptions.includes(chosenMethod) ? chosenMethod : '';
 
   const activeFilters = [coin, fiat, method].filter(Boolean).length;
@@ -89,7 +92,7 @@ export function Offers() {
       ({ offer, asset }) =>
         (!coin || asset.symbol === coin) &&
         (!fiat || offer.document.fiat === fiat) &&
-        (!method || offer.document.paymentMethods.includes(method)),
+        (!method || offerTakes(offer.document.paymentMethods, offer.document.fiat, method)),
     );
 
   // The pay field needs one currency. Use the filtered one, else the one most listed offers are in.

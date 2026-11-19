@@ -8,6 +8,7 @@ import { buildCloseOfferTransaction, isPositiveDecimalString, validateOfferDocum
 import { cashAddressToPkh, derivePayoutPkhFromXpub, pkhToLockingBytecode, type WalletSpendableUtxo, type WalletTransactionRequest } from '../protocol/keys.js';
 import type { Offer as ListedOffer, OfferDocument as ListedOfferDocument } from './api';
 import { applyMargin, formatBch, formatFiat } from './format';
+import { canonicalMethod, findMethod, isSuggestedAnywhere, methodsFor } from './paymentMethods';
 import { parseAmount } from './take';
 import { TradeActionError } from './trade';
 
@@ -79,13 +80,8 @@ export function parseMethods(input: string): string[] | null {
 
 // --- Payment method chips (the wizard writes them into `form.methods`, so the document builder is unchanged) ---
 
-const METHOD_CHIPS: Record<string, readonly string[]> = {
-  ARS: ['Bank transfer', 'Mercado Pago', 'Ualá', 'Brubank', 'Cash in person'],
-  USD: ['Bank transfer', 'Zelle', 'Wise', 'Cash in person'],
-};
-
-/** The suggested payment methods for a currency. */
-export const methodChips = (fiat: string): readonly string[] => METHOD_CHIPS[fiat] ?? METHOD_CHIPS.ARS;
+/** The suggested payment method names for a currency, most used first (src/web/paymentMethods.ts). */
+export const methodChips = (fiat: string): string[] => methodsFor(fiat).map((m) => m.name);
 
 const sameName = (a: string, b: string) => a.toLowerCase() === b.toLowerCase();
 
@@ -105,17 +101,19 @@ export function toggleMethod(methods: string, name: string): string {
   return (names.some((n) => sameName(n, name)) ? names.filter((n) => !sameName(n, name)) : [...names, name]).join(', ');
 }
 
-/** Adds the comma-separated names someone typed in "Other". */
-export function addMethods(methods: string, typed: string): string {
-  return selectedMethods(`${methods},${typed}`).join(', ');
+/**
+ * Adds the comma-separated names someone typed in "Other". A name that is a suggestion in this currency, however
+ * it was written ("zelle", "transferencia por alias"), is stored as the suggestion, so the offer filter finds it.
+ */
+export function addMethods(methods: string, typed: string, fiat: string): string {
+  const added = selectedMethods(typed).map((name) => canonicalMethod(name, fiat));
+  return selectedMethods([methods, ...added].join(',')).join(', ');
 }
 
 /** Drops the suggested names of another currency (Zelle on a peso offer) and keeps what was typed by hand. */
 export function keepMethodsFor(methods: string, fiat: string): string {
-  const here = methodChips(fiat);
-  const known = Object.values(METHOD_CHIPS).flat();
   return selectedMethods(methods)
-    .filter((n) => here.some((h) => sameName(h, n)) || !known.some((k) => sameName(k, n)))
+    .filter((n) => findMethod(n, fiat) !== undefined || !isSuggestedAnywhere(n))
     .join(', ');
 }
 

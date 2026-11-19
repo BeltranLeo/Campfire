@@ -13,6 +13,7 @@ import { useConfig } from '../config';
 import { findUnusedReceiveIndex, withKeptElectrum } from '../electrum';
 import { applyMargin, formatBch, formatDateTime, formatFiat, formatFiatAmount, toAmountInput } from '../format';
 import { usePoll } from '../hooks/usePoll';
+import { VISIBLE_METHODS, reversibleWarning } from '../paymentMethods';
 import { refreshWalletCoins, useWalletCoins } from '../walletCoins';
 import {
   EXPIRIES_SEC,
@@ -77,6 +78,7 @@ export function CreateOffer() {
   // The wizard step; the form above stays one piece of state whichever step shows it.
   const [step, setStep] = useState<1 | 2 | 3 | 'review'>(1);
   const [otherOpen, setOtherOpen] = useState(false);
+  const [moreOpen, setMoreOpen] = useState(false);
   const [other, setOther] = useState('');
   const heading = useRef<HTMLHeadingElement>(null);
   const firstStep = useRef(true);
@@ -245,7 +247,14 @@ export function CreateOffer() {
   const demoOn = buying && form.demo === true;
   const chosen = selectedMethods(form.methods);
   const chipNames = methodChips(form.fiat);
+  const isChosen = (name: string) => chosen.some((n) => n.toLowerCase() === name.toLowerCase());
+  // The most used methods are always on screen; the rest show behind "More", or once one of them is chosen.
+  const hiddenNames = chipNames.slice(VISIBLE_METHODS);
+  const shownNames = moreOpen ? chipNames : [...chipNames.slice(0, VISIBLE_METHODS), ...hiddenNames.filter(isChosen)];
   const customNames = chosen.filter((n) => !chipNames.some((c) => c.toLowerCase() === n.toLowerCase()));
+  // Whoever receives the fiat carries the risk of a payment that can be clawed back: the seller of a sell offer.
+  // On a buy offer the seller who answers sees the same warning (Take.tsx).
+  const reversibleNote = buying ? null : reversibleWarning(chosen, form.fiat);
   const methodsMessage = shown('methods') ? methodsProblem(form.methods, demoOn ? 1 : 0) ?? shown('methods') : undefined;
 
   const priceLine = describeYourPrice({
@@ -268,7 +277,7 @@ export function CreateOffer() {
   const toggleChip = (name: string) => edit('methods', { methods: toggleMethod(form.methods, name) });
   const addOther = () => {
     if (!other.trim()) return;
-    edit('methods', { methods: addMethods(form.methods, other) });
+    edit('methods', { methods: addMethods(form.methods, other, form.fiat) });
     setOther('');
   };
   const nextFromPrice = () => {
@@ -469,11 +478,17 @@ export function CreateOffer() {
               <div className="cf-field" data-invalid={methodsMessage ? true : undefined}>
                 <label id="co-methods">{buying ? 'Ways you can pay' : 'Ways buyers can pay you'}</label>
                 <div className="co-chips" role="group" aria-labelledby="co-methods">
-                  {[...chipNames, ...customNames].map((name) => (
-                    <button key={name} type="button" className="co-chip" aria-pressed={chosen.some((n) => n.toLowerCase() === name.toLowerCase())} onClick={() => toggleChip(name)}>
+                  {[...shownNames, ...customNames].map((name) => (
+                    <button key={name} type="button" className="co-chip" aria-pressed={isChosen(name)} onClick={() => toggleChip(name)}>
                       {name}
                     </button>
                   ))}
+                  {!moreOpen && hiddenNames.some((n) => !isChosen(n)) && (
+                    // Invented copy: the design shows only the most used methods.
+                    <button type="button" className="co-chip" aria-expanded={false} onClick={() => setMoreOpen(true)}>
+                      More
+                    </button>
+                  )}
                   <button type="button" className="co-chip" aria-pressed={otherOpen} aria-expanded={otherOpen} onClick={() => setOtherOpen((o) => !o)}>
                     + Other
                   </button>
@@ -499,6 +514,8 @@ export function CreateOffer() {
                   </div>
                 )}
                 <span className="cf-hint">{methodsMessage ?? 'Only the names are public. You share your account details with each buyer, encrypted, after you accept them.'}</span>
+                {/* Invented copy: the design has no reversible payment methods. */}
+                {reversibleNote && <Notice tone="attention">{reversibleNote}</Notice>}
               </div>
 
               <div className="s-2">
