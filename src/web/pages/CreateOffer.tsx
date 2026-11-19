@@ -26,12 +26,17 @@ import {
   toggleMethod,
   PAYMENT_WINDOWS_SEC,
   SELL_FIATS,
+  COIN_DECIMALS,
+  DEFAULT_RANGE,
+  OFFER_COINS,
   buildOfferDocument,
+  formatCoin,
   marginRange,
   parseFixedPrice,
   parseMarginBps,
   type FormErrors,
   type FormField,
+  type OfferCoin,
   type OfferForm,
 } from '../sell';
 import { parseAmount, payoutAddress } from '../take';
@@ -52,8 +57,9 @@ const INITIAL: Omit<OfferForm, 'side'> = {
   priceType: 'market',
   margin: '2.5',
   fixedPrice: '',
-  min: '0.001',
-  max: '0.02',
+  coin: 'BCH',
+  min: DEFAULT_RANGE.BCH.min,
+  max: DEFAULT_RANGE.BCH.max,
   methods: '',
   paymentWindowSec: 3600,
   expirySec: 7 * 86_400,
@@ -97,6 +103,9 @@ export function CreateOffer() {
     setTouched((t) => new Set(t).add(field));
   };
   const buying = form.side === 'buy';
+  const coin: OfferCoin = form.coin ?? 'BCH';
+  const decimals = COIN_DECIMALS[coin];
+  const coinAsset = { decimals, isBch: coin === 'BCH' };
 
   const identity = wallet.status === 'connected' ? wallet.identity : null;
   const xpubs = wallet.xpubs;
@@ -123,34 +132,44 @@ export function CreateOffer() {
   );
   const demo = usePoll(() => (buying ? apiGet<DemoInfo>('/api/demo').catch(() => null) : Promise.resolve(null)), form.side);
 
+  // The oracle signs both coins against both currencies: BCH/ARS, BCH/USD, PUSD/ARS and PUSD/USD.
+  const pair = `${coin}/${form.fiat}`;
   const quote = usePoll(
-    () => apiGet<{ quote: PriceQuote }>(`/api/oracle/quote?pair=${encodeURIComponent(`BCH/${form.fiat}`)}`).then((r) => r.quote),
-    `BCH/${form.fiat}`,
+    () => apiGet<{ quote: PriceQuote }>(`/api/oracle/quote?pair=${encodeURIComponent(pair)}`).then((r) => r.quote),
+    pair,
     QUOTE_INTERVAL_MS,
   );
   const offers = usePoll(() => apiGet<{ offers: Offer[] }>('/api/offers?onlyOpen=true').then((r) => r.offers), 'open');
 
   const verifiedQuote =
-    quote.data && config && quote.data.pair === `BCH/${form.fiat}` && verifyPriceQuote(quote.data, config.oraclePk) ? quote.data : null;
+    quote.data && config && quote.data.pair === pair && verifyPriceQuote(quote.data, config.oraclePk) ? quote.data : null;
   const marginBps = parseMarginBps(form.margin);
   const unitPrice = form.priceType === 'fixed' ? parseFixedPrice(form.fixedPrice) : verifiedQuote?.price ?? null;
   const effectiveMargin = form.priceType === 'market' ? marginBps ?? 0 : 0;
   const fiatInfo = SELL_FIATS.find((f) => f.code === form.fiat) ?? SELL_FIATS[0];
   const approx = (typed: string) => {
-    const amount = parseAmount(typed, 8);
+    const amount = parseAmount(typed, decimals);
     if (!unitPrice || amount === null || amount <= 0n || (form.priceType === 'market' && marginBps === null)) return null;
-    return formatFiatAmount(computeFiatAmount({ amount, assetDecimals: 8, unitPrice, marginBps: effectiveMargin }), form.fiat);
+    return formatFiatAmount(computeFiatAmount({ amount, assetDecimals: decimals, unitPrice, marginBps: effectiveMargin }), form.fiat);
   };
-  const range = marginRange(offers.data ?? [], form.fiat, form.side);
+  const range = marginRange(offers.data ?? [], form.fiat, form.side, coin === 'BCH' ? 'BCH' : (config?.pusdCategory ?? ''));
 
   const status = sponsorship.data ?? null;
   const maxExpirySec = buying ? status?.maxExpirySec : undefined;
   const expiries = EXPIRIES_SEC.filter((s) => maxExpirySec === undefined || s <= maxExpirySec);
   // The demo seller's limit, known before the form is built so a demo offer it would skip is caught here.
-  const demoMaxText = demo.data?.limits.maxBchSats;
-  const demoMaxSats = demoMaxText !== undefined ? BigInt(demoMaxText) : undefined;
+  const demoMaxText = coin === 'BCH' ? demo.data?.limits.maxBchSats : demo.data?.limits.maxPusdUnits;
+  const demoMaxUnits = demoMaxText !== undefined ? BigInt(demoMaxText) : undefined;
   const built = config
-    ? buildOfferDocument({ form, arbiter: config.arbiterPk, oracle: config.oraclePk, now: Math.floor(Date.now() / 1000), maxExpirySec, demoMaxSats })
+    ? buildOfferDocument({
+        form,
+        arbiter: config.arbiterPk,
+        oracle: config.oraclePk,
+        now: Math.floor(Date.now() / 1000),
+        maxExpirySec,
+        demoMaxUnits,
+        pusdCategory: config.pusdCategory,
+      })
     : null;
   const errors: FormErrors = built && !built.ok ? built.errors : {};
   const shown = (field: FormField) => (touched.has(field) ? errors[field] : undefined);
@@ -232,11 +251,11 @@ export function CreateOffer() {
 
   if (published) return <Published offer={published} />;
 
-  const demoMax = demoMaxSats;
+  const demoMax = demoMaxUnits;
   // Turning the demo on brings the smallest trade within the demo seller's reach, and says so under the switch.
   const toggleDemo = (on: boolean) => {
-    const min = parseAmount(form.min, 8);
-    if (on && demoMax !== undefined && (min === null || min > demoMax)) edit('min', { demo: on, min: toAmountInput(demoMax, { decimals: 8, isBch: true }) });
+    const min = parseAmount(form.min, decimals);
+    if (on && demoMax !== undefined && (min === null || min > demoMax)) edit('min', { demo: on, min: toAmountInput(demoMax, coinAsset) });
     else set({ demo: on });
   };
   const nextSlot = status?.nextSlotAt ? formatDateTime(status.nextSlotAt) : null;
@@ -263,6 +282,7 @@ export function CreateOffer() {
     fixedPrice: parseFixedPrice(form.fixedPrice),
     marketPrice: verifiedQuote?.price ?? null,
     fiat: form.fiat,
+    coin,
   });
   // While the market price is missing the line says why, in the words the hint always used.
   const priceStatus =
@@ -272,6 +292,10 @@ export function CreateOffer() {
     // The margin follows the side's default only while the person has not typed their own.
     const margin = form.margin === defaultMargin(form.side) ? defaultMargin(side) : form.margin;
     set({ side, margin, demo: side === 'buy' ? form.demo : false });
+  };
+  // A new coin starts from that coin's amounts: 0.001 BCH and 1.00 PUSD are not the same kind of number.
+  const chooseCoin = (next: OfferCoin) => {
+    if (next !== coin) set({ coin: next, min: DEFAULT_RANGE[next].min, max: DEFAULT_RANGE[next].max });
   };
   const chooseFiat = (fiat: string) => set({ fiat, methods: keepMethodsFor(form.methods, fiat) });
   const toggleChip = (name: string) => edit('methods', { methods: toggleMethod(form.methods, name) });
@@ -293,7 +317,7 @@ export function CreateOffer() {
     } else setStep('review');
   };
 
-  const rangeText = `${toAmountInput(parseAmount(form.min, 8) ?? 0n, { decimals: 8, isBch: true })} to ${toAmountInput(parseAmount(form.max, 8) ?? 0n, { decimals: 8, isBch: true })} BCH`;
+  const rangeText = `${toAmountInput(parseAmount(form.min, decimals) ?? 0n, coinAsset)} to ${toAmountInput(parseAmount(form.max, decimals) ?? 0n, coinAsset)} ${coin}`;
   const payNames = [...chosen, ...(demoOn ? ['Simulated (demo)'] : [])];
   const windowMinutes = form.paymentWindowSec / 60;
   const openFor = form.expirySec === 86_400 ? '1 day' : `${form.expirySec / 86_400} days`;
@@ -327,17 +351,28 @@ export function CreateOffer() {
 
           {step === 1 && (
             <>
+              {/* Invented copy: the design offers BCH only. */}
+              <div className="cf-field">
+                <label id="co-coin">Which coin?</label>
+                <div className="cf-seg" role="group" aria-labelledby="co-coin">
+                  {OFFER_COINS.map((c) => (
+                    <button key={c} type="button" aria-pressed={coin === c} onClick={() => chooseCoin(c)}>
+                      {c === 'BCH' ? 'Bitcoin Cash' : 'PUSD (dollar token)'}
+                    </button>
+                  ))}
+                </div>
+              </div>
               <div className="cf-stack" data-gap="3">
                 <button type="button" className="cf-choice" aria-pressed={!buying} onClick={() => chooseSide('sell')}>
                   <span>
-                    Sell BCH
+                    Sell {coin}
                     <small>Buyers pay you in pesos or dollars</small>
                   </span>
                 </button>
                 <button type="button" className="cf-choice" aria-pressed={buying} onClick={() => chooseSide('buy')}>
                   <span>
-                    Buy BCH
-                    <small>Sellers send you BCH, you pay them</small>
+                    Buy {coin}
+                    <small>Sellers send you {coin}, you pay them</small>
                   </span>
                 </button>
               </div>
@@ -392,7 +427,7 @@ export function CreateOffer() {
                     {shown('margin') ??
                       [
                         verifiedQuote && marginBps !== null
-                          ? `${buying ? 'You pay' : 'Buyers pay'} ${formatFiat(applyMargin(verifiedQuote.price, marginBps), form.fiat)} per BCH today.`
+                          ? `${buying ? 'You pay' : 'Buyers pay'} ${formatFiat(applyMargin(verifiedQuote.price, marginBps), form.fiat)} per ${coin} today.`
                           : verifiedQuote
                             ? null
                             : quote.loading
@@ -406,7 +441,7 @@ export function CreateOffer() {
                 </div>
               ) : (
                 <div className="cf-field" data-invalid={shown('fixedPrice') ? true : undefined}>
-                  <label htmlFor="fixed">Price per BCH</label>
+                  <label htmlFor="fixed">Price per {coin}</label>
                   <div className="cf-inputgroup">
                     <input
                       id="fixed"
@@ -440,7 +475,7 @@ export function CreateOffer() {
                       aria-invalid={shown('min') ? true : undefined}
                       onChange={(e) => edit('min', { min: e.target.value })}
                     />
-                    <span className="cf-addon">BCH</span>
+                    <span className="cf-addon">{coin}</span>
                   </div>
                   <span className="cf-hint">{shown('min') ?? (approx(form.min) ? `≈ ${approx(form.min)}` : ' ')}</span>
                 </div>
@@ -456,7 +491,7 @@ export function CreateOffer() {
                       aria-invalid={shown('max') ? true : undefined}
                       onChange={(e) => edit('max', { max: e.target.value })}
                     />
-                    <span className="cf-addon">BCH</span>
+                    <span className="cf-addon">{coin}</span>
                   </div>
                   <span className="cf-hint">{shown('max') ?? (approx(form.max) ? `≈ ${approx(form.max)}` : ' ')}</span>
                 </div>
@@ -552,8 +587,8 @@ export function CreateOffer() {
                     <span className="cf-stack" data-gap="1">
                       <strong>Get a demo answer (simulated {fiatInfo.label.toLowerCase()})</strong>
                       <span className="cf-small cf-muted">
-                        The demo seller answers right away for trades up to {formatBch(demoMax)}. The payment is simulated: no
-                        money moves, and the BCH you get is real.
+                        The demo seller answers right away for trades up to {formatCoin(demoMax, coin)}. The payment is simulated: no
+                        money moves, and the {coin} you get is real.
                       </span>
                     </span>
                   </label>

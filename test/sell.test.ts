@@ -299,7 +299,7 @@ describe('closing an offer', () => {
 describe('the demo switch on a buy offer', () => {
   const buy = { side: 'buy' as const, min: '0.0001', max: '0.0002' };
   const demoBuild = (patch: Partial<OfferForm> = {}) =>
-    buildOfferDocument({ form: { ...form, ...buy, demo: true, ...patch }, arbiter, oracle, now: 1_800_000_000, demoMaxSats: 20_000n });
+    buildOfferDocument({ form: { ...form, ...buy, demo: true, ...patch }, arbiter, oracle, now: 1_800_000_000, demoMaxUnits: 20_000n });
 
   it('adds the simulated method the demo seller answers to', () => {
     const built = demoBuild();
@@ -324,7 +324,7 @@ describe('the demo switch on a buy offer', () => {
   });
 
   it('is ignored on a sell offer', () => {
-    const built = buildOfferDocument({ form: { ...form, demo: true }, arbiter, oracle, now: 1_800_000_000, demoMaxSats: 20_000n });
+    const built = buildOfferDocument({ form: { ...form, demo: true }, arbiter, oracle, now: 1_800_000_000, demoMaxUnits: 20_000n });
     expect(built.ok && built.document.paymentMethods).toEqual(['bank-transfer', 'mercadopago']);
   });
 });
@@ -376,6 +376,33 @@ describe('payment method chips', () => {
     expect(methodsProblem('x'.repeat(31))).toMatch(/30 characters/);
     expect(methodsProblem('Zelle')).toBeNull();
   });
+
+  it('builds a PUSD offer with the service token, two decimals and the PUSD pair', () => {
+    const pusd = 'ab'.repeat(32);
+    const built = buildOfferDocument({
+      form: { ...form, coin: 'PUSD', fiat: 'USD', min: '1.00', max: '20' },
+      arbiter,
+      oracle,
+      now: 1_800_000_000,
+      pusdCategory: pusd.toUpperCase(),
+    });
+    if (!built.ok) throw new Error(JSON.stringify(built.errors));
+    expect(() => validateOfferDocument(built.document)).not.toThrow();
+    expect(built.document).toMatchObject({ asset: pusd, assetDecimals: 2, price: { type: 'floating', pair: 'PUSD/USD' }, min: '100', max: '2000' });
+    // One cent is the smallest PUSD trade; without the token's category there is nothing to offer.
+    expect(buildOfferDocument({ form: { ...form, coin: 'PUSD', min: '0.001' }, arbiter, oracle, now: 1, pusdCategory: pusd })).toMatchObject({ ok: false, errors: { min: /0.01 PUSD/ } });
+    expect(buildOfferDocument({ form: { ...form, coin: 'PUSD', min: '1', max: '2' }, arbiter, oracle, now: 1 })).toMatchObject({ ok: false, errors: { min: /PUSD token/ } });
+    // The demo seller's PUSD limit is in cents.
+    const demo = buildOfferDocument({ form: { ...form, side: 'buy', demo: true, coin: 'PUSD', min: '0.20', max: '1' }, arbiter, oracle, now: 1, pusdCategory: pusd, demoMaxUnits: 10n });
+    expect(demo).toMatchObject({ ok: false, errors: { min: 'For a demo answer, keep the smallest trade at 0.10 PUSD or less.' } });
+  });
+
+  it('compares margins only with offers of the same coin', () => {
+    const offer = (asset: string, marginBps: number) => ({ document: { side: 'sell', asset, fiat: 'USD', price: { type: 'floating', pair: 'X/USD', marginBps } } as never });
+    const offers = [offer('BCH', 300), offer('CD'.repeat(32), 50)];
+    expect(marginRange(offers, 'USD')).toEqual({ low: 300, high: 300 });
+    expect(marginRange(offers, 'USD', 'sell', 'cd'.repeat(32))).toEqual({ low: 50, high: 50 });
+  });
 });
 
 describe('the live price line', () => {
@@ -390,5 +417,9 @@ describe('the live price line', () => {
     expect(describeYourPrice({ ...base, priceType: 'fixed', marginBps: null })).toBeNull();
     expect(describeYourPrice({ ...base, marginBps: 250, marketPrice: null })).toBeNull();
     expect(describeYourPrice({ ...base, marginBps: null })).toBeNull();
+  });
+  it('names the coin the price is for', () => {
+    expect(describeYourPrice({ ...base, fiat: 'USD', marketPrice: '1.00', marginBps: 100, coin: 'PUSD' })).toBe('Your price: market + 1% (1 PUSD ≈ 1.01 USD today)');
+    expect(describeYourPrice({ ...base, priceType: 'fixed', marginBps: null, fixedPrice: '1450', coin: 'PUSD' })).toBe('Your price: 1,450 ARS per PUSD');
   });
 });

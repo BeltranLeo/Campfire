@@ -266,5 +266,5 @@ export interface DemoInfo {
   enabled: boolean;
   identity: string;
   /** Amounts come as strings in base units (sats, PUSD cents). */
-  limits: { maxActiveTrades: number; maxDailyFundings: number; minBchSats?: string; maxBchSats?: string };
+  limits: { maxActiveTrades: number; maxDailyFundings: number; minBchSats?: string; maxBchSats?: string; minPusdUnits?: string; maxPusdUnits?: string };
 }

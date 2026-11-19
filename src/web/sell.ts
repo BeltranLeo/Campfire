@@ -7,7 +7,7 @@ import type { NetworkProvider } from 'cashscript';
 import { buildCloseOfferTransaction, isPositiveDecimalString, validateOfferDocument, type OfferDocument } from '../protocol/offers.js';
 import { cashAddressToPkh, derivePayoutPkhFromXpub, pkhToLockingBytecode, type WalletSpendableUtxo, type WalletTransactionRequest } from '../protocol/keys.js';
 import type { Offer as ListedOffer, OfferDocument as ListedOfferDocument } from './api';
-import { applyMargin, formatBch, formatFiat } from './format';
+import { applyMargin, formatBch, formatFiat, fromBaseUnits } from './format';
 import { canonicalMethod, findMethod, isSuggestedAnywhere, methodsFor } from './paymentMethods';
 import { parseAmount } from './take';
 import { TradeActionError } from './trade';
@@ -16,15 +16,17 @@ export type PriceType = 'market' | 'fixed';
 
 /** What the form holds, exactly as typed. */
 export interface OfferForm {
-  /** "sell": I give BCH and get money. "buy": I give money and get BCH. */
+  /** "sell": I give coins and get money. "buy": I give money and get coins. */
   side: 'sell' | 'buy';
+  /** The coin traded: BCH or the PUSD dollar token. Optional so older saved forms still read as BCH. */
+  coin?: OfferCoin;
   fiat: string;
   priceType: PriceType;
   /** Percent over the market price, e.g. "2.5". */
   margin: string;
   /** Fiat per whole coin, for a fixed price. */
   fixedPrice: string;
-  /** Smallest and largest trade in BCH, as typed ("0.001"). */
+  /** Smallest and largest trade in the coin, as typed ("0.001" BCH, "5.00" PUSD). */
   min: string;
   max: string;
   /** Payment method names separated by commas. */
@@ -46,6 +48,20 @@ export const SELL_FIATS = [
   { code: 'ARS', label: 'Pesos', name: 'Argentine pesos' },
   { code: 'USD', label: 'Dollars', name: 'US dollars' },
 ] as const;
+
+export type OfferCoin = 'BCH' | 'PUSD';
+export const OFFER_COINS: readonly OfferCoin[] = ['BCH', 'PUSD'];
+/** Decimals of each coin's base units: satoshis, and PUSD cents. */
+export const COIN_DECIMALS: Record<OfferCoin, number> = { BCH: 8, PUSD: 2 };
+/** The amounts a new form starts from, per coin. */
+export const DEFAULT_RANGE: Record<OfferCoin, { min: string; max: string }> = { BCH: { min: '0.001', max: '0.02' }, PUSD: { min: '1.00', max: '20.00' } };
+/** A PUSD trade carries its own BCH to the buyer (6,000 sats), so one cent is already a trade that pays out. */
+export const MIN_TRADE_PUSD_UNITS = 1n;
+
+/** "0.001 BCH" or "1.00 PUSD", from base units. */
+export function formatCoin(units: bigint, coin: OfferCoin): string {
+  return coin === 'BCH' ? formatBch(units) : `${fromBaseUnits(units, COIN_DECIMALS.PUSD)} PUSD`;
+}
 
 export const PAYMENT_WINDOWS_SEC = [3600, 1800, 900] as const;
 export const EXPIRIES_SEC = [7 * 86_400, 86_400] as const;
@@ -130,19 +146,27 @@ export function methodsProblem(methods: string, reserved = 0): string | null {
  * "Market + 2.5%", "market − 1%" or "market price", and the price today; or "368,765 ARS per BCH" for a fixed price.
  * Null while there is nothing to say yet (no valid margin or price, or no market price).
  */
-export function describeYourPrice(p: { priceType: PriceType; marginBps: number | null; fixedPrice: string | null; marketPrice: string | null; fiat: string }): string | null {
+export function describeYourPrice(p: {
+  priceType: PriceType;
+  marginBps: number | null;
+  fixedPrice: string | null;
+  marketPrice: string | null;
+  fiat: string;
+  coin?: OfferCoin;
+}): string | null {
+  const coin = p.coin ?? 'BCH';
   const money = (v: number) => formatFiat(v, p.fiat).replace('.00 ', ' ');
-  if (p.priceType === 'fixed') return p.fixedPrice === null ? null : `Your price: ${money(Number(p.fixedPrice))} per BCH`;
+  if (p.priceType === 'fixed') return p.fixedPrice === null ? null : `Your price: ${money(Number(p.fixedPrice))} per ${coin}`;
   if (p.marginBps === null || p.marketPrice === null) return null;
   const percent = Math.abs(p.marginBps) / 100;
   const label = p.marginBps === 0 ? 'market price' : `market ${p.marginBps > 0 ? '+' : '−'} ${percent}%`;
-  return `Your price: ${label} (1 BCH ≈ ${money(applyMargin(p.marketPrice, p.marginBps))} today)`;
+  return `Your price: ${label} (1 ${coin} ≈ ${money(applyMargin(p.marketPrice, p.marginBps))} today)`;
 }
 
 export type OfferBuild = { ok: true; document: OfferDocument; json: string } | { ok: false; errors: FormErrors };
 
 /**
- * The offer document for a BCH sell offer, or what is wrong with the form. The document is validated with the
+ * The offer document for a BCH or PUSD offer, or what is wrong with the form. The document is validated with the
  * same function the service runs, so a rejection there cannot come as a surprise after the wallet signed.
  */
 export function buildOfferDocument(params: {
@@ -153,27 +177,32 @@ export function buildOfferDocument(params: {
   now: number;
   /** The longest expiry Campfire pays for, for buy offers. */
   maxExpirySec?: number;
-  /** The largest trade the demo seller takes, in sats: above it the demo seller silently skips the offer. */
-  demoMaxSats?: bigint;
+  /** The largest trade the demo seller takes, in the coin's base units: above it the demo seller silently skips the offer. */
+  demoMaxUnits?: bigint;
+  /** The PUSD token category the service names; needed for a PUSD offer. */
+  pusdCategory?: string;
 }): OfferBuild {
   const { form } = params;
+  const coin = form.coin ?? 'BCH';
+  const decimals = COIN_DECIMALS[coin];
   const errors: FormErrors = {};
 
   let price: OfferDocument['price'] | undefined;
   if (form.priceType === 'market') {
     const marginBps = parseMarginBps(form.margin);
     if (marginBps === null) errors.margin = 'Enter a percentage between -50 and 100, with up to two decimals.';
-    else price = { type: 'floating', pair: `BCH/${form.fiat}`, marginBps };
+    else price = { type: 'floating', pair: `${coin}/${form.fiat}`, marginBps };
   } else {
     const value = parseFixedPrice(form.fixedPrice);
     if (value === null) errors.fixedPrice = 'Enter the price with digits and a dot for decimals, for example 480000.50.';
     else price = { type: 'fixed', value };
   }
 
-  const min = parseAmount(form.min, 8);
-  const max = parseAmount(form.max, 8);
-  if (min === null || min < MIN_TRADE_SATS) errors.min = `The smallest trade must be at least ${formatBch(MIN_TRADE_SATS)}.`;
-  if (max === null || max <= 0n) errors.max = 'Enter the largest trade in BCH, for example 0.02.';
+  const min = parseAmount(form.min, decimals);
+  const max = parseAmount(form.max, decimals);
+  const minUnits = coin === 'BCH' ? MIN_TRADE_SATS : MIN_TRADE_PUSD_UNITS;
+  if (min === null || min < minUnits) errors.min = `The smallest trade must be at least ${formatCoin(minUnits, coin)}.`;
+  if (max === null || max <= 0n) errors.max = `Enter the largest trade in ${coin}, for example ${DEFAULT_RANGE[coin].max}.`;
   else if (min !== null && max < min) errors.max = 'The largest trade cannot be below the smallest.';
 
   // A demo buy offer carries the simulated method the demo seller looks for; real methods are optional then.
@@ -183,17 +212,19 @@ export function buildOfferDocument(params: {
   if (!methods || methods.length > MAX_METHODS) {
     errors.methods = `Name 1 to ${MAX_METHODS - (demo ? 1 : 0)} payment methods, separated by commas, up to ${MAX_METHOD_LENGTH} characters each.`;
   }
-  if (demo && params.demoMaxSats !== undefined && min !== null && min > params.demoMaxSats && !errors.min) {
-    errors.min = `For a demo answer, keep the smallest trade at ${formatBch(params.demoMaxSats)} or less.`;
+  if (demo && params.demoMaxUnits !== undefined && min !== null && min > params.demoMaxUnits && !errors.min) {
+    errors.min = `For a demo answer, keep the smallest trade at ${formatCoin(params.demoMaxUnits, coin)} or less.`;
   }
+  // Without the service's PUSD category there is no token to name: the form waits for the configuration.
+  if (coin === 'PUSD' && !params.pusdCategory) errors.min ??= 'Campfire is still loading the PUSD token. Try again in a moment.';
 
   if (Object.keys(errors).length > 0 || !price || min === null || max === null || !methods) return { ok: false, errors };
 
   const document: OfferDocument = {
     v: 1,
     side: form.side,
-    asset: 'BCH',
-    assetDecimals: 8,
+    asset: coin === 'BCH' ? 'BCH' : params.pusdCategory!.toLowerCase(),
+    assetDecimals: decimals,
     fiat: form.fiat,
     price,
     min: min.toString(),
@@ -223,9 +254,11 @@ export function marginRange(
   offers: { document: ListedOfferDocument }[],
   fiat: string,
   side: 'sell' | 'buy' = 'sell',
+  /** "BCH" or the token category. */
+  asset = 'BCH',
 ): { low: number; high: number } | null {
   const margins = offers
-    .filter((o) => o.document.side === side && o.document.asset === 'BCH' && o.document.fiat === fiat && o.document.price.type === 'floating')
+    .filter((o) => o.document.side === side && o.document.asset.toLowerCase() === asset.toLowerCase() && o.document.fiat === fiat && o.document.price.type === 'floating')
     .map((o) => (o.document.price.type === 'floating' ? o.document.price.marginBps : 0));
   return margins.length === 0 ? null : { low: Math.min(...margins), high: Math.max(...margins) };
 }
