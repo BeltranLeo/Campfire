@@ -21,6 +21,7 @@ import {
   type WalletSpendableUtxo,
   type WalletTransactionRequest,
 } from '../protocol/keys.js';
+import { totalFeeSats, type TradeFee } from '../protocol/fees.js';
 import { computeTradeId, type TradeTerms } from '../protocol/trades.js';
 import type { OfferDocument, Trade } from './api';
 import { spendableBch } from './coins';
@@ -127,13 +128,20 @@ export async function sealPaymentDetails(params: {
   return { encryptedPaymentDetails, paymentDetailsSignature: signPaymentDetails(params.sessionPrivateKey, params.tradeId, encryptedPaymentDetails) };
 }
 
-/** The coins the wallet must hold to deposit this trade: the escrow's value plus the deposit's own fee. */
-export function depositNeeds(trade: Pick<Trade, 'asset' | 'amount'>): bigint {
-  return expectedEscrowFunding(trade).satoshis + DEPOSIT_FEE_RESERVE_SATS;
+/** The coins the wallet must hold to deposit this trade: the escrow's value, the service fees and the deposit's own fee. */
+export function depositNeeds(trade: Pick<Trade, 'asset' | 'amount' | 'fees'>): bigint {
+  return expectedEscrowFunding(trade).satoshis + totalFeeSats(trade.fees) + DEPOSIT_FEE_RESERVE_SATS;
+}
+
+/** Fees are equal when they pay the same roles, addresses and amounts, in any order. */
+function sameFees(a: readonly TradeFee[] | undefined, b: readonly TradeFee[] | undefined): boolean {
+  const key = (fees: readonly TradeFee[] | undefined) =>
+    (fees ?? []).map((f) => `${f.role}:${f.pkh.toLowerCase()}:${f.satoshis}`).sort().join('|');
+  return key(a) === key(b);
 }
 
 /** Throws a sentence for the person if the wallet's coins cannot cover the deposit. */
-export function assertCanDeposit(trade: Pick<Trade, 'asset' | 'amount'>, coins: WalletSpendableUtxo[]): void {
+export function assertCanDeposit(trade: Pick<Trade, 'asset' | 'amount' | 'fees'>, coins: WalletSpendableUtxo[]): void {
   if (trade.asset !== 'BCH') throw new TradeActionError('Depositing PUSD is not available yet.');
   const have = spendableBch(coins);
   const need = depositNeeds(trade);
@@ -191,6 +199,11 @@ export function checkAcceptedTrade(
   }
   if (terms.amount !== trade.amount || terms.asset !== trade.asset || terms.offerTxid !== trade.offerTxid) {
     throw stop('The terms do not match the request.');
+  }
+  // The fees were shown with the request; the terms must not charge anything else. Their addresses and the
+  // cap on BCH trades were already checked with the terms (validateTradeFees).
+  if (!sameFees(terms.fees, trade.fees)) {
+    throw stop('The terms charge different service fees than the ones shown with this request.');
   }
   if (params.offer && terms.arbiterPk.toLowerCase() !== params.offer.arbiter.toLowerCase()) {
     throw stop('The terms name a different arbiter than your offer.');

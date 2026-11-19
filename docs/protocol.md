@@ -250,11 +250,15 @@ When the seller accepts, both clients hold the same trade-terms document:
   "sellerPayoutPkh": "…", "buyerPayoutPkh": "…",
   "sellerSessionPk": "…", "buyerSessionPk": "…",
   "refundTime": 1796109600,
-  "nonce": "…"
+  "nonce": "…",
+  "fees": [
+    { "role": "arbiter", "pkh": "…", "satoshis": "625" },
+    { "role": "oracle", "pkh": "…", "satoshis": "625" }
+  ]
 }
 ```
 
-`tradeId` = SHA-256 of these bytes. It is a constructor parameter of the escrow contract, so the escrow address commits to every term: the price, the oracle that signed it, the fiat amount and the session keys. Anyone holding the document can recompute the address and check it against the chain.
+`tradeId` = SHA-256 of these bytes. It is a constructor parameter of the escrow contract, so the escrow address commits to every term: the price, the oracle that signed it, the fiat amount, the session keys and the service fees (section 5.1). Anyone holding the document can recompute the address and check it against the chain.
 
 **Price quote.** For a floating offer, the oracle signs `SHA-256("CMPF-QUOTE" ‖ pair ‖ price ‖ timestamp)` with its key. Clients verify the signature against the oracle key in the offer before accepting. The contract does not verify the quote; it commits to it through `tradeId`, and the arbiter checks it in a dispute. For a fixed offer, `quote` is omitted and the price comes from the offer.
 
@@ -370,6 +374,20 @@ The same contract handles BCH and any CashToken, because the payout rule copies 
 - PUSD on mainnet: category `2469acc5afa4b10cb5b5c04afb89c3a3ffd61c5da9c01e26d00951cae2a02544`, 2 decimals.
 - Before the buyer is told the escrow is funded, the client checks that a UTXO at the escrow address holds the exact value, category and token amount from the trade terms.
 - Payout addresses for token trades are shown in the token-aware format (`bitcoincash:z…`).
+
+### 5.1 Service fees
+
+The seller pays a fee to the arbiter and, on a floating-price trade, to the price oracle. The fees are extra outputs of the funding transaction, next to the escrow output, so the escrow contract does not change.
+
+- **Rates.** Basis points of the trade's value, one rate per role (0.25% each by default). The administrator changes them with `POST /api/admin/fees` (admin token), from the arbiter console; `GET /api/fees` returns them. Each rate is a whole number between 0 and 500 (5%).
+- **Fixed per trade.** The service computes the fees when the trade is requested, shows them with the request and copies them into the trade terms (`fees`), so they are part of `tradeId`. A later change of rates does not affect a trade already requested.
+- **Value.** A BCH trade is worth its amount. A PUSD trade is worth its dollar amount at the oracle's BCH/USD price at request time. A trade in any other token pays no fee.
+- **Paid in BCH.** Each fee is a P2PKH output, without tokens, to `hash160` of the role's key in the terms (`arbiterPk`, `oraclePk`). If the offer names another arbiter, that arbiter is paid.
+- **Rounding and dust.** Fees round down; a fee below 546 sats is left out.
+- **Fixed-price offers** have no oracle, so they pay no oracle fee.
+- **Checks.** The terms are refused if a fee pays a key other than its role's, appears twice, is below the dust limit, or, on a BCH trade, is above 5% of the amount. The seller's client refuses terms whose fees differ from the ones shown with the request. The service counts the trade as funded only if the funding transaction has an output of at least each fee to its address.
+- **Not refundable.** The fees are paid with the deposit, so they stay paid if the trade is later cancelled or refunded.
+- Trades whose terms have no `fees` field (all trades before this section existed) pay no fee.
 
 ## 6. Payment details and chat
 

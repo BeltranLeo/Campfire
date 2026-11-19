@@ -11,6 +11,7 @@ import {
 import type { NetworkProvider } from 'cashscript';
 import {
   BCH_ASSET,
+  DEFAULT_FEE_RATES,
   MARKER_SATOSHIS,
   PUSD_CATEGORY,
   VERDICT_BUYER,
@@ -20,6 +21,7 @@ import {
   buildRefundSpend,
   buildReleaseRequest,
   computeFiatAmount,
+  computeTradeFees,
   computeTradeId,
   createEscrowContract,
   decryptChatMessage,
@@ -29,10 +31,13 @@ import {
   MAX_CHAT_IMAGE_BYTES,
   MAX_CHAT_MESSAGE_CHARS,
   matchesEscrowFunding,
+  missingFundingFees,
   pkhToCashAddress,
   pkhToLockingBytecode,
   signVerdict,
   toBytes,
+  tradeValueSats,
+  validateFeeRates,
   verifyDerivedPayoutPkh,
   verifyDerivedPubkey,
   verifyOfferAgainstOpReturn,
@@ -40,7 +45,9 @@ import {
   verifyPaymentDetailsSignature,
   verifyPriceQuote,
   verifySignedContractSpend,
+  type FeeRates,
   type OfferDocument,
+  type TradeFee,
   type TradeTerms,
   type VerdictHex,
 } from '../protocol/index.js';
@@ -60,6 +67,7 @@ export const FUNDING_WINDOW_SEC = 1800; // 30 minutes (protocol section 2.2)
 export const DEFAULT_REFUND_DELAY_SEC = 14 * 86_400; // 14 days (protocol section 2.2)
 export const MIN_REFUND_DELAY_SEC = 7 * 86_400;
 export const MAX_REFUND_DELAY_SEC = 30 * 86_400;
+const FEE_RATES_SETTING = 'feeRates';
 
 // What the service pays for when it publishes a buy offer on the buyer's behalf (section 2.2). Identities are
 // hashes of a presented key with no proof of possession, so the limit per identity is easy to get around with a
@@ -576,6 +584,33 @@ export class CampfireService {
     }
   }
 
+  // --- Service fees (protocol section 5.1) ---
+
+  async getFeeRates(): Promise<FeeRates> {
+    const stored = await this.options.storage.getSetting<FeeRates>(FEE_RATES_SETTING);
+    return stored ? { arbiterBps: stored.arbiterBps, oracleBps: stored.oracleBps } : { ...DEFAULT_FEE_RATES };
+  }
+
+  // Only new trades use the new rates: a trade keeps the fees fixed when it was requested.
+  async setFeeRates(rates: FeeRates): Promise<FeeRates> {
+    const next = { arbiterBps: rates?.arbiterBps, oracleBps: rates?.oracleBps };
+    validateFeeRates(next);
+    await this.options.storage.saveSetting(FEE_RATES_SETTING, { ...next, updatedAt: this.nowSeconds() });
+    return next;
+  }
+
+  // The oracle is paid only when the offer floats with the market, so it signed the trade's price. Public so the
+  // demo seller can count the fees before it takes a buy offer.
+  async feesFor(doc: OfferDocument, amount: string): Promise<TradeFee[]> {
+    const rates = await this.getFeeRates();
+    const oraclePk = doc.price.type === 'floating' ? doc.oracle?.toLowerCase() : undefined;
+    if (rates.arbiterBps === 0 && (rates.oracleBps === 0 || !oraclePk)) return [];
+    const isPusd = doc.asset.toLowerCase() === PUSD_CATEGORY;
+    const bchUsd = isPusd ? (await this.options.oracle.createQuote('BCH/USD')).price : undefined;
+    const valueSats = tradeValueSats({ asset: doc.asset, amount, assetDecimals: doc.assetDecimals, bchUsd });
+    return computeTradeFees({ valueSats, rates, arbiterPk: doc.arbiter.toLowerCase(), oraclePk });
+  }
+
   // The open offer a trade is requested from, with the amount checked against its range.
   private async offerToTake(offerTxid: string, side: 'sell' | 'buy', amount: string): Promise<OfferView> {
     const offerView = await this.getOffer(offerTxid);
@@ -661,6 +696,7 @@ export class CampfireService {
       buyerSessionPk: params.buyerSessionPk.toLowerCase(),
       arbiterPk: doc.arbiter.toLowerCase(),
       oraclePk: doc.oracle?.toLowerCase(),
+      fees: await this.feesFor(doc, params.amount),
       isDemo: this.isDemoTrade({ sellerIdentity: offerView.sellerIdentity }),
       createdAt: now,
       updatedAt: now,
@@ -716,6 +752,7 @@ export class CampfireService {
       sellerSessionPk: params.sellerSessionPk.toLowerCase(),
       arbiterPk: doc.arbiter.toLowerCase(),
       oraclePk: doc.oracle?.toLowerCase(),
+      fees: await this.feesFor(doc, params.amount),
       isDemo: this.isDemoTrade({ sellerIdentity: params.sellerIdentity }),
       createdAt: now,
       updatedAt: now,
@@ -764,6 +801,7 @@ export class CampfireService {
       buyerSessionPk: buyer.sessionPk.toLowerCase(),
       refundTime,
       nonce,
+      ...(trade.fees && trade.fees.length > 0 ? { fees: trade.fees } : {}),
     };
 
     const termsJson = JSON.stringify(terms);
@@ -981,6 +1019,16 @@ export class CampfireService {
       throw new Error('The seller must send the encrypted payment details with the deposit');
     }
 
+    // The fees travel in the same transaction as the escrow output (section 5.1). A deposit without them is refused
+    // before it is broadcast: once on the network, the escrow would stay locked until the refund time.
+    const fees = trade.status === 'Accepted' ? trade.terms.fees : undefined;
+    if (params.fundingTxHex && fees && fees.length > 0) {
+      const problem = missingFundingFees(params.fundingTxHex, fees);
+      if (problem) {
+        throw new Error(`${problem}. Nothing was broadcast.`);
+      }
+    }
+
     if (params.fundingTxHex) {
       await this.options.provider.sendRawTransaction(params.fundingTxHex);
     }
@@ -999,6 +1047,13 @@ export class CampfireService {
     }
     if (!matchingUtxo) {
       throw new Error('No UTXO at the escrow address matches the required value and token terms');
+    }
+    if (!params.fundingTxHex && fees && fees.length > 0) {
+      // A deposit made outside this request: the transaction that created the escrow output must pay the fees too.
+      const problem = missingFundingFees(await this.options.provider.getRawTransaction(matchingUtxo.txid), fees);
+      if (problem) {
+        throw new Error(`${problem}. The trade is not counted as funded.`);
+      }
     }
     if (needsDetails) {
       // The deposit is already on the network (it was not sent through this request): the seller sends the

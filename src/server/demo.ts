@@ -37,6 +37,7 @@ import {
   deriveSharedTradeKey,
   derivePayoutPkhFromXpub,
   expectedEscrowFunding,
+  totalFeeSats,
   derivePubkeyFromXpub,
   encryptChatMessage,
   encryptPaymentDetails,
@@ -405,8 +406,9 @@ export class DemoSeller {
 
   // Declines before accepting when the bot cannot pay the escrow, so an empty bot does not keep
   // trades stuck in Accepted (holding active slots) until the funding window ends.
-  private async checkBalance(trade: Pick<StoredTrade, 'asset' | 'amount'>): Promise<void> {
+  private async checkBalance(trade: Pick<StoredTrade, 'asset' | 'amount' | 'fees'>): Promise<void> {
     const expected = expectedEscrowFunding(trade);
+    const feeSats = totalFeeSats(trade.fees);
     const utxos = await this.spendableUtxos();
     const sats = utxos.reduce((sum, u) => sum + u.satoshis, 0n);
     const tokens = expected.token
@@ -415,7 +417,7 @@ export class DemoSeller {
           .reduce((sum, u) => sum + u.token!.amount, 0n)
       : 0n;
     // 2,000 sats of margin for the funding fee and the change outputs.
-    if (sats < expected.satoshis + 2000n || (expected.token && tokens < expected.token.amount)) {
+    if (sats < expected.satoshis + feeSats + 2000n || (expected.token && tokens < expected.token.amount)) {
       throw new DemoLimitError(
         'The demo seller has run out of funds for this offer. Please try again later.',
       );
@@ -691,7 +693,9 @@ export class DemoSeller {
       if (amount > BigInt(doc.max) || amount > botMax) return null;
       try {
         await this.checkLimits();
-        await this.checkBalance({ asset: doc.asset, amount: amount.toString() });
+        // The fees are counted now: once the buyer accepts, the bot must be able to pay them with the deposit.
+        const fees = await this.options.service.feesFor(doc, amount.toString());
+        await this.checkBalance({ asset: doc.asset, amount: amount.toString(), fees });
         const wallet = this.options.wallet;
         const recordId = binToHex(randomBytes(16));
         const { defiIndex, receiveIndex } = await this.nextIndices();

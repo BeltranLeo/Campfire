@@ -3,6 +3,7 @@ import { setArbiterToken, useArbiterToken } from '../arbiterToken';
 import { assetInfo } from '../assets';
 import { ArbiterTokenForm } from '../components/ArbiterTokenForm';
 import { Button } from '../components/Button';
+import { FeeRatesForm } from '../components/FeeRatesForm';
 import { ProvenanceTag } from '../components/Provenance';
 import { EmptyState, Notice, Skeleton } from '../components/States';
 import { useConfig } from '../config';
@@ -28,7 +29,15 @@ export function ArbiterList() {
         </p>
       </div>
       {token ? (
-        <Disputes />
+        <>
+          <Disputes />
+          <section className="cf-card" data-flush>
+            <div className="cf-card__section cf-stack">
+              <h2 className="cf-heading">Service fees</h2>
+              <FeeRatesForm token={token} />
+            </div>
+          </section>
+        </>
       ) : (
         <section className="cf-card" data-flush>
           <div className="cf-card__section cf-stack">

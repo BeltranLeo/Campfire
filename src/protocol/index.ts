@@ -4,3 +4,4 @@ export * from './trades.js';
 export * from './crypto.js';
 export * from './chatImage.js';
 export * from './escrow.js';
+export * from './fees.js';

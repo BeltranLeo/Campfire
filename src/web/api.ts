@@ -1,6 +1,8 @@
 // Typed access to the Campfire API on the same origin. Errors arrive as { error } with a message
 // that is already written for display, so ApiError carries it unchanged.
 
+import type { TradeFee } from '../protocol/fees.js';
+
 export class ApiError extends Error {
   constructor(
     readonly status: number,
@@ -47,6 +49,14 @@ async function request<T>(method: 'GET' | 'POST', path: string, body?: unknown, 
 
 export const apiGet = <T>(path: string, token?: string) => request<T>('GET', path, undefined, token);
 export const apiPost = <T>(path: string, body: unknown, token?: string) => request<T>('POST', path, body, token);
+
+/** The fee rates new trades use, as GET /api/fees returns them. */
+export interface FeeRatesInfo {
+  arbiterBps: number;
+  oracleBps: number;
+  maxBps: number;
+  dustLimitSats: number;
+}
 
 // --- Shapes used by the web app (see src/server/http.ts and src/server/service.ts) ---
 
@@ -193,6 +203,8 @@ export interface Trade extends TradeSummary {
   sellerPayoutPkh?: string;
   arbiterPk: string;
   oraclePk?: string;
+  /** Service fees the seller pays in the deposit, fixed when the trade was requested (protocol section 5.1). */
+  fees?: TradeFee[];
   refundTime?: number;
   termsJson?: string;
   escrowAddress?: string;

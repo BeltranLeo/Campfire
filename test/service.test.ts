@@ -32,6 +32,7 @@ import {
   buildFundEscrowTransaction,
   buildPublishOfferTransaction,
   buildReleaseRequest,
+  computeTradeFees,
   createEscrowContract,
   decryptPaymentDetails,
   derivePayoutPkhFromXpub,
@@ -41,10 +42,14 @@ import {
   encryptChatMessage,
   signChatMessage,
   encryptPaymentDetails,
+  feePkh,
   generateSessionKeyPair,
+  missingFundingFees,
   pkhToCashAddress,
   pkhToLockingBytecode,
   tagWalletUtxos,
+  tradeValueSats,
+  validateTradeFees,
   type OfferDocument,
 } from '../src/protocol/index.js';
 import {
@@ -733,5 +738,165 @@ describe('CampfireService & HTTP API end-to-end lifecycle', () => {
     expect(expiredCheck.data.trade.status).toBe('ResolvedSeller');
     expect(expiredCheck.data.trade.verdict).toBe(VERDICT_SELLER);
     expect(expiredCheck.data.trade.settlementTxid).toMatch(/^[0-9a-f]{64}$/);
+  });
+});
+
+describe('Service fees (protocol section 5.1)', () => {
+  // Publishes a floating BCH offer, takes 0.01 BCH of it and accepts, so the terms carry the fees.
+  async function acceptedFloatingTrade(ctx: ReturnType<typeof setupTestContext>) {
+    const sellerId = (await ctx.jsonReq('POST', '/api/identities', { defiXpub: seller.defiXpub, receiveXpub: seller.receiveXpub })).data.identity;
+    const buyerId = (await ctx.jsonReq('POST', '/api/identities', { defiXpub: buyer.defiXpub, receiveXpub: buyer.receiveXpub })).data.identity;
+    const cfg = await ctx.jsonReq('GET', '/api/config');
+    const offerDoc: OfferDocument = {
+      v: 1,
+      side: 'sell',
+      asset: BCH_ASSET,
+      assetDecimals: BCH_DECIMALS,
+      fiat: 'ARS',
+      price: { type: 'floating', pair: 'BCH/ARS', marginBps: 0 },
+      min: '100000',
+      max: '5000000',
+      paymentMethods: ['bank-transfer'],
+      paymentWindowSec: 3600,
+      terms: 'Bank transfer',
+      expiresAt: ctx.getNow() + 86_400,
+      arbiter: cfg.data.arbiterPk,
+      oracle: cfg.data.oraclePk,
+    };
+    const addrMap = deriveWalletAddressMap({ receiveXpub: seller.receiveXpub, count: 5 });
+    const sign = (utxos: Awaited<ReturnType<typeof ctx.provider.getUtxos>>) =>
+      tagWalletUtxos(utxos, addrMap).map((u) => ({ ...u, signer: new SignatureTemplate(seller.receivePriv(u.keyIndex)) }));
+    ctx.provider.addUtxo(seller.receiveAddr(0), randomUtxo({ satoshis: 3_000_000n }));
+    const pubTx = buildPublishOfferTransaction({
+      provider: ctx.provider,
+      document: offerDoc,
+      utxos: sign(await ctx.provider.getUtxos(seller.receiveAddr(0))),
+      markerAddress: seller.receiveAddr(1),
+      changeAddress: seller.receiveAddr(0),
+    });
+    const offerTxid = (
+      await ctx.jsonReq('POST', '/api/offers', { sellerIdentity: sellerId, offerJson: pubTx.offerJson, offerTxHex: pubTx.hex, markerReceiveIndex: 1 })
+    ).data.offer.offerTxid;
+
+    const buyerSession = generateSessionKeyPair();
+    const take = await ctx.jsonReq<{ trade: StoredTrade }>('POST', '/api/trades', {
+      offerTxid,
+      buyerIdentity: buyerId,
+      amount: '1000000',
+      buyerPk: buyer.defiPkHex(0),
+      buyerDefiIndex: 0,
+      buyerPayoutPkh: buyer.receivePkhHex(0),
+      buyerReceiveIndex: 0,
+      buyerSessionPk: buyerSession.publicKey,
+    });
+    const sellerSession = generateSessionKeyPair();
+    const accept = await ctx.jsonReq<{ trade: StoredTrade }>('POST', `/api/trades/${take.data.trade.id}/accept`, {
+      sellerIdentity: sellerId,
+      sellerPk: seller.defiPkHex(0),
+      sellerDefiIndex: 0,
+      sellerPayoutPkh: seller.receivePkhHex(0),
+      sellerReceiveIndex: 0,
+      sellerSessionPk: sellerSession.publicKey,
+      encryptedPaymentDetails: await encryptPaymentDetails(sellerSession.privateKey, buyerSession.publicKey, 'alias: campfire'),
+    });
+    expect(accept.status).toBe(200);
+    const trade = accept.data.trade;
+    const contract = createEscrowContract(trade.terms!, trade.tradeId!, ctx.provider);
+    const coins = sign(await ctx.provider.getUtxos(seller.receiveAddr(0)));
+    return { take: take.data.trade, trade, contract, coins, cfg: cfg.data };
+  }
+
+  it('lets only the admin change the rates and refuses rates above the cap', async () => {
+    const ctx = setupTestContext();
+    expect((await ctx.jsonReq('GET', '/api/fees')).data).toMatchObject({ arbiterBps: 25, oracleBps: 25, maxBps: 500, dustLimitSats: 546 });
+
+    const anonymous = await ctx.jsonReq('POST', '/api/admin/fees', { arbiterBps: 100, oracleBps: 0 });
+    expect(anonymous.status).toBe(403);
+    const tooHigh = await ctx.jsonReq('POST', '/api/admin/fees', { arbiterBps: 501, oracleBps: 0 }, ADMIN);
+    expect(tooHigh.status).toBe(400);
+    const fractional = await ctx.jsonReq('POST', '/api/admin/fees', { arbiterBps: 12.5, oracleBps: 0 }, ADMIN);
+    expect(fractional.status).toBe(400);
+
+    const saved = await ctx.jsonReq('POST', '/api/admin/fees', { arbiterBps: 100, oracleBps: 0 }, ADMIN);
+    expect(saved.status).toBe(200);
+    expect((await ctx.jsonReq('GET', '/api/fees')).data).toMatchObject({ arbiterBps: 100, oracleBps: 0 });
+  });
+
+  it('commits the fees in the terms and counts the trade as funded only when the deposit pays them', async () => {
+    const ctx = setupTestContext();
+    const { take, trade, contract, coins, cfg } = await acceptedFloatingTrade(ctx);
+
+    // 0.25% of 1,000,000 sats to each of the arbiter and the oracle, shown with the request and fixed in the terms.
+    const expected = [
+      { role: 'arbiter', pkh: feePkh(cfg.arbiterPk), satoshis: '2500' },
+      { role: 'oracle', pkh: feePkh(cfg.oraclePk), satoshis: '2500' },
+    ];
+    expect(take.fees).toEqual(expected);
+    expect(trade.terms!.fees).toEqual(expected);
+
+    // Changing the rates afterwards does not touch a trade that was already requested.
+    await ctx.jsonReq('POST', '/api/admin/fees', { arbiterBps: 500, oracleBps: 500 }, ADMIN);
+    expect((await ctx.service.getTrade(trade.id))!.terms!.fees).toEqual(expected);
+
+    // A deposit with the right escrow output but without the fees is not accepted.
+    const withoutFees = buildFundEscrowTransaction({
+      contract,
+      terms: { ...trade.terms!, fees: undefined },
+      utxos: coins,
+      changeAddress: seller.receiveAddr(0),
+    });
+    const refused = await ctx.jsonReq('POST', `/api/trades/${trade.tradeId}/funding`, { fundingTxHex: withoutFees.hex });
+    expect(refused.status).toBe(400);
+    expect(refused.data.error).toMatch(/does not pay the arbiter fee\. Nothing was broadcast/);
+    expect((await ctx.service.getTrade(trade.id))!.status).toBe('Accepted');
+    expect(await contract.getUtxos()).toEqual([]);
+
+    // The same deposit made outside Campfire is on-chain, but it still does not count as funded.
+    await ctx.provider.sendRawTransaction(withoutFees.hex);
+    const outside = await ctx.jsonReq('POST', `/api/trades/${trade.tradeId}/funding`, {});
+    expect(outside.status).toBe(400);
+    expect(outside.data.error).toMatch(/does not pay the arbiter fee\. The trade is not counted as funded/);
+  });
+
+  it('records a deposit that pays the fees in the same transaction', async () => {
+    const ctx = setupTestContext();
+    const { trade, contract, coins } = await acceptedFloatingTrade(ctx);
+    const fundTx = buildFundEscrowTransaction({ contract, terms: trade.terms!, utxos: coins, changeAddress: seller.receiveAddr(0) });
+    expect(missingFundingFees(fundTx.hex, trade.terms!.fees)).toBeNull();
+    const funded = await ctx.jsonReq<{ trade: StoredTrade }>('POST', `/api/trades/${trade.tradeId}/funding`, { fundingTxHex: fundTx.hex });
+    expect(funded.status).toBe(200);
+    expect(funded.data.trade.status).toBe('Funded');
+  });
+});
+
+describe('Fee computation', () => {
+  const arbiterPk = binToHex(secp256k1.derivePublicKeyCompressed(arbiterSk) as Uint8Array);
+  const oraclePk = binToHex(secp256k1.derivePublicKeyCompressed(oracleSk) as Uint8Array);
+  const rates = { arbiterBps: 25, oracleBps: 25 };
+
+  it('pays the oracle only when there is one, and leaves out fees below the dust limit', () => {
+    expect(computeTradeFees({ valueSats: 1_000_000n, rates, arbiterPk })).toEqual([
+      { role: 'arbiter', pkh: feePkh(arbiterPk), satoshis: '2500' },
+    ]);
+    // 0.25% of 200,000 sats is 500 sats, below 546: no fee at all.
+    expect(computeTradeFees({ valueSats: 200_000n, rates, arbiterPk, oraclePk })).toEqual([]);
+    expect(computeTradeFees({ valueSats: null, rates, arbiterPk, oraclePk })).toEqual([]);
+  });
+
+  it('values PUSD in BCH at the BCH/USD price and other tokens at nothing', () => {
+    // 100.00 PUSD at 450 USD/BCH is 0.22222222 BCH.
+    expect(tradeValueSats({ asset: PUSD_CATEGORY, amount: '10000', assetDecimals: PUSD_DECIMALS, bchUsd: '450.00' })).toBe(22_222_222n);
+    expect(tradeValueSats({ asset: BCH_ASSET, amount: '123', assetDecimals: BCH_DECIMALS })).toBe(123n);
+    expect(tradeValueSats({ asset: 'ab'.repeat(32), amount: '10000', assetDecimals: 2 })).toBeNull();
+    expect(() => tradeValueSats({ asset: PUSD_CATEGORY, amount: '10000', assetDecimals: PUSD_DECIMALS })).toThrow(/BCH\/USD/);
+  });
+
+  it('refuses terms whose fee pays another key or is above the cap', () => {
+    const base = { asset: BCH_ASSET, amount: '1000000', arbiterPk, oraclePk };
+    expect(() => validateTradeFees({ ...base, fees: [{ role: 'arbiter', pkh: feePkh(arbiterPk), satoshis: '2500' }] })).not.toThrow();
+    expect(() => validateTradeFees({ ...base, fees: [{ role: 'arbiter', pkh: feePkh(oraclePk), satoshis: '2500' }] })).toThrow(/does not pay/);
+    expect(() => validateTradeFees({ ...base, fees: [{ role: 'arbiter', pkh: feePkh(arbiterPk), satoshis: '50001' }] })).toThrow(/above 5%/);
+    expect(() => validateTradeFees({ ...base, fees: [{ role: 'arbiter', pkh: feePkh(arbiterPk), satoshis: '500' }] })).toThrow(/dust/);
+    expect(() => validateTradeFees({ ...base, oraclePk: undefined, fees: [{ role: 'oracle', pkh: feePkh(oraclePk), satoshis: '2500' }] })).toThrow(/oracle/);
   });
 });

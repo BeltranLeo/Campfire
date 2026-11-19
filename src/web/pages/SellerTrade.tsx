@@ -2,6 +2,7 @@ import { useState, type ReactNode } from 'react';
 import { expectedEscrowFunding } from '../../protocol/escrow.js';
 import { pkhToCashAddress } from '../../protocol/keys.js';
 import { aliasFor } from '../alias';
+import type { TradeFee } from '../../protocol/fees.js';
 import { apiGet, apiPost, type Offer, type Reputation, type Trade } from '../api';
 import { ActionCard } from '../components/ActionCard';
 import { Button } from '../components/Button';
@@ -368,6 +369,7 @@ export function SellerAction(props: { trade: Trade; amount: string; fiat: string
             You lock {deposit}: {formatAmount(trade.amount, BCH)} for the buyer plus a {formatBch(1000n)} fee budget for the closing transaction.
           </p>
         )}
+        <FeeNote fees={trade.fees} />
         {walletNotices}
         {failure}
         <div className="s-actions">
@@ -415,6 +417,7 @@ export function SellerAction(props: { trade: Trade; amount: string; fiat: string
                 closing transaction.
               </Notice>
             )}
+            <FeeNote fees={trade.fees} />
             {expired && (
               <Notice tone="attention" title="This request expired">
                 The signed quote ran out. The request is dropped and nothing was locked.
@@ -761,3 +764,16 @@ export function SellerResult({ trade, amount }: { trade: Trade; amount: string }
 const capitalize = (text: string) => text.charAt(0).toUpperCase() + text.slice(1);
 /** "is" for the BCH, "are" for the coins of a token. */
 const lockVerb = (asset: string) => (asset === 'BCH' ? 'is' : 'are');
+
+// Invented copy: the design predates the service fees (protocol section 5.1).
+/** The service fees the deposit pays besides the escrow, fixed when the trade was requested. */
+function FeeNote({ fees }: { fees?: TradeFee[] }) {
+  if (!fees || fees.length === 0) return null;
+  const parts = fees.map((f) => `${formatBch(BigInt(f.satoshis))} to the ${f.role === 'oracle' ? 'price oracle' : 'arbiter'}`);
+  return (
+    <p className="cf-small cf-muted">
+      The same transaction pays the service fees: {parts.join(' and ')}. They are paid in BCH and are not returned if the trade is
+      cancelled or refunded.
+    </p>
+  );
+}

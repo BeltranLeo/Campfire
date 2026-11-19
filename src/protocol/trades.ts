@@ -8,6 +8,7 @@ import {
   sha256,
   utf8ToBin,
 } from '@bitauth/libauth';
+import { validateTradeFees, type TradeFee } from './fees.js';
 import { isBytes20Hex, isBytes32Hex, isCompressedPubkeyHex, toBytes } from './keys.js';
 import {
   BCH_ASSET,
@@ -47,6 +48,9 @@ export interface TradeTerms {
   buyerSessionPk: string;
   refundTime: number;
   nonce: string;
+  // Fee outputs the seller pays in the funding transaction (protocol section 5.1). Absent on trades from
+  // before fees existed, and on trades too small for any fee.
+  fees?: TradeFee[];
 }
 
 const POSITIVE_INT_RE = /^[1-9][0-9]*$/;
@@ -204,6 +208,7 @@ export function validateTradeTerms(terms: TradeTerms): void {
       throw new Error('Invalid oracle signature on price quote');
     }
   }
+  validateTradeFees(terms);
 }
 
 // Validates the trade-terms JSON bytes and returns their 32-byte SHA-256 (`tradeId`).

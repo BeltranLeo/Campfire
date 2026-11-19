@@ -3,10 +3,13 @@
 import { timingSafeEqual } from 'node:crypto';
 import {
   BCH_DECIMALS,
+  FEE_DUST_LIMIT_SATS,
+  MAX_FEE_BPS,
   PUSD_CATEGORY,
   PUSD_DECIMALS,
   VERDICT_BUYER,
   VERDICT_SELLER,
+  type FeeRates,
   type VerdictHex,
 } from '../protocol/index.js';
 import { DemoLimitError, type DemoAsset, type DemoSeller } from './demo.js';
@@ -81,6 +84,19 @@ export function createApiHandler(deps: {
           pusdDecimals: PUSD_DECIMALS,
           demoSellerIdentity: service.demoSellerIdentity ?? null,
         });
+      }
+
+      // GET /api/fees: the fee rates new trades use (protocol section 5.1).
+      if (method === 'GET' && path === '/api/fees') {
+        return jsonResponse({ ...(await service.getFeeRates()), maxBps: MAX_FEE_BPS, dustLimitSats: Number(FEE_DUST_LIMIT_SATS) });
+      }
+
+      // POST /api/admin/fees (admin): changes the rates. Trades already requested keep their fees.
+      if (method === 'POST' && path === '/api/admin/fees') {
+        requireAdmin(req);
+        const body = await readJson<FeeRates>(req);
+        const rates = await service.setFeeRates(body);
+        return jsonResponse({ ...rates, maxBps: MAX_FEE_BPS, dustLimitSats: Number(FEE_DUST_LIMIT_SATS) });
       }
 
       // POST /api/identities

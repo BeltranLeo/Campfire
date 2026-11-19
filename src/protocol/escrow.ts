@@ -13,11 +13,13 @@ import {
   type Unlocker,
 } from 'cashscript';
 import {
+  binToHex,
   createVirtualMachineBch2026,
   decodeTransactionUnsafe,
   hexToBin,
   stringify,
 } from '@bitauth/libauth';
+import { totalFeeSats } from './fees.js';
 import artifactJson from '../../contracts/CampfireEscrow.json' with { type: 'json' };
 import {
   formatWalletTransactionRequest,
@@ -316,7 +318,7 @@ export function buildRefundSpend(params: {
 // Builds the seller's funding transaction for either a BCH or a CashToken (PUSD) escrow (protocol section 5).
 export function buildFundEscrowTransaction(params: {
   contract: Contract;
-  terms: Pick<TradeTerms, 'asset' | 'amount'>;
+  terms: Pick<TradeTerms, 'asset' | 'amount' | 'fees'>;
   utxos: WalletSpendableUtxo[];
   changeAddress: string;
   tokenChangeAddress?: string;
@@ -325,17 +327,21 @@ export function buildFundEscrowTransaction(params: {
 }): WalletTransactionRequest {
   const expected = expectedEscrowFunding(params.terms);
   const feeRate = params.feeRate ?? 1.0;
+  // The service fees are paid in BCH next to the escrow output, whatever the escrowed asset (section 5.1).
+  const feeOutputs = (params.terms.fees ?? []).map((f) => ({ to: pkhToLockingBytecode(f.pkh), amount: BigInt(f.satoshis) }));
+  const feeTotal = totalFeeSats(params.terms.fees);
 
   if (!expected.token) {
     const bchPool = params.utxos.filter((u) => !u.token);
     const totalAvailable = bchPool.reduce((sum, u) => sum + u.satoshis, 0n);
-    const target =
-      totalAvailable >= expected.satoshis + 1000n ? expected.satoshis + 1000n : expected.satoshis + 250n;
+    const outgoing = expected.satoshis + feeTotal;
+    const target = totalAvailable >= outgoing + 1000n ? outgoing + 1000n : outgoing + 250n;
     const { utxos: selected } = gatherBchUtxos(bchPool, target);
 
     const builder = new TransactionBuilder({ provider: params.contract.provider })
       .addInputs(selected.map(toUnlockableWalletUtxo))
       .addOutput({ to: params.contract.address, amount: expected.satoshis })
+      .addOutputs(feeOutputs)
       .addBchChangeOutputIfNeeded({ to: params.changeAddress, feeRate });
 
     return formatWalletTransactionRequest(
@@ -358,8 +364,8 @@ export function buildFundEscrowTransaction(params: {
     expected.token.amount,
   );
   const tokenInputSats = tokenInputs.reduce((sum, u) => sum + u.satoshis, 0n);
-  const neededBchSats = expected.satoshis + 2000n > tokenInputSats
-    ? expected.satoshis + 2000n - tokenInputSats
+  const neededBchSats = expected.satoshis + feeTotal + 2000n > tokenInputSats
+    ? expected.satoshis + feeTotal + 2000n - tokenInputSats
     : 0n;
 
   const bchInputs =
@@ -373,6 +379,7 @@ export function buildFundEscrowTransaction(params: {
       amount: expected.satoshis,
       token: expected.token,
     })
+    .addOutputs(feeOutputs)
     .addTokenChangeOutputIfNeeded({
       category: expected.token.category,
       to: params.tokenChangeAddress,
@@ -387,3 +394,27 @@ export function buildFundEscrowTransaction(params: {
   );
 }
 
+
+/**
+ * Checks that a funding transaction pays every fee of the terms: for each one, an output of at least its
+ * satoshis, without tokens, to its P2PKH address. Returns the problem, or null when every fee is paid.
+ */
+export function missingFundingFees(fundingTxHex: string, fees: TradeTerms['fees']): string | null {
+  if (!fees || fees.length === 0) return null;
+  let outputs: ReturnType<typeof decodeTransactionUnsafe>['outputs'];
+  try {
+    outputs = decodeTransactionUnsafe(hexToBin(fundingTxHex)).outputs;
+  } catch {
+    return 'The funding transaction cannot be decoded';
+  }
+  const used = new Set<number>();
+  for (const fee of fees) {
+    const lockingHex = binToHex(pkhToLockingBytecode(fee.pkh));
+    const index = outputs.findIndex(
+      (o, i) => !used.has(i) && !o.token && binToHex(o.lockingBytecode) === lockingHex && o.valueSatoshis >= BigInt(fee.satoshis),
+    );
+    if (index === -1) return `The funding transaction does not pay the ${fee.role} fee`;
+    used.add(index);
+  }
+  return null;
+}
