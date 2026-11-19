@@ -30,7 +30,7 @@ export function Landing() {
       <section className="s-hero">
         <div className="cf-stack">
           <h1>Buy or sell Bitcoin Cash directly with another person</h1>
-          <p className="cf-muted" style={{ fontSize: 17, lineHeight: '26px', maxWidth: 520 }}>
+          <p className="cf-muted s-herolead">
             No exchange holds your money. A contract on the Bitcoin Cash network locks the seller’s coins until the payment
             is done.
           </p>

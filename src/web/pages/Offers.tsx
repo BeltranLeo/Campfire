@@ -55,6 +55,7 @@ export function Offers() {
   const [chosenMethod, setMethod] = useState('');
   // What the visitor wants to pay (buying) or sell (selling). Component state only: it is a question, not a setting.
   const [amount, setAmount] = useState('');
+  const [filtersOpen, setFiltersOpen] = useState(false);
   const clearFilters = () => {
     setCoin('');
     setFiat('');
@@ -79,6 +80,8 @@ export function Offers() {
   const coin = coinOptions.includes(chosenCoin) ? chosenCoin : '';
   const fiat = fiatOptions.includes(chosenFiat) ? chosenFiat : '';
   const method = methodOptions.includes(chosenMethod) ? chosenMethod : '';
+
+  const activeFilters = [coin, fiat, method].filter(Boolean).length;
 
   const filtered = sideOffers
     .map((offer) => ({ offer, asset: assetInfo(offer.document.asset, offer.document.assetDecimals, config) }))
@@ -140,53 +143,26 @@ export function Offers() {
 
   return (
     <main className="s-main">
-      <div className="s-pagehead">
+      {/* Title and side in one row, so the list starts high on a phone. */}
+      <div className="s-pagehead o-head">
         <h1 className="cf-display">Offers</h1>
-      </div>
-
-      <div className="s-toolbar">
         <div className="cf-seg" role="group" aria-label="What do you want to do">
           <button type="button" aria-pressed={intent === 'buy'} onClick={() => switchTo('buy')}>
-            I want to buy
+            Buy
           </button>
           <button type="button" aria-pressed={intent === 'sell'} onClick={() => switchTo('sell')}>
-            I want to sell
+            Sell
           </button>
         </div>
       </div>
-      {/* What the choice means in one sentence: who sends what, and what keeps the visitor safe on that side. */}
-      <p className="s-intent">
+      {/* What the choice means in one short sentence: who sends what, and what keeps the visitor safe on that side. */}
+      <p className="s-intent cf-small cf-muted">
         {intent === 'buy'
-          ? `You send ${fiat || 'money'} directly to the seller. Their ${coin || 'coins'} ${coin ? 'is' : 'are'} locked in a contract before you pay, and ${coin ? 'goes' : 'go'} to your wallet when they confirm your payment.`
-          : `The buyer sends you ${fiat || 'money'} directly. You lock your ${coin || 'coins'} in a contract only after you accept their request, and release ${coin ? 'it' : 'them'} when the payment arrives.`}
+          ? `You pay the seller directly. Their ${coin || 'coins'} ${coin ? 'is' : 'are'} locked in a contract before you pay.`
+          : `The buyer pays you directly. You lock your ${coin || 'coins'} only after you accept their request.`}
       </p>
-      {/* Each filter says which side of the trade it describes, in the same words as the columns below. */}
-      <div className="s-filters">
-        <Filter
-          id="offers-coin"
-          label={intent === 'buy' ? 'You get' : 'You give'}
-          any="Any coin"
-          value={coin}
-          options={coinOptions}
-          onChange={setCoin}
-        />
-        <Filter
-          id="offers-fiat"
-          label={intent === 'buy' ? 'You pay in' : 'You get paid in'}
-          any="Any currency"
-          value={fiat}
-          options={fiatOptions}
-          onChange={setFiat}
-        />
-        <Filter
-          id="offers-method"
-          label={intent === 'buy' ? 'You pay by' : 'You get paid by'}
-          any="Any method"
-          value={method}
-          options={methodOptions}
-          optionLabel={paymentMethodLabel}
-          onChange={setMethod}
-        />
+      {/* The amount is the question most visitors have, so it stays out; the three filters fold behind one button. */}
+      <div className="o-ask">
         {!showSkeleton && !failed && sideOffers.length > 0 && (intent === 'sell' || payFiat) && (
           <div className="cf-field o-amount">
             <label htmlFor="offers-amount">{intent === 'buy' ? 'I want to pay' : 'I want to sell'}</label>
@@ -210,11 +186,45 @@ export function Offers() {
             )}
           </div>
         )}
+        <button
+          type="button"
+          className="cf-btn o-filterbtn"
+          aria-expanded={filtersOpen}
+          aria-controls="offers-filters"
+          onClick={() => setFiltersOpen(!filtersOpen)}
+        >
+          {activeFilters ? `Filters (${activeFilters})` : 'Filters'}
+        </button>
       </div>
-      {intent === 'sell' && !showSkeleton && !failed && (
-        <Link className="o-postlink" to="/offers/new">
-          Or post your own offer
-        </Link>
+      {filtersOpen && (
+        // Each filter says which side of the trade it describes, in the same words as the columns below.
+        <div className="s-filters" id="offers-filters">
+          <Filter
+            id="offers-coin"
+            label={intent === 'buy' ? 'You get' : 'You give'}
+            any="Any coin"
+            value={coin}
+            options={coinOptions}
+            onChange={setCoin}
+          />
+          <Filter
+            id="offers-fiat"
+            label={intent === 'buy' ? 'You pay in' : 'You get paid in'}
+            any="Any currency"
+            value={fiat}
+            options={fiatOptions}
+            onChange={setFiat}
+          />
+          <Filter
+            id="offers-method"
+            label={intent === 'buy' ? 'You pay by' : 'You get paid by'}
+            any="Any method"
+            value={method}
+            options={methodOptions}
+            optionLabel={paymentMethodLabel}
+            onChange={setMethod}
+          />
+        </div>
       )}
       {demo && !showSkeleton && !failed && (
         <div className="cf-simbox o-demo">
@@ -225,10 +235,17 @@ export function Offers() {
           </Button>
         </div>
       )}
-      <span className="cf-small cf-muted">
-        {status}
-        {updated}
-      </span>
+      <div className="o-status">
+        <span className="cf-small cf-muted">
+          {status}
+          {updated}
+        </span>
+        {intent === 'sell' && !showSkeleton && !failed && (
+          <Link className="o-postlink" to="/offers/new">
+            Or post your own offer
+          </Link>
+        )}
+      </div>
 
       {showSkeleton ? (
         <section className="cf-card" data-flush aria-busy="true">

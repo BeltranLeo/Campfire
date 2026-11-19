@@ -18,3 +18,16 @@
 /* A compact strip: it only points at the demo offer, whose page asks for a wallet itself. */
 .o-demo { display: flex; align-items: center; gap: var(--space-3); padding: var(--space-2) var(--space-3); border-radius: var(--radius-md); }
 .o-demotext { flex: 1; min-width: 0; font-size: 14px; line-height: 20px; }
+
+/* Title and the buy / sell switch share a row; the amount and the Filters button share the next. */
+.o-head { flex-direction: row; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: var(--space-3); }
+.o-ask { display: flex; align-items: flex-end; gap: var(--space-3); }
+.o-ask > .o-amount { flex: 1; }
+.o-ask > .o-filterbtn { flex: none; margin-left: auto; height: 44px; padding-top: 0; padding-bottom: 0; }
+.o-status { display: flex; align-items: baseline; justify-content: space-between; flex-wrap: wrap; gap: var(--space-1) var(--space-3); }
+.o-top { display: flex; align-items: center; flex-wrap: wrap; gap: 2px var(--space-2); }
+/* On a phone the avatar (decoration: the initials repeat the name) gives its width to the text, so a row keeps to three lines. */
+@container s-main (max-width: 420px) {
+  .o-row { grid-template-columns: minmax(0, 1fr) auto; }
+  .o-row > .o-avatar { display: none; }
+}

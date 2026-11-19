@@ -34,23 +34,21 @@ export function OfferRow(props: OfferRowProps) {
         {props.initials}
       </span>
       <div className="o-main">
-        <span className="o-headline" data-muted={props.headlineMuted || undefined}>
-          {props.headline}
+        {/* Three lines at most: what you get (with the Simulated tag of a demo offer), who and how fast, how and how much. */}
+        <span className="o-top">
+          <span className="o-headline" data-muted={props.headlineMuted || undefined}>
+            {props.headline}
+          </span>
+          {props.isDemo && <ProvenanceTag kind="sim" />}
         </span>
         <span className="o-line">
           {props.alias}
-          {trades}
-          {props.isDemo && (
-            <>
-              {' '}
-              <ProvenanceTag kind="sim" />
-            </>
-          )}
+          {trades} · {props.paymentWindow}
         </span>
         <span className="o-line">
-          {props.methods} · {props.paymentWindow}
+          {props.methods}
+          {props.range && ` · ${props.range}`}
         </span>
-        {props.range && <span className="o-line">{props.range}</span>}
       </div>
       <div className="o-cta">{props.action}</div>
     </div>
@@ -61,7 +59,9 @@ export function OfferRow(props: OfferRowProps) {
 export function OfferRowSkeleton() {
   return (
     <div className="o-row">
-      <Skeleton width={36} height={36} style={{ borderRadius: '50%' }} />
+      <span className="o-avatar" aria-hidden="true">
+        <Skeleton width={34} height={34} style={{ borderRadius: '50%' }} />
+      </span>
       <div className="o-main">
         <Skeleton width="55%" />
         <Skeleton width="40%" />
