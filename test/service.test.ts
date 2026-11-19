@@ -660,6 +660,21 @@ describe('CampfireService & HTTP API end-to-end lifecycle', () => {
     expect((await newerThan(arbChat.data.decrypted[0].createdAt)).data.decrypted).toHaveLength(1);
     expect((await newerThan(arbChat.data.decrypted[0].createdAt + 1)).data.decrypted).toEqual([]);
 
+    // A party posts a message that is validly signed but encrypted with another key. It used to make the whole chat
+    // undecryptable for the arbiter; now only that message is unreadable, and its author is still shown.
+    const wrongKey = deriveSharedTradeKey(buyerSession.privateKey, generateSessionKeyPair().publicKey);
+    const junk = await encryptChatMessage(wrongKey, 'unreadable for the arbiter');
+    const junkRes = await ctx.jsonReq('POST', `/api/trades/${acc1.trade.tradeId}/chat`, {
+      senderIdentity: buyerId,
+      ciphertext: junk,
+      signature: signChatMessage(buyerSession.privateKey, acc1.trade.tradeId, junk),
+    });
+    expect(junkRes.status).toBe(201);
+    const withJunk = await ctx.jsonReq('GET', `/api/trades/${acc1.trade.tradeId}/chat?arbiter=true`, undefined, ADMIN);
+    expect(withJunk.data.decrypted).toHaveLength(2);
+    expect(withJunk.data.decrypted[0].plaintext).toBe('Receipt #777 attached');
+    expect(withJunk.data.decrypted[1]).toMatchObject({ plaintext: null, senderRole: 'buyer', verified: true });
+
     // Arbiter issues verdict `0x01` (buyer wins), which automatically broadcasts `arbitrate`.
     const verdictRes = await ctx.jsonReq(
       'POST',

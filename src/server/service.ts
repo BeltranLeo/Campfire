@@ -99,7 +99,8 @@ export interface DecryptedChatMessage {
   /** Present only when the message carries a valid signature by that role's session key. */
   senderRole?: 'buyer' | 'seller';
   verified: boolean;
-  plaintext: string;
+  /** Null when the message does not decrypt with the key the party handed over; the rest of the chat still does. */
+  plaintext: string | null;
   createdAt: number;
 }
 
@@ -1357,7 +1358,14 @@ export class CampfireService {
     const messages = await this.options.storage.listChatMessages(trade.id, sinceSeconds);
     const decrypted: DecryptedChatMessage[] = [];
     for (const m of messages) {
-      const plaintext = await decryptChatMessage(trade.sharedTradeKeyHex, m.ciphertext);
+      // One message that does not decrypt (a party can post a signed message encrypted with another key) must not
+      // hide the rest of the chat from the arbiter: it is returned as unreadable, with its author and signature.
+      let plaintext: string | null;
+      try {
+        plaintext = await decryptChatMessage(trade.sharedTradeKeyHex, m.ciphertext);
+      } catch {
+        plaintext = null;
+      }
       // Checked again here so the arbiter never relies on what was stored: a message counts as written by a role
       // only if that role's session key signed it.
       const sessionPk = m.senderRole === 'buyer' ? trade.buyerSessionPk : m.senderRole === 'seller' ? trade.sellerSessionPk : undefined;

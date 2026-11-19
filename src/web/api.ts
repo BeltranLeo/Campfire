@@ -244,7 +244,8 @@ export interface ArbiterChat {
     /** Who signed the message with their session key; absent when the signature is missing or wrong. */
     senderRole?: 'buyer' | 'seller';
     verified?: boolean;
-    plaintext: string;
+    /** Null when this one message does not decrypt with the handed-over key. */
+    plaintext: string | null;
     createdAt: number;
   }[];
 }

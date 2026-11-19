@@ -453,7 +453,12 @@ function ChatCard({ trade, chat, error }: { trade: Trade; chat: ArbiterChat | un
             {/* The author is the role whose session key signed the message, not the identity the request named.
                 "Not signed" is invented copy: the design has no unsigned messages. */}
             <strong>{m.senderRole === 'seller' ? 'Seller' : m.senderRole === 'buyer' ? 'Buyer' : 'Not signed'}</strong>{' '}
-            <ChatPlaintext plaintext={m.plaintext} />
+            {m.plaintext === null ? (
+              // Invented copy: the design has no message the shared key cannot open.
+              <em>This message does not decrypt with the key that was handed over.</em>
+            ) : (
+              <ChatPlaintext plaintext={m.plaintext} />
+            )}
             <small>{formatHourMinute(new Date(m.createdAt * 1000))}</small>
           </div>
         ))}
