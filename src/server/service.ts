@@ -184,6 +184,11 @@ export class CampfireService {
     verifyDerivedPayoutPkh(params.receiveXpub, 0, new Uint8Array(20));
     const now = this.nowSeconds();
     const existing = await this.options.storage.getIdentity(identity);
+    // Every dapp a wallet connects to receives the same defi key, so presenting it proves nothing. The first
+    // receive key stays: replacing it would send the identity's payouts to whoever presented the defi key.
+    if (existing && existing.receiveXpub !== params.receiveXpub.trim()) {
+      throw new Error('This identity is already registered with another receive key');
+    }
     const record: UserIdentityRecord = {
       identity,
       defiXpub: params.defiXpub.trim(),

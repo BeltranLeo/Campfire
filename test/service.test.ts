@@ -755,6 +755,90 @@ describe('Identity registration', () => {
     expect(stored).not.toBeNull();
     expect(Object.keys(stored!).sort()).toEqual(['createdAt', 'defiXpub', 'identity', 'receiveXpub', 'updatedAt']);
   });
+
+  // Every dapp the wallet connects to receives the same defi key, so knowing it proves nothing. Swapping the
+  // receive key would let such a dapp take offers under the victim's identity, with payouts to its own wallet.
+  it('refuses to replace the receive key of a registered identity', async () => {
+    const ctx = setupTestContext();
+    const attacker = makeWallet('service-test-attacker');
+
+    const victimReg = await ctx.jsonReq('POST', '/api/identities', {
+      defiXpub: buyer.defiXpub,
+      receiveXpub: buyer.receiveXpub,
+    });
+    expect(victimReg.status).toBe(201);
+    const victimId: string = victimReg.data.identity;
+
+    // Reconnecting with the same keys still works.
+    const again = await ctx.jsonReq('POST', '/api/identities', {
+      defiXpub: buyer.defiXpub,
+      receiveXpub: buyer.receiveXpub,
+    });
+    expect(again.status).toBe(201);
+    expect(again.data.identity).toBe(victimId);
+
+    const hijack = await ctx.jsonReq('POST', '/api/identities', {
+      defiXpub: buyer.defiXpub,
+      receiveXpub: attacker.receiveXpub,
+    });
+    expect(hijack.status).toBe(400);
+    expect(hijack.data.error).toMatch(/already registered with another receive key/);
+    expect((await ctx.storage.getIdentity(victimId))!.receiveXpub).toBe(buyer.receiveXpub);
+
+    // So a take under the victim's identity cannot pay out to the attacker.
+    const sellerReg = await ctx.jsonReq('POST', '/api/identities', {
+      defiXpub: seller.defiXpub,
+      receiveXpub: seller.receiveXpub,
+    });
+    const cfg = await ctx.jsonReq('GET', '/api/config');
+    const offerDoc: OfferDocument = {
+      v: 1,
+      side: 'sell',
+      asset: BCH_ASSET,
+      assetDecimals: BCH_DECIMALS,
+      fiat: 'ARS',
+      price: { type: 'fixed', value: '500000' },
+      min: '100000',
+      max: '1000000',
+      paymentMethods: ['bank-transfer'],
+      paymentWindowSec: 3600,
+      terms: 'CBU immediate transfer',
+      expiresAt: ctx.getNow() + 86_400,
+      arbiter: cfg.data.arbiterPk,
+    };
+    const sellerAddrMap = deriveWalletAddressMap({ receiveXpub: seller.receiveXpub, count: 5 });
+    const rawUtxo = ctx.provider.addUtxo(seller.receiveAddr(0), randomUtxo({ satoshis: 600_000n }));
+    const pubTx = buildPublishOfferTransaction({
+      provider: ctx.provider,
+      document: offerDoc,
+      utxos: tagWalletUtxos([rawUtxo], sellerAddrMap).map((u) => ({
+        ...u,
+        signer: new SignatureTemplate(seller.receivePriv(u.keyIndex)),
+      })),
+      markerAddress: seller.receiveAddr(1),
+      changeAddress: seller.receiveAddr(0),
+    });
+    const pubRes = await ctx.jsonReq<{ offer: StoredOffer }>('POST', '/api/offers', {
+      sellerIdentity: sellerReg.data.identity,
+      offerJson: pubTx.offerJson,
+      offerTxHex: pubTx.hex,
+      markerReceiveIndex: 1,
+    });
+    expect(pubRes.status).toBe(201);
+
+    const take = await ctx.jsonReq('POST', '/api/trades', {
+      offerTxid: pubRes.data.offer.offerTxid,
+      buyerIdentity: victimId,
+      amount: '200000',
+      buyerPk: buyer.defiPkHex(0),
+      buyerDefiIndex: 0,
+      buyerPayoutPkh: attacker.receivePkhHex(0),
+      buyerReceiveIndex: 0,
+      buyerSessionPk: generateSessionKeyPair().publicKey,
+    });
+    expect(take.status).toBe(400);
+    expect(take.data.error).toMatch(/buyerPayoutPkh does not match/);
+  });
 });
 
 describe('Service fees (protocol section 5.1)', () => {
