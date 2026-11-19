@@ -45,7 +45,7 @@ export function Landing() {
             I want to sell BCH<small>Get pesos or dollars for your coins</small>
           </Link>
           <p className="s-walletlink">
-            {/* Welcome asks what the person wants first, then shows how to get a wallet, then connects it. */}
+            {/* Welcome shows how to get a wallet, then connects it. */}
             New to Bitcoin Cash? <Link to="/welcome">Get a free wallet in 2 minutes →</Link>
           </p>
         </div>

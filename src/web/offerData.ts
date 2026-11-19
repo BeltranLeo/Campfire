@@ -43,3 +43,11 @@ export async function loadReputations(identities: string[]): Promise<Map<string,
 export function unique(values: string[]): string[] {
   return [...new Set(values)].sort();
 }
+
+/** The demo offers first (the way in for a first visit), the rest in the service's order. Nothing is removed. */
+export function demoFirst(offers: Offer[]): Offer[] {
+  return offers
+    .map((offer, index) => ({ offer, index }))
+    .sort((a, b) => Number(b.offer.isDemo) - Number(a.offer.isDemo) || a.index - b.index)
+    .map((x) => x.offer);
+}

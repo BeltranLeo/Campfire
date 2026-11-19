@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Link, Navigate } from 'react-router';
+import { Link } from 'react-router';
 import QRCode from 'qrcode';
 import { ApiError, apiGet, type Offer, type PriceQuote, type Trade } from '../api';
 import { assetInfo } from '../assets';
@@ -16,8 +16,7 @@ import { formatAmount, formatBchBalance, formatDate, formatFiat, formatFiatAmoun
 import { useNow } from '../hooks/useNow';
 import { usePoll } from '../hooks/usePoll';
 import { isActive, nextStep, rowTitle, sortActive, sortHistory, historyNote } from '../mytrades';
-import { describeReputation, loadQuotes, loadReputations, priceOf } from '../offerData';
-import { describePrefs, rankOffers, usePrefs } from '../prefs';
+import { demoFirst, describeReputation, loadQuotes, loadReputations, priceOf } from '../offerData';
 import { roleOf } from '../trade';
 import { refreshWalletCoins, useWalletCoins } from '../walletCoins';
 import { useWallet } from '../wallet';
@@ -33,9 +32,6 @@ const RECENT = 3;
 
 export function Home() {
   const wallet = useWallet();
-  const prefs = usePrefs();
-  // The first time, the two questions come before anything else. Skipping them counts as an answer.
-  if (prefs === null) return <Navigate to="/welcome" replace />;
   if (!wallet.identity) return null;
   return <HomeBody identity={wallet.identity} receiveXpub={wallet.xpubs?.receive ?? null} />;
 }
@@ -247,24 +243,22 @@ function Attention({ items, sideOf }: { items: ReturnType<typeof sortActive>; si
 
 function ForYou() {
   const config = useConfig();
-  const prefs = usePrefs();
   const offers = usePoll(() => apiGet<{ offers: Offer[] }>('/api/offers?onlyOpen=true').then((r) => r.offers), 'offers', REFRESH_MS * 3);
-  const ranked = rankOffers(offers.data ?? [], prefs, (o) => assetInfo(o.document.asset, o.document.assetDecimals, config).symbol).slice(0, FOR_YOU);
+  const ranked = demoFirst(offers.data ?? []).slice(0, FOR_YOU);
 
   const pairs = [...new Set(ranked.flatMap((o) => (o.document.price.type === 'floating' ? [o.document.price.pair] : [])))];
   const quotes = usePoll(() => loadQuotes(pairs), pairs.join(','), pairs.length ? 30_000 : undefined);
   const identities = [...new Set(ranked.map((o) => o.sellerIdentity))];
   const reputations = usePoll(() => loadReputations(identities), identities.join(','));
-  const subtitle = describePrefs(prefs);
 
   return (
     <section className="cf-card" data-flush>
       <div className="s-sechead">
         <div className="s-cell">
           <h2 className="cf-heading">For you</h2>
-          <span className="cf-small cf-muted">{subtitle ?? 'The newest open offers'}</span>
+          <span className="cf-small cf-muted">The newest open offers</span>
         </div>
-        <Link to="/welcome">Change</Link>
+        <Link to="/offers">See all</Link>
       </div>
       {!offers.data && !offers.error ? (
         <div className="s-item">

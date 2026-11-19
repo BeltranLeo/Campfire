@@ -187,9 +187,6 @@ function WalletMenu({ onClose }: { onClose: () => void }) {
         {wallet.activeTrades ? `My trades · ${wallet.activeTrades} active` : 'My trades'}
       </Link>
       <div className="cf-stack" data-gap="1">
-        <Link to="/welcome" onClick={onClose}>
-          Preferences
-        </Link>
         <Link to="/about" onClick={onClose}>
           About
         </Link>

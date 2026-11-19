@@ -20,7 +20,6 @@ import {
 import { fiatForUnits, parseFiatCents, unitsForFiat } from '../fiatAmount';
 import { parseAmount } from '../take';
 import { usePoll } from '../hooks/usePoll';
-import { usePrefs } from '../prefs';
 import { loadQuotes, loadReputations, priceOf, unique } from '../offerData';
 import { filterOptions, offerTakes } from '../paymentMethods';
 
@@ -32,10 +31,8 @@ const QUOTE_INTERVAL_MS = 30_000;
 
 export function Offers() {
   const [params, setParams] = useSearchParams();
-  // The link decides; without one, what the person said at onboarding does.
-  const prefs = usePrefs();
-  const sideParam = params.get('side');
-  const intent = sideParam === 'sell' || (sideParam === null && prefs?.intent === 'sell') ? 'sell' : 'buy';
+  // The link decides; without one, the list starts on buying.
+  const intent = params.get('side') === 'sell' ? 'sell' : 'buy';
   // Buying means taking someone's sell offer, and the other way round.
   const offerSide = intent === 'buy' ? 'sell' : 'buy';
   const config = useConfig();
@@ -50,9 +47,9 @@ export function Offers() {
   const identities = unique(all.map((o) => o.sellerIdentity));
   const reputations = usePoll(() => loadReputations(identities), identities.join(','));
 
-  // The filters start from the onboarding answers when they name exactly one coin or currency.
-  const [chosenCoin, setCoin] = useState(prefs?.assets.length === 1 ? prefs.assets[0] : '');
-  const [chosenFiat, setFiat] = useState(prefs?.fiat.length === 1 ? prefs.fiat[0] : '');
+  // The filters start empty: every open offer is shown until the visitor narrows the list.
+  const [chosenCoin, setCoin] = useState('');
+  const [chosenFiat, setFiat] = useState('');
   const [chosenMethod, setMethod] = useState('');
   // What the visitor wants to pay (buying) or sell (selling). Component state only: it is a question, not a setting.
   const [amount, setAmount] = useState('');
@@ -76,7 +73,7 @@ export function Offers() {
   const coinOptions = unique(sideOffers.map((o) => assetInfo(o.document.asset, o.document.assetDecimals, config).symbol));
   const fiatOptions = unique(sideOffers.map((o) => o.document.fiat));
   // A choice counts only while it is one of the options. Otherwise the select would show "Any …" while a
-  // value left over from the other side (the back button, an onboarding answer) silently hid every offer.
+  // value left over from the other side (the back button) silently hid every offer.
   const coin = coinOptions.includes(chosenCoin) ? chosenCoin : '';
   const fiat = fiatOptions.includes(chosenFiat) ? chosenFiat : '';
   // Methods come from Campfire's fixed list, for the chosen currency or all of them, so the choices do not depend on
