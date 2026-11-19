@@ -267,7 +267,7 @@ function BuyerAction(props: {
       <div className="cf-stack">
         {disputeForm || (
           <div className="cf-stack" data-gap="2">
-            <Button block disabled={busy !== null} onClick={() => setDisputing(true)}>
+            <Button block variant="arbiter" disabled={busy !== null} onClick={() => setDisputing(true)}>
               Ask the arbiter for help
             </Button>
             <p className="cf-small cf-muted">{arbiterLine}</p>

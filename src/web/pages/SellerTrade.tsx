@@ -232,7 +232,7 @@ export function SellerAction(props: { trade: Trade; amount: string; fiat: string
     </Notice>
   );
   const disputeButton = !disputing && (
-    <Button disabled={busy !== null} onClick={() => setDisputing(true)}>
+    <Button variant="arbiter" disabled={busy !== null} onClick={() => setDisputing(true)}>
       Open dispute
     </Button>
   );

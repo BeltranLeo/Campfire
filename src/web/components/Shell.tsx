@@ -1,7 +1,7 @@
 import { useState } from 'react';
+import logoNight from '../brand/logo-night.png';
 import { Link, NavLink, Outlet } from 'react-router';
 import { BANNER_LINKS, PROTOCOL_SPEC_URL, REPO_URL, VOTING_ADDRESS } from '../links';
-import { getThemePref, setThemePref, type ThemePref } from '../theme';
 import { useWalletCoinsSync } from '../walletCoins';
 import { useWallet } from '../wallet';
 import { AdvancedSwitch } from './AdvancedSwitch';
@@ -33,23 +33,26 @@ export function Shell() {
   return (
     <>
       <Banner />
+      {/* Two levels: the brand and the wallet on the logo's own night blue, then the page links on light glass. */}
       <header className="cf-header">
         <div className="s-headerbar">
-          <Link className="cf-logo" to="/">
-            Campfire
+          <Link className="cf-logo" to="/" aria-label="Campfire home">
+            <img src={logoNight} alt="Campfire" />
           </Link>
-          <nav className="cf-nav" data-app={connected || undefined} aria-label="Main">
-            {nav.map((item) => (
-              // `end` keeps "/" from matching every route.
-              <NavLink key={item.to} to={item.to} end={item.to === '/'}>
-                {item.label}
-              </NavLink>
-            ))}
-          </nav>
           <span className="cf-grow" />
           <WalletButton />
         </div>
       </header>
+      <div className="cf-subnav" data-app={connected || undefined}>
+        <nav className="cf-nav s-headerbar" aria-label="Main">
+          {nav.map((item) => (
+            // `end` keeps "/" from matching every route.
+            <NavLink key={item.to} to={item.to} end={item.to === '/'}>
+              {item.label}
+            </NavLink>
+          ))}
+        </nav>
+      </div>
       <WalletError />
       <Outlet />
       <Footer />
@@ -103,7 +106,6 @@ function Footer() {
           <a href={REPO_URL}>GitHub</a>
           <a href={PROTOCOL_SPEC_URL}>Protocol spec</a>
           <span>Mainnet. Real funds.</span>
-          <ThemeSwitch />
           {/* Also here, so a visitor without a wallet (a judge, say) can open every technical detail at once. */}
           <AdvancedSwitch compact />
         </div>
@@ -112,29 +114,3 @@ function Footer() {
   );
 }
 
-const THEME_OPTIONS: { value: ThemePref; label: string }[] = [
-  { value: 'system', label: 'System' },
-  { value: 'light', label: 'Light' },
-  { value: 'dark', label: 'Dark' },
-];
-
-function ThemeSwitch() {
-  const [pref, setPref] = useState(getThemePref);
-  return (
-    <div className="cf-seg" role="group" aria-label="Theme">
-      {THEME_OPTIONS.map((option) => (
-        <button
-          key={option.value}
-          type="button"
-          aria-pressed={pref === option.value}
-          onClick={() => {
-            setThemePref(option.value);
-            setPref(option.value);
-          }}
-        >
-          {option.label}
-        </button>
-      ))}
-    </div>
-  );
-}

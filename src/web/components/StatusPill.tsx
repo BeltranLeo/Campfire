@@ -5,7 +5,7 @@ import type { TradeState } from '../api';
 // the neutral wording. On a buy offer the buyer accepts the request, so `Requested` is the buyer's turn.
 
 export type TradeRole = 'buyer' | 'seller' | 'visitor';
-type Tone = 'active' | 'done' | 'warn' | 'danger' | 'idle' | undefined;
+type Tone = 'active' | 'done' | 'warn' | 'danger' | 'idle' | 'arbiter' | undefined;
 
 function pill(state: TradeState, role: TradeRole, side: 'sell' | 'buy'): [string, Tone] {
   const turn = (who: TradeRole, mine: string, theirs: string): [string, Tone] =>
@@ -21,7 +21,7 @@ function pill(state: TradeState, role: TradeRole, side: 'sell' | 'buy'): [string
     case 'Paid':
       return turn('seller', 'Paid, waiting for your release', 'Paid, waiting for release');
     case 'Disputed':
-      return ['In dispute', 'danger'];
+      return ['In dispute', 'arbiter'];
     case 'Released':
       return ['Completed', 'done'];
     case 'ResolvedBuyer':

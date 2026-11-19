@@ -1,52 +1,42 @@
-/* Campfire — generated from tokens.json */
-@font-face { font-family: "Bricolage Grotesque"; src: url("../fonts/BricolageGrotesque-Variable.woff2") format("woff2"); font-weight: 200 800; font-display: swap; }
-@font-face { font-family: "Hanken Grotesk"; src: url("../fonts/HankenGrotesk-Variable.woff2") format("woff2"); font-weight: 100 900; font-display: swap; }
-@font-face { font-family: "JetBrains Mono"; src: url("../fonts/JetBrainsMono-Variable.woff2") format("woff2"); font-weight: 100 800; font-display: swap; }
+/* Campfire brand tokens. Every colour has one meaning:
+   accent (ember)  = your action        warn (amber)    = time is running
+   escrow (blue)   = the contract/wait  chain (BCH)     = verified on chain
+   arbiter (violet)= someone mediates   danger (coral)  = stop, irreversible
+   sim (clear glass, dashed)            = simulated, no real money
+   Fonts are Rubik (titles), Figtree (text) and Geist Mono (data), loaded in index.html. */
+/* Light mode only for now: the dark mode comes later, with its own pass. */
 :root, [data-theme="light"] {
-  --bg: #f3f0ea;
-  --surface: #fcfbf8;
-  --surface-sunken: #e9e4dc;
-  --line: #d8d1c6;
-  --line-strong: #8d8478;
-  --ink: #1f1a15;
-  --ink-muted: #5a5046;
-  --ink-subtle: #685d50;
-  --accent: #c2410c;
-  --accent-hover: #a3350a;
+  --bg: #f8f7ec;
+  --surface: #ffffff;
+  --surface-sunken: #f4f3ee;
+  --line: #e8eaf0;
+  --line-strong: #8a96b3;
+  --ink: #0b1733;
+  --ink-muted: #5b6785;
+  --ink-subtle: #5b6785;
+  --accent: #c94f14;
+  --accent-hover: #b5480f;
+  --accent-mark: #f07a2e;
+  --accent-text: #a8460f;
   --on-accent: #ffffff;
-  --accent-soft: #fdf1e9;
-  --chain: #0b6e52;
-  --chain-soft: #dcf1e8;
-  --sim: #6535b8;
-  --sim-soft: #ece4fa;
-  --warn: #7d5700;
-  --warn-soft: #f8ebc2;
-  --danger: #b0163a;
-  --danger-soft: #fbe1e6;
-  --focus: #1f1a15;
-}
-[data-theme="dark"] {
-  --bg: #161310;
-  --surface: #1f1b17;
-  --surface-sunken: #100e0c;
-  --line: #39332c;
-  --line-strong: #7a7064;
-  --ink: #f3ede5;
-  --ink-muted: #b9ae9f;
-  --ink-subtle: #9a8f81;
-  --accent: #ff8a4c;
-  --accent-hover: #ffa06e;
-  --on-accent: #1d0f06;
-  --accent-soft: #3a2114;
-  --chain: #45d1a2;
-  --chain-soft: #12362b;
-  --sim: #b9a0ff;
-  --sim-soft: #2a2147;
-  --warn: #edc257;
-  --warn-soft: #372b0c;
-  --danger: #ff8298;
-  --danger-soft: #40161f;
-  --focus: #f3ede5;
+  --accent-soft: #fdeee3;
+  --chain: #067a5a;
+  --chain-fill: #0ac18e;
+  --chain-soft: #e3f8f1;
+  --escrow: #2662af;
+  --escrow-soft: #e6f0fa;
+  --arbiter: #593b8f;
+  --arbiter-soft: #f0e9f8;
+  --sim: #5b6785;
+  --sim-soft: rgba(91, 103, 133, 0.1);
+  --warn: #8a5a00;
+  --warn-soft: #fdf5dc;
+  --danger: #b42a45;
+  --danger-soft: #fce7eb;
+  --focus: #2662af;
+  --glass: rgba(255, 255, 255, 0.72);
+  --glass-edge: #e8eaf0;
+  --shadow: 0 1px 2px rgba(11, 23, 51, 0.04), 0 6px 20px rgba(11, 23, 51, 0.06);
 }
 :root {
   --space-1: 4px;
@@ -65,8 +55,7 @@
   --control-h-sm: 32px;
   --content-max: 1120px;
   --measure: 640px;
-  --font-display: "Bricolage Grotesque", "Hanken Grotesk", system-ui, sans-serif;
-  --font-sans: "Hanken Grotesk", system-ui, -apple-system, "Segoe UI", sans-serif;
-  --font-mono: "JetBrains Mono", ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  --font-display: "Rubik", "Figtree", system-ui, sans-serif;
+  --font-sans: "Figtree", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-mono: "Geist Mono", ui-monospace, "SF Mono", Menlo, Consolas, monospace;
 }
-[data-theme="dark"] { color-scheme: dark; }

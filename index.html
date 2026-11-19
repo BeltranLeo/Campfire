@@ -1,21 +1,13 @@
 <!doctype html>
-<html lang="en">
+<html lang="en" data-theme="light">
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Campfire</title>
-    <script>
-      // Set the theme before the first paint so a dark-mode visitor never sees a light flash.
-      // Must match src/web/theme.ts: localStorage.theme is 'light', 'dark' or absent (follow the system).
-      (function () {
-        var stored = null;
-        try {
-          stored = localStorage.getItem('theme');
-        } catch (e) {}
-        var dark = stored === 'dark' || (stored !== 'light' && window.matchMedia('(prefers-color-scheme: dark)').matches);
-        document.documentElement.setAttribute('data-theme', dark ? 'dark' : 'light');
-      })();
-    </script>
+    <link rel="icon" type="image/png" href="/favicon.png" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Figtree:wght@400;500;600;700&family=Geist+Mono:wght@400;500&family=Rubik:wght@500;600;700&display=swap" rel="stylesheet" />
   </head>
   <body>
     <div id="root" class="cf s-screen"></div>

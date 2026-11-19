@@ -8,7 +8,7 @@ import { useWallet } from '../wallet';
 
 export interface ButtonProps {
   children: ReactNode;
-  variant?: 'primary' | 'danger' | 'ghost';
+  variant?: 'primary' | 'danger' | 'ghost' | 'arbiter';
   size?: 'sm';
   block?: boolean;
   /** The action asks the wallet for a signature. A string replaces the default line. */
