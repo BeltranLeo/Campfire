@@ -12,6 +12,7 @@ import './styles/create.css';
 import './styles/welcome.css';
 import './styles/pairing.css';
 import './styles/home.css';
+import './styles/chats.css';
 import './styles/chat.css';
 import './styles/app.css';
 

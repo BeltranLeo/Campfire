@@ -3,6 +3,7 @@ import { Shell } from './components/Shell';
 import { About } from './pages/About';
 import { Arbiter } from './pages/Arbiter';
 import { ArbiterList } from './pages/ArbiterList';
+import { Chats } from './pages/Chats';
 import { CreateOffer } from './pages/CreateOffer';
 import { DevComponents } from './pages/DevComponents';
 import { Home } from './pages/Home';
@@ -54,7 +55,7 @@ export function App() {
         <Route path="trade/:id/arbiter" element={<Arbiter />} />
         <Route path="arbiter" element={<ArbiterList />} />
         <Route path="trades" element={<MyTrades />} />
-        <Route path="chats" element={<NotBuilt title="Chats" />} />
+        <Route path="chats" element={<Chats />} />
         <Route path="about" element={<About />} />
         {/* The design's Help FAQ lives at the end of About. */}
         <Route path="help" element={<Navigate to="/about" replace />} />

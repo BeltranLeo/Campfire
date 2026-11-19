@@ -1,0 +1,4 @@
+/* The /chats page. Rows reuse .s-item and .s-cell from screens.css and .cf-badge from components.css. */
+.s-chat-time { flex: none; white-space: nowrap; }
+.s-item > .s-cell > .cf-small { overflow-wrap: anywhere; }
+.s-item > .cf-badge { flex: none; }
