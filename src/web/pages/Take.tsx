@@ -322,7 +322,7 @@ function TakeOffer({ offer }: { offer: Offer }) {
             </div>
 
             {expired ? (
-              <Notice tone="warn" title="This quote expired">
+              <Notice tone="attention" title="This quote expired">
                 The price was not refreshed for over 10 minutes. Get a new quote to continue.
               </Notice>
             ) : (
@@ -597,7 +597,7 @@ function TakeBuyOffer({ offer }: { offer: Offer }) {
             </div>
 
             {expired ? (
-              <Notice tone="warn" title="This quote expired">
+              <Notice tone="attention" title="This quote expired">
                 The price was not refreshed for over 10 minutes. Get a new quote to continue.
               </Notice>
             ) : (
@@ -619,7 +619,7 @@ function TakeBuyOffer({ offer }: { offer: Offer }) {
 
             {!asset.isBch && (
               // Invented copy: the page deposits BCH only for now.
-              <Notice tone="warn" title="Selling PUSD is not available yet">
+              <Notice tone="attention" title="Selling PUSD is not available yet">
                 Only BCH can be locked from this page for now.
               </Notice>
             )}
@@ -633,7 +633,7 @@ function TakeBuyOffer({ offer }: { offer: Offer }) {
             )}
             {short && (
               // Invented copy: the design does not show a seller without enough BCH here.
-              <Notice tone="warn" title="Your wallet does not have enough BCH">
+              <Notice tone="attention" title="Your wallet does not have enough BCH">
                 Locking this amount needs about {deposit !== null && formatBch(deposit)} with the network fee, and Campfire can see{' '}
                 {have !== null && formatBch(have)}. The buyer would accept and wait for coins you cannot lock.
               </Notice>
@@ -778,24 +778,24 @@ function LimitNotice({ message, demo }: { message: string; demo: DemoInfo | null
   switch (demoLimitKind(message)) {
     case 'busy':
       return (
-        <Notice tone="warn" title="The demo seller is busy with other visitors">
+        <Notice tone="attention" title="The demo seller is busy with other visitors">
           {limits ? `It handles ${limits.maxActiveTrades} trades at a time. ` : ''}Please try again in a few minutes.
         </Notice>
       );
     case 'daily':
       return (
-        <Notice tone="warn" title="The demo seller has reached its daily limit of trades">
+        <Notice tone="attention" title="The demo seller has reached its daily limit of trades">
           {limits ? `It funds ${limits.maxDailyFundings} trades per day across all visitors. ` : ''}Please try again
           tomorrow, or see the real transactions of earlier trades.
         </Notice>
       );
     case 'funds':
       return (
-        <Notice tone="warn" title="The demo seller has run out of funds for this offer">
+        <Notice tone="attention" title="The demo seller has run out of funds for this offer">
           Please try again later, or try the other demo offer.
         </Notice>
       );
     default:
-      return <Notice tone="warn">{message}</Notice>;
+      return <Notice tone="attention">{message}</Notice>;
   }
 }

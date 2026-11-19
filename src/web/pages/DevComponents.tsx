@@ -69,7 +69,7 @@ export function DevComponents() {
           <Button variant="primary" note="No signature needed. This step is off-chain.">
             Mark as paid
           </Button>
-          <Button>Open dispute</Button>
+          <Button variant="arbiter">Open dispute</Button>
           <Button variant="danger" signs="Signs in your wallet. Returns the funds to the seller.">
             Cancel trade
           </Button>
@@ -99,13 +99,13 @@ export function DevComponents() {
 
       <Section title="Notices">
         <Notice>Deposit seen, not confirmed yet.</Notice>
-        <Notice tone="warn" title="Payment window ends soon">
+        <Notice tone="attention" title="Payment window ends soon">
           Mark the trade as paid only after sending the money.
         </Notice>
         <Notice tone="danger" title="We could not load the offers">
           The server did not answer. Offers are published on-chain, so nothing is lost.
         </Notice>
-        <Notice tone="chain" title="Completed">
+        <Notice tone="verified" title="Completed">
           The escrow paid the buyer.
         </Notice>
       </Section>

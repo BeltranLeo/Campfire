@@ -353,7 +353,7 @@ function Activity({ finished, sideOf, failed, loading, retry }: { finished: Trad
   if (finished.length === 0) {
     return (
       <section className="cf-card">
-        <div className="cf-empty" style={{ padding: 'var(--space-5) var(--space-4)' }}>
+        <div className="cf-empty" style={{ padding: 'var(--space-6) var(--space-4)' }}>
           <strong>No activity yet</strong>
           <span>Your finished trades will show up here.</span>
         </div>

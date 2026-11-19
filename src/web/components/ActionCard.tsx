@@ -1,14 +1,17 @@
 import type { ReactNode } from 'react';
-import type { Progress } from '../trade';
+import type { Progress, Turn } from '../trade';
 import { Icon } from './Icon';
 
 /**
- * The card at the top of a trade page, the only part that changes with the state and the viewer. `step` says whose
- * turn it is ("Your turn", "Waiting"); `progress` draws the four named steps above it, so nobody reads "Step 2 of 4"
- * without knowing what the steps are.
+ * The card at the top of a trade page, the only part that changes with the state and the viewer. `turn` says whose
+ * move it is, in words ("Your turn", "Waiting") and in the colour of the current step: Brasa when it is yours, blue
+ * while the other party or the contract works, violet in a dispute. `progress` draws the four named steps above it,
+ * so nobody reads "Step 2 of 4" without knowing what the steps are.
  */
+const TURN_LABEL: Record<Turn, string> = { you: 'Your turn', other: 'Waiting', arbiter: 'Paused · In dispute' };
+
 export function ActionCard(props: {
-  step: string;
+  turn: Turn;
   progress?: Progress | null;
   title: string;
   reassurance?: ReactNode;
@@ -18,11 +21,11 @@ export function ActionCard(props: {
   return (
     <section className="cf-card s-action" data-flush>
       <div className="cf-card__section">
-        {props.progress && <Steps progress={props.progress} />}
-        <span className="cf-stepper">{props.step}</span>
+        {props.progress && <Steps progress={props.progress} turn={props.turn} />}
+        <span className="cf-stepper">{TURN_LABEL[props.turn]}</span>
         <h2 className="cf-heading">{props.title}</h2>
         {props.reassurance && (
-          <p className="cf-row cf-small" data-nowrap style={{ color: 'var(--chain)', alignItems: 'flex-start' }}>
+          <p className="cf-row cf-small" data-nowrap style={{ color: 'var(--escrow)', alignItems: 'flex-start' }}>
             <Icon name="shield" />
             <span>{props.reassurance}</span>
           </p>
@@ -34,9 +37,9 @@ export function ActionCard(props: {
   );
 }
 
-function Steps({ progress }: { progress: Progress }) {
+function Steps({ progress, turn }: { progress: Progress; turn: Turn }) {
   return (
-    <ol className="cf-steps" aria-label="Trade progress">
+    <ol className="cf-steps" aria-label="Trade progress" data-turn={turn}>
       {progress.labels.map((label, i) => (
         <li
           key={label}

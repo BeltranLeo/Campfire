@@ -121,7 +121,7 @@ export function About() {
       </Section>
 
       <Section title="Privacy">
-        <ul className="cf-stack" data-gap="2" style={{ margin: 0, paddingLeft: 'var(--space-5)' }}>
+        <ul className="cf-stack" data-gap="2" style={{ margin: 0, paddingLeft: 'var(--space-6)' }}>
           <li>Connecting a wallet is the only sign-in. There are no accounts, passwords or e-mail addresses.</li>
           <li>Each trade uses a new key and a new address of your wallet, so trades are not linked on-chain.</li>
           <li>Payment details are encrypted in the browser and revealed only to the other person in the trade.</li>
@@ -227,7 +227,7 @@ function Step({ n, title, children }: { n: number; title: string; children: Reac
         {n}
       </span>
       <div>
-        <div className="cf-step__title" style={{ color: 'var(--ink)', fontWeight: 600 }}>
+        <div className="cf-step__title" style={{ color: 'var(--text)', fontWeight: 600 }}>
           {title}
         </div>
         <div className="cf-small cf-muted">{children}</div>

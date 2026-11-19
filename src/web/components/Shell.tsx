@@ -4,6 +4,8 @@ import { BANNER_LINKS, PROTOCOL_SPEC_URL, REPO_URL, VOTING_ADDRESS } from '../li
 import { getThemePref, setThemePref, type ThemePref } from '../theme';
 import { useWalletCoinsSync } from '../walletCoins';
 import { useWallet } from '../wallet';
+import logoDark from '../logos/logo-dark.svg';
+import logoLight from '../logos/logo-light.png';
 import { AdvancedSwitch } from './AdvancedSwitch';
 import { CopyButton } from './CopyButton';
 import { BottomNav, WalletButton, WalletError } from './Wallet';
@@ -35,8 +37,10 @@ export function Shell() {
       <Banner />
       <header className="cf-header">
         <div className="s-headerbar">
-          <Link className="cf-logo" to="/">
-            Campfire
+          {/* The logo is a file, never the word set in a font. CSS shows the one that matches the theme. */}
+          <Link className="cf-logo" to="/" aria-label="Campfire, home">
+            <img src={logoLight} alt="" data-theme-only="light" />
+            <img src={logoDark} alt="" data-theme-only="dark" />
           </Link>
           <nav className="cf-nav" data-app={connected || undefined} aria-label="Main">
             {nav.map((item) => (

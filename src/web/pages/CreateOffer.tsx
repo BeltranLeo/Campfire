@@ -579,24 +579,24 @@ export function CreateOffer() {
 
               {buying ? (
                 blocked === 'daily' ? (
-                  <Notice tone="warn" title="Today’s free offers are used up">
+                  <Notice tone="attention" title="Today’s free offers are used up">
                     Campfire pays the network fee for {status?.dailyOffers} buy offers per day across all users. Please try again
                     {nextSlot ? ` after ${nextSlot}.` : ' tomorrow.'}
                   </Notice>
                 ) : blocked === 'open' ? (
                   // Invented copy: the design has a screen for the daily limit only.
-                  <Notice tone="warn" title={`You already have ${status?.openNow} open offers paid for by Campfire`}>
+                  <Notice tone="attention" title={`You already have ${status?.openNow} open offers paid for by Campfire`}>
                     Close one in My trades to publish another. Campfire pays for {status?.openOffersPerIdentity} open offers per wallet.
                   </Notice>
                 ) : blocked === 'disabled' ? (
                   // Invented copy.
-                  <Notice tone="warn" title="Campfire is not paying for buy offers right now">Please try again later.</Notice>
+                  <Notice tone="attention" title="Campfire is not paying for buy offers right now">Please try again later.</Notice>
                 ) : limitHit ? (
-                  <Notice tone="warn" title="Campfire could not pay for this offer">
+                  <Notice tone="attention" title="Campfire could not pay for this offer">
                     {limitHit}
                   </Notice>
                 ) : (
-                  <Notice tone="chain" title="Publishing is free for you">
+                  <Notice tone="verified" title="Publishing is free for you">
                     Campfire pays the network fee. It is still a real mainnet transaction, and you can close the offer anytime.
                   </Notice>
                 )
@@ -615,7 +615,7 @@ export function CreateOffer() {
                 </Notice>
               )}
               {short && scan.data && (
-                <Notice tone="warn" title="Your wallet does not have enough BCH">
+                <Notice tone="attention" title="Your wallet does not have enough BCH">
                   Publishing needs about {formatBch(needed)} for the marker and the fee. This wallet has {bch !== null && formatBch(bch)}
                   that Campfire can see. {describeScan(scan.data)} Send some BCH to it: this page checks again every few seconds.{' '}
                   <button type="button" className="cf-copy" onClick={scan.reload}>
@@ -624,7 +624,7 @@ export function CreateOffer() {
                 </Notice>
               )}
               {prep.data && prep.data.markerIndex === null && (
-                <Notice tone="warn" title="We could not find a fresh address in your wallet">
+                <Notice tone="attention" title="We could not find a fresh address in your wallet">
                   The lookup took too long.{' '}
                   <button type="button" className="cf-copy" onClick={prep.reload}>
                     Try again
@@ -632,7 +632,7 @@ export function CreateOffer() {
                 </Notice>
               )}
               {declined && (
-                <Notice tone="warn" title="Nothing was published">
+                <Notice tone="attention" title="Nothing was published">
                   {WALLET_DECLINED}
                 </Notice>
               )}

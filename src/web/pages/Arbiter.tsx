@@ -307,7 +307,7 @@ function DecidedCard({ trade, amount }: { trade: Trade; amount: string }) {
       <div className="cf-card__section">
         <div className="cf-stack">
           {/* The seller's wording is invented; the design only shows a verdict for the buyer. */}
-          <Notice tone={forBuyer ? 'chain' : undefined} title={forBuyer ? 'Decided for the buyer' : 'Decided for the seller'}>
+          <Notice tone="verified" title={forBuyer ? 'Decided for the buyer' : 'Decided for the seller'}>
             {forBuyer ? `${amount} were paid to the buyer by the contract.` : `${amount} were returned to the seller by the contract.`}
           </Notice>
           <dl className="cf-dl">
@@ -569,7 +569,7 @@ function EscrowVerification({ trade, escrow }: { trade: Trade; escrow: EscrowChe
         </span>
       </div>
       {escrow.funding === 'missing' && (
-        <Notice tone="warn" title="The deposit is not visible at the escrow address">
+        <Notice tone="attention" title="The deposit is not visible at the escrow address">
           This browser did not find the funding coin there. The verdict can only be paid out if it exists.
         </Notice>
       )}

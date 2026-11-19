@@ -36,7 +36,7 @@ export function Landing() {
           </p>
         </div>
         <div className="s-intents">
-          <Link className="cf-quick" to="/offers?side=buy" data-variant="primary">
+          <Link className="cf-quick" to="/offers?side=buy">
             <Icon name="buy" />
             I want to buy BCH<small>You don’t need any BCH to start</small>
           </Link>

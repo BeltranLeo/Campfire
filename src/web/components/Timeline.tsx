@@ -9,7 +9,8 @@ export function Timeline({ steps }: { steps: Step[] }) {
   return (
     <ol className="cf-timeline">
       {steps.map((step, i) => (
-        <li key={i} className="cf-step" data-state={step.state}>
+        // A step with a transaction is on the network: green. Other done steps are blue.
+        <li key={i} className="cf-step" data-state={step.state} data-chain={step.txid ? '' : undefined} data-turn={step.turn}>
           <span className="cf-step__dot" aria-hidden="true">
             {step.state === 'done' ? '✓' : step.state === 'failed' ? '×' : i + 1}
           </span>
@@ -51,7 +52,7 @@ function StepMeta({ step }: { step: Step }) {
 export const confirmationsText = (n: number) =>
   n === 0 ? 'in the mempool (0-conf)' : `${n} confirmation${n === 1 ? '' : 's'}`;
 
-/** Time left until `deadline` (Unix seconds), turning amber under 20 % of the window. Stops at 00:00. */
+/** Time left until `deadline` (Unix seconds), in amber; `data-low` marks the last 20 % of the window. Stops at 00:00. */
 export function Countdown({ deadline, windowSec }: { deadline: number; windowSec: number }) {
   const now = useNow(1000);
   const left = Math.max(0, deadline - now / 1000);

@@ -267,7 +267,7 @@ function BuyerAction(props: {
       <div className="cf-stack">
         {disputeForm || (
           <div className="cf-stack" data-gap="2">
-            <Button block disabled={busy !== null} onClick={() => setDisputing(true)}>
+            <Button block variant="arbiter" disabled={busy !== null} onClick={() => setDisputing(true)}>
               Ask the arbiter for help
             </Button>
             <p className="cf-small cf-muted">{arbiterLine}</p>
@@ -307,7 +307,7 @@ function BuyerAction(props: {
       if (trade.side === 'buy') return <BuyRequest trade={trade} amount={props.amount} fiat={props.fiat} onUpdate={props.onUpdate} />;
       return (
         <ActionCard
-          step="Waiting"
+          turn="other"
           progress={progress}
           title="Waiting for the seller to accept"
           reassurance="You have not paid anything. Nothing is charged if the seller does not answer."
@@ -329,7 +329,7 @@ function BuyerAction(props: {
     case 'Accepted':
       return (
         <ActionCard
-          step="Waiting"
+          turn="other"
           progress={progress}
           title={`Waiting for the seller to lock ${coins}`}
           reassurance={`Don't pay yet. We'll tell you when ${coins} ${trade.asset === 'BCH' ? 'is' : 'are'} locked.`}
@@ -351,7 +351,7 @@ function BuyerAction(props: {
       const windowSec = trade.paymentDeadline && trade.fundedAt ? trade.paymentDeadline - trade.fundedAt : 0;
       return (
         <ActionCard
-          step="Your turn"
+          turn="you"
           progress={progress}
           title="Send the payment, then mark it as paid"
           reassurance={props.check && props.check !== 'error' && props.check.funding === 'match' ? "The seller's coins are locked for you. They can only go to you or back to the seller." : undefined}
@@ -386,7 +386,7 @@ function BuyerAction(props: {
     case 'Paid':
       return (
         <ActionCard
-          step="Waiting"
+          turn="other"
           progress={progress}
           title="Waiting for the seller to release"
           reassurance={props.check && props.check !== 'error' && props.check.funding === 'match' ? "The seller's coins are locked for you. They can only go to you or back to the seller." : undefined}
@@ -399,7 +399,7 @@ function BuyerAction(props: {
     case 'Disputed': {
       const opened = trade.disputedAt !== undefined ? formatHourMinute(new Date(trade.disputedAt * 1000)) : null;
       return (
-        <ActionCard step="Paused · In dispute" title="The arbiter is reviewing this trade">
+        <ActionCard turn="arbiter" title="The arbiter is reviewing this trade">
           <p className="cf-muted">
             {trade.disputedBy === 'seller' ? 'The seller opened a dispute' : 'You opened a dispute'}
             {opened ? ` at ${opened}` : ''}. The arbiter can now read the chat and will decide for the buyer or the seller.
@@ -468,7 +468,7 @@ function BuyRequest(props: { trade: Trade; amount: string; fiat: string; onUpdat
 
   return (
     <ActionCard
-      step="Your turn"
+      turn="you"
       progress={actionProgress(trade.status, 'buyer', trade.side)}
       title={`A seller wants to sell you ${props.amount}`}
       reassurance="Accepting is free and needs no signature. You pay only after the coins are locked for you."
@@ -530,7 +530,7 @@ function ZeroConfNotice({ ds, isDemo }: { ds: DoubleSpendState; isDemo: boolean 
       );
     case 'clear':
       return (
-        <Notice tone="chain" title="Safe at 0-conf">
+        <Notice tone="verified" title="Safe at 0-conf">
           The locked coins reached the network and no double-spend attempt was seen in {DSPROOF_WATCH_SEC} seconds. On Bitcoin Cash
           you can rely on it now, without waiting for a block.
         </Notice>
@@ -543,11 +543,11 @@ function ZeroConfNotice({ ds, isDemo }: { ds: DoubleSpendState; isDemo: boolean 
       );
     case 'error':
       return isDemo ? (
-        <Notice tone="warn" title="Could not check for double spends">
+        <Notice tone="attention" title="Could not check for double spends">
           With real money, wait for 1 confirmation before you pay. In this demo no money is sent, so you can continue.
         </Notice>
       ) : (
-        <Notice tone="warn" title="Could not check for double spends">
+        <Notice tone="attention" title="Could not check for double spends">
           Wait for 1 confirmation before you pay.
         </Notice>
       );
@@ -572,7 +572,7 @@ function EscrowCheckNotice({ check }: { check: EscrowCheck | null | 'error' }) {
   }
   if (check.funding === 'missing') {
     return (
-      <Notice tone="warn" title="The deposit is not visible on-chain yet">
+      <Notice tone="attention" title="The deposit is not visible on-chain yet">
         Do not pay until it appears. This browser looks for it at the escrow address every 15 seconds.
       </Notice>
     );
@@ -610,9 +610,9 @@ function PaymentDetails({ trade, fiat }: { trade: Trade; fiat: string }) {
   }, [trade.id, trade.side, trade.tradeId, trade.encryptedPaymentDetails, trade.paymentDetailsSignature, trade.sellerSessionPk]);
 
   if (state.kind === 'loading') return <Skeleton height={96} />;
-  if (state.kind === 'nokey') return <Notice tone="warn">{NO_KEY}</Notice>;
+  if (state.kind === 'nokey') return <Notice tone="attention">{NO_KEY}</Notice>;
   // Invented copy: the key is here but does not open the details.
-  if (state.kind === 'failed') return <Notice tone="warn">The payment details could not be decrypted with this browser's key for the trade.</Notice>;
+  if (state.kind === 'failed') return <Notice tone="attention">The payment details could not be decrypted with this browser's key for the trade.</Notice>;
   // Invented copy.
   if (state.kind === 'unsigned') {
     return (
@@ -690,7 +690,7 @@ function BuyerResult({ trade, amount, payout }: { trade: Trade; amount: string; 
     case 'Released':
     case 'ResolvedBuyer':
       notice = (
-        <Notice tone="chain" title="Trade completed">
+        <Notice tone="verified" title="Trade completed">
           {trade.status === 'Released' ? `The seller released ${amount} to your wallet.` : `The arbiter released ${amount} to your wallet.`} You can
           use them right away: on Bitcoin Cash there is no need to wait for a block.
         </Notice>
@@ -719,11 +719,11 @@ function BuyerResult({ trade, amount, payout }: { trade: Trade; amount: string; 
     case 'ResolvedSeller': {
       const minutes = trade.paymentDeadline && trade.fundedAt ? Math.round((trade.paymentDeadline - trade.fundedAt) / 60) : null;
       notice = trade.disputedAt ? (
-        <Notice tone="warn" title="The arbiter decided for the seller">
+        <Notice tone="attention" title="The arbiter decided for the seller">
           The funds went back to the seller.
         </Notice>
       ) : (
-        <Notice tone="warn" title="The payment window ended">
+        <Notice tone="attention" title="The payment window ended">
           The trade was not marked as paid{minutes ? ` within ${minutes} minutes` : ' in time'}, so the arbiter returned the funds to the
           seller. You were not charged.
         </Notice>

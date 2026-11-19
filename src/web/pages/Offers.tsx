@@ -269,7 +269,6 @@ export function Offers() {
               <OfferRow
                 key={offer.offerTxid}
                 initials={alias.initials}
-                hue={alias.hue}
                 headline={headline}
                 headlineMuted={applies && (outside || !result)}
                 alias={alias.name}

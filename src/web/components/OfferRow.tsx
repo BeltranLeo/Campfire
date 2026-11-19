@@ -7,7 +7,6 @@ import { Skeleton } from './States';
 
 export interface OfferRowProps {
   initials: string;
-  hue: number;
   /** Line 1: what the visitor gets (the amount, or the price). */
   headline: string;
   /** The headline is a hint, not a result (no price, or the amount is outside the range). */
@@ -31,7 +30,7 @@ export function OfferRow(props: OfferRowProps) {
   return (
     <div className="o-row">
       {/* Colour comes from the identity hash; the initials carry the meaning, so it is decoration only. */}
-      <span className="o-avatar" style={{ ['--hue' as string]: props.hue }} aria-hidden="true">
+      <span className="o-avatar" aria-hidden="true">
         {props.initials}
       </span>
       <div className="o-main">

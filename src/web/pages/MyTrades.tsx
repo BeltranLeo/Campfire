@@ -157,13 +157,13 @@ function ActiveTab({ trades, identity }: { trades: Trade[]; identity: string }) 
             </span>
             {next.deadline && next.windowSec ? <Countdown deadline={next.deadline} windowSec={next.windowSec} /> : null}
             {next.turn ? (
-              <span className="cf-pill" data-tone="active">
+              <span className="cf-pill" data-tone="attention">
                 Your turn
               </span>
             ) : trade.status === 'Disputed' ? (
               <StatusPill state={trade.status} role={role} side={trade.side} />
             ) : (
-              <span className="cf-pill" data-tone="idle">
+              <span className="cf-pill" data-tone="escrow">
                 Waiting
               </span>
             )}
@@ -300,7 +300,7 @@ function OffersTab({ identity, trades }: { identity: string; trades: Trade[] }) 
                   · <span className="cf-mono">{formatRange(doc.min, doc.max, asset)}</span>
                 </span>
                 <span className="cf-small cf-muted">
-                  <span className="cf-pill" data-tone={offer.status === 'Published' ? 'done' : undefined}>
+                  <span className="cf-pill" data-tone={offer.status === 'Published' ? 'escrow' : undefined}>
                     {offer.status === 'Published' ? 'Open' : offer.status}
                   </span>{' '}
                   {n} {n === 1 ? 'trade' : 'trades'} · {offer.status === 'Expired' ? 'expired' : 'expires'} {formatDayMonth(doc.expiresAt)} ·{' '}
@@ -320,7 +320,7 @@ function OffersTab({ identity, trades }: { identity: string; trades: Trade[] }) 
                 )}
               </div>
               {offer.status !== 'Closed' && (
-                <Button variant="danger" size="sm" signs busy={closing === offer.offerTxid} disabled={closing !== null && closing !== offer.offerTxid} onClick={() => close(offer)}>
+                <Button size="sm" signs busy={closing === offer.offerTxid} disabled={closing !== null && closing !== offer.offerTxid} onClick={() => close(offer)}>
                   Close offer
                 </Button>
               )}

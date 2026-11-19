@@ -30,19 +30,19 @@
   align-items: center;
   font-size: 13px;
   line-height: 18px;
-  color: var(--ink);
+  color: var(--text);
 }
 
 .pr-dot {
   width: 20px;
   height: 20px;
-  border-radius: 50%;
-  border: 1.5px solid var(--line-strong);
-  background: var(--surface-sunken);
-  color: var(--ink-muted);
+  border-radius: var(--radius-pill);
+  border: 1.5px solid var(--border);
+  background: var(--bg);
+  color: var(--text-muted);
   display: grid;
   place-items: center;
-  font: 700 11px/1 var(--font-sans);
+  font: 600 11px/1 var(--font-text);
   font-variant-numeric: tabular-nums;
 }
 

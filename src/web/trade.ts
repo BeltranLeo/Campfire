@@ -94,6 +94,34 @@ export interface Step {
   offchain?: boolean;
   simulated?: boolean;
   note?: string;
+  /** Whose move a current step is, for its colour: Brasa when it is yours, blue while someone else works, violet for the arbiter. */
+  turn?: Turn;
+}
+
+export type Turn = 'you' | 'other' | 'arbiter';
+
+/** Who has to act in an open trade, or undefined once it has ended. On a buy offer the buyer accepts the request. */
+function actor(status: TradeState, side: 'sell' | 'buy'): 'buyer' | 'seller' | 'arbiter' | undefined {
+  switch (status) {
+    case 'Requested':
+      return side === 'buy' ? 'buyer' : 'seller';
+    case 'Accepted':
+    case 'Paid':
+      return 'seller';
+    case 'Funded':
+      return 'buyer';
+    case 'Disputed':
+      return 'arbiter';
+    default:
+      return undefined;
+  }
+}
+
+/** Whose move an open trade waits for, seen by `role`. */
+export function turnOf(status: TradeState, role: Role, side: 'sell' | 'buy'): Turn | undefined {
+  const who = actor(status, side);
+  if (who === undefined) return undefined;
+  return who === 'arbiter' ? 'arbiter' : who === role ? 'you' : 'other';
 }
 
 /**
@@ -102,6 +130,11 @@ export interface Step {
  * view adds a step for accepting before the deposit and words every step as "you".
  */
 export function timeline(trade: Trade, role: Role, amount: string): Step[] {
+  const turn = turnOf(trade.status, role, trade.side ?? 'sell');
+  return storySteps(trade, role, amount).map((step) => (step.state === 'current' ? { ...step, turn } : step));
+}
+
+function storySteps(trade: Trade, role: Role, amount: string): Step[] {
   const you = role === 'buyer';
   const mine = role === 'seller';
   const buyer = you ? 'You' : 'Buyer';

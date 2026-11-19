@@ -232,7 +232,7 @@ export function SellerAction(props: { trade: Trade; amount: string; fiat: string
     </Notice>
   );
   const disputeButton = !disputing && (
-    <Button disabled={busy !== null} onClick={() => setDisputing(true)}>
+    <Button variant="arbiter" disabled={busy !== null} onClick={() => setDisputing(true)}>
       Open dispute
     </Button>
   );
@@ -242,7 +242,7 @@ export function SellerAction(props: { trade: Trade; amount: string; fiat: string
   const walletNotices = (
     <>
       {short && coins.data && (
-        <Notice tone="warn" title="Your wallet does not have enough BCH">
+        <Notice tone="attention" title="Your wallet does not have enough BCH">
           Locking needs about {formatBch(depositNeeds(trade))} and Campfire can see{' '}
           {formatBch(spendableBch(coins.data.coins))} in this wallet. {describeScan(coins.data)} Send some BCH to it: this page checks
           again every few seconds.{' '}
@@ -260,7 +260,7 @@ export function SellerAction(props: { trade: Trade; amount: string; fiat: string
         </Notice>
       )}
       {!isBch && (
-        <Notice tone="warn" title="Locking PUSD is not available yet">
+        <Notice tone="attention" title="Locking PUSD is not available yet">
           This trade is for a token. Only BCH trades can be locked from this page for now.
         </Notice>
       )}
@@ -285,7 +285,7 @@ export function SellerAction(props: { trade: Trade; amount: string; fiat: string
   };
   const releaseChecks = (
     <>
-      <Notice tone="warn" title="Only your bank app counts">
+      <Notice tone="attention" title="Only your bank app counts">
         Don't trust screenshots or messages. Once you release, {locked} can't come back.
       </Notice>
       <div className="cf-stack" data-gap="2">
@@ -298,9 +298,10 @@ export function SellerAction(props: { trade: Trade; amount: string; fiat: string
       </div>
     </>
   );
-  const releaseButton = (variant?: 'primary') => (
+  // Releasing cannot be undone, so the button is red (danger), not the Brasa of an ordinary next step.
+  const releaseButton = () => (
     <Button
-      variant={variant}
+      variant="danger"
       signs
       busy={busy === 'release'}
       disabled={!releaseReady(ticked) || (busy !== null && busy !== 'release')}
@@ -316,7 +317,7 @@ export function SellerAction(props: { trade: Trade; amount: string; fiat: string
     // Invented copy: the design shows the buyer's side of this wait only.
     return (
       <ActionCard
-        step="Waiting"
+        turn="other"
         progress={progress}
         title="Waiting for the buyer to accept"
         reassurance="Nothing is locked yet. You sign only when you lock the coins."
@@ -341,7 +342,7 @@ export function SellerAction(props: { trade: Trade; amount: string; fiat: string
   if (trade.side === 'buy' && trade.status === 'Accepted') {
     return (
       <ActionCard
-        step="Your turn"
+        turn="you"
         progress={progress}
         title={`The buyer accepted. Lock ${locked} and share how to pay you.`}
         reassurance="The contract can only pay the buyer or return the coins to you. Campfire cannot move them."
@@ -389,7 +390,7 @@ export function SellerAction(props: { trade: Trade; amount: string; fiat: string
       return (
         <>
           <ActionCard
-            step="Your turn"
+            turn="you"
             progress={progress}
             title="Accept this buyer"
             deadline={
@@ -415,7 +416,7 @@ export function SellerAction(props: { trade: Trade; amount: string; fiat: string
               </Notice>
             )}
             {expired && (
-              <Notice tone="warn" title="This request expired">
+              <Notice tone="attention" title="This request expired">
                 The signed quote ran out. The request is dropped and nothing was locked.
               </Notice>
             )}
@@ -443,7 +444,7 @@ export function SellerAction(props: { trade: Trade; amount: string; fiat: string
     case 'Accepted':
       return (
         <ActionCard
-          step="Your turn"
+          turn="you"
           progress={progress}
           title={deposit ? `Lock ${deposit} for this trade` : `Lock ${locked} for this trade`}
           reassurance="The contract can only pay the buyer or return the coins to you. Campfire cannot move them."
@@ -473,7 +474,7 @@ export function SellerAction(props: { trade: Trade; amount: string; fiat: string
       const windowSec = trade.paymentDeadline && trade.fundedAt ? trade.paymentDeadline - trade.fundedAt : 0;
       return (
         <ActionCard
-          step="Waiting"
+          turn="other"
           progress={progress}
           title="Waiting for the buyer's payment"
           reassurance={`${capitalize(locked)} ${lockVerb(trade.asset)} locked. It can only go to the buyer or back to you.`}
@@ -498,7 +499,7 @@ export function SellerAction(props: { trade: Trade; amount: string; fiat: string
     case 'Paid':
       return (
         <ActionCard
-          step="Your turn"
+          turn="you"
           progress={progress}
           title="The buyer says they paid. Check your bank."
           reassurance={`${capitalize(locked)} ${lockVerb(trade.asset)} locked until you release. Take the time to check.`}
@@ -507,7 +508,7 @@ export function SellerAction(props: { trade: Trade; amount: string; fiat: string
           {failure}
           {disputeForm}
           <div className="s-actions">
-            {releaseButton('primary')}
+            {releaseButton()}
             {disputeButton}
           </div>
           <Details summary="Not received yet?" tag={null}>
@@ -521,7 +522,7 @@ export function SellerAction(props: { trade: Trade; amount: string; fiat: string
     case 'Disputed': {
       const opened = trade.disputedAt !== undefined ? formatDateTime(trade.disputedAt) : null;
       return (
-        <ActionCard step="Paused · In dispute" title="The arbiter is reviewing this trade">
+        <ActionCard turn="arbiter" title="The arbiter is reviewing this trade">
           <p className="cf-muted">
             {trade.disputedBy === 'seller' ? 'You opened a dispute' : 'The buyer opened a dispute'}
             {opened ? ` on ${opened}` : ''}. The arbiter can now read the chat and will decide for the buyer or the seller. If you receive the payment
@@ -687,7 +688,7 @@ export function SellerResult({ trade, amount }: { trade: Trade; amount: string }
   switch (trade.status) {
     case 'Released':
       notice = (
-        <Notice tone="chain" title="Trade completed">
+        <Notice tone="verified" title="Trade completed">
           You released {amount} to the buyer. The fiat payment happened off-chain: it is between you and the buyer.
         </Notice>
       );
@@ -695,7 +696,7 @@ export function SellerResult({ trade, amount }: { trade: Trade; amount: string }
       break;
     case 'ResolvedBuyer':
       notice = (
-        <Notice tone="warn" title="The arbiter decided for the buyer">
+        <Notice tone="attention" title="The arbiter decided for the buyer">
           The {amount} went to the buyer.
         </Notice>
       );
