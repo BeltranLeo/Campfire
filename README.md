@@ -21,6 +21,33 @@ Details are in [Identity and sign-in](docs/protocol.md#identity-and-sign-in).
 
 The app does not show your identity hash. It shows a name made from it, such as «Quiet Cedar», the same on every screen. Nobody chooses it. It helps to recognise someone, but it is not proof of who they are: two people can share a name, and anyone can generate wallets until one lands on a name they want to imitate. Judge a counterparty by their completed trades, which Campfire counts and which can be inflated with a second wallet. Choosing your own name is planned and not built yet.
 
+## Try it
+
+The demo opens with one click and needs no registration: <https://campfire-rosy.vercel.app/>. You can browse without a wallet and trade with one (WizardConnect, top right).
+
+## What is real and what is simulated
+
+- **Real:** the escrow contract, its signatures and every transaction below. They are on Bitcoin Cash mainnet and the coins are real, in small amounts.
+- **Simulated:** in the demo the seller is a bot run by the service, and the fiat payment does not happen. Every demo offer and trade carries a visible «Simulated» label in the app.
+- **Not yet run on mainnet:** the `arbitrate` and `refund` paths of the contract and the closing of an offer. They are implemented, but no real transaction exists for them yet, so none is listed below.
+
+## Real transactions on mainnet
+
+One transaction for each contract path that has run on mainnet. The code links are pinned to commit [`1c99132`](https://github.com/BeltranLeo/Campfire/tree/1c9913240dfb9b3d494a0d9b814419b4a216d5cb), the one this table was written against, so the line numbers do not drift. The code has changed since these transactions were made, so the link points at the function that builds that kind of transaction today.
+
+| Path | What it does | Transaction | Code that builds it |
+| --- | --- | --- | --- |
+| Publish an offer | Writes the offer's hash in an `OP_RETURN` and a 1,000-sat marker; locks nothing | [`48946f57…3816`](https://blockchair.com/bitcoin-cash/transaction/48946f57a8a13ee7173b8529a0b41d020f4225891a1fa4339bbf9c7cc42f3816) | [`demo.ts:363`](https://github.com/BeltranLeo/Campfire/blob/1c9913240dfb9b3d494a0d9b814419b4a216d5cb/src/server/demo.ts#L363) → [`offers.ts:347`](https://github.com/BeltranLeo/Campfire/blob/1c9913240dfb9b3d494a0d9b814419b4a216d5cb/src/protocol/offers.ts#L347) |
+| Fund | The seller locks the coins in the escrow address `bitcoincash:pwsm78j96g8jyz6rpjmzaqfm64q727zgnhzrap7vux8m9v3akla8s3dxhhj5u` | [`c065c11d…09ff`](https://blockchair.com/bitcoin-cash/transaction/c065c11d078b15e4847d52611404042247f0e6ac4b3fea0c68cae3dd2b1609ff) | [`demo.ts:568`](https://github.com/BeltranLeo/Campfire/blob/1c9913240dfb9b3d494a0d9b814419b4a216d5cb/src/server/demo.ts#L568) → [`escrow.ts:317`](https://github.com/BeltranLeo/Campfire/blob/1c9913240dfb9b3d494a0d9b814419b4a216d5cb/src/protocol/escrow.ts#L317) |
+| `release` | The seller's signature pays the buyer; it spends the output of the fund transaction above | [`c957a840…0a18`](https://blockchair.com/bitcoin-cash/transaction/c957a8401bdb9748010bad67da0e8ad09eaecb383b91affb8b7c055728230a18) | [`demo.ts:603`](https://github.com/BeltranLeo/Campfire/blob/1c9913240dfb9b3d494a0d9b814419b4a216d5cb/src/server/demo.ts#L603) → [`escrow.ts:198`](https://github.com/BeltranLeo/Campfire/blob/1c9913240dfb9b3d494a0d9b814419b4a216d5cb/src/protocol/escrow.ts#L198) |
+| `cancel` | The buyer's wallet signs and the funds return to the seller; it spends the output of a different trade's deposit, [`59421e3c…628d`](https://blockchair.com/bitcoin-cash/transaction/59421e3c8e13bb13487204e196e727e2a6b90f01a1ca66190517e1f2fdd8628d) | [`6d3bbebd…4405`](https://blockchair.com/bitcoin-cash/transaction/6d3bbebda998b9fe9b5b9740f47e25be44c179372957214c799a35e9656e4405) | [`TradePage.tsx:267`](https://github.com/BeltranLeo/Campfire/blob/1c9913240dfb9b3d494a0d9b814419b4a216d5cb/src/web/pages/TradePage.tsx#L267) → [`trade.ts:330`](https://github.com/BeltranLeo/Campfire/blob/1c9913240dfb9b3d494a0d9b814419b4a216d5cb/src/web/trade.ts#L330) → [`escrow.ts:221`](https://github.com/BeltranLeo/Campfire/blob/1c9913240dfb9b3d494a0d9b814419b4a216d5cb/src/protocol/escrow.ts#L221) |
+
+The same list, with dates, is on the app's transparency page (`src/web/proof.ts`). The contract paths are in [`contracts/CampfireEscrow.cash`](contracts/CampfireEscrow.cash).
+
+## Vote for Campfire
+
+CashTokens address for the public vote: `bitcoincash:zrkupj9hdtgk0nc3ygmjzw89e2hyfuwen5dnp77rrq`
+
 ## Run it
 
 ```bash
