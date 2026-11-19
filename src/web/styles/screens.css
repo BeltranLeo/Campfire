@@ -162,3 +162,26 @@
   .s-balance > strong { font-size: 32px; line-height: 36px; }
   .cf-card[data-pad] { padding: var(--space-4); }
 }
+
+/* ---------- One screen on a phone: the chrome takes as little height as it can ---------- */
+.cf-logo > img[data-symbol] { display: none; }
+/* Theme and technical details sit behind one line in the footer. */
+.s-footsettings > summary { cursor: pointer; list-style: none; text-decoration: underline; text-underline-offset: 2px; white-space: nowrap; }
+.s-footsettings > summary::-webkit-details-marker { display: none; }
+.s-footsettings > summary::after { content: " ▾"; }
+.s-footsettings[open] > summary::after { content: " ▴"; }
+.s-footsettings__body { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-3) var(--space-6); padding-top: var(--space-3); }
+@media (max-width: 719px) {
+  /* Logo symbol, nav and wallet button in one row; the nav scrolls sideways and fades at the edge when it overflows. */
+  .s-headerbar { flex-wrap: nowrap; }
+  .s-headerbar > .cf-nav { order: 0; flex: 1 1 auto; flex-basis: auto; min-width: 0; margin: 0; scrollbar-width: none; -webkit-mask: linear-gradient(to right, #000 calc(100% - 24px), transparent); mask: linear-gradient(to right, #000 calc(100% - 24px), transparent); }
+  .s-headerbar > .cf-nav::-webkit-scrollbar { display: none; }
+  .s-headerbar > .cf-grow { display: none; }
+  .s-headerbar > .cf-nav[data-app] + .cf-grow { display: block; }
+  .cf-nav a { padding: var(--space-2); }
+  .cf-header { padding-top: var(--space-2); padding-bottom: var(--space-2); }
+  .cf-logo > img[data-theme-only] { display: none !important; }
+  .cf-logo > img[data-symbol] { display: block; height: 28px; }
+  .cf-footer { padding: var(--space-4); }
+  .s-footer { gap: var(--space-3) var(--space-4); }
+}

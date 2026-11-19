@@ -6,6 +6,7 @@ import { useWalletCoinsSync } from '../walletCoins';
 import { useWallet } from '../wallet';
 import logoDark from '../logos/logo-dark.svg';
 import logoLight from '../logos/logo-light.png';
+import logoSymbol from '../logos/symbol-64.png';
 import { AdvancedSwitch } from './AdvancedSwitch';
 import { CopyButton } from './CopyButton';
 import { BottomNav, WalletButton, WalletError } from './Wallet';
@@ -41,6 +42,8 @@ export function Shell() {
           <Link className="cf-logo" to="/" aria-label="Campfire, home">
             <img src={logoLight} alt="" data-theme-only="light" />
             <img src={logoDark} alt="" data-theme-only="dark" />
+            {/* On a phone only the symbol shows, so the logo, the nav and the wallet button share one row. */}
+            <img src={logoSymbol} alt="" data-symbol />
           </Link>
           <nav className="cf-nav" data-app={connected || undefined} aria-label="Main">
             {nav.map((item) => (
@@ -107,10 +110,16 @@ function Footer() {
           <a href={REPO_URL}>GitHub</a>
           <a href={PROTOCOL_SPEC_URL}>Protocol spec</a>
           <span>Mainnet. Real funds.</span>
-          <ThemeSwitch />
-          {/* Also here, so a visitor without a wallet (a judge, say) can open every technical detail at once. */}
-          <AdvancedSwitch compact />
         </div>
+        {/* Display settings fold into one line so the footer stays short on a phone. The technical-details switch is
+            also here, so a visitor without a wallet (a judge, say) can open every technical detail at once. */}
+        <details className="s-footsettings">
+          <summary>Display settings</summary>
+          <div className="s-footsettings__body">
+            <ThemeSwitch />
+            <AdvancedSwitch compact />
+          </div>
+        </details>
       </div>
     </footer>
   );
