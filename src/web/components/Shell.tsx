@@ -9,6 +9,7 @@ import logoLight from '../logos/logo-light.png';
 import logoSymbol from '../logos/symbol-64.png';
 import { AdvancedSwitch } from './AdvancedSwitch';
 import { CopyButton } from './CopyButton';
+import { NavBadge, NotificationsProvider } from './Notifications';
 import { BottomNav, WalletButton, WalletError } from './Wallet';
 
 // Visitors without a wallet see the public pages; the logo leads back to the landing page at "/".
@@ -19,22 +20,25 @@ const PUBLIC_NAV = [
   { to: '/transparency', label: 'Transparency' },
 ];
 
-// With a wallet, "/" becomes Home. Below 720px this nav is hidden and BottomNav takes over.
-// Chats is left out until the page exists: a link to an unbuilt page reads as a hidden mock-up.
+// With a wallet, "/" becomes Home. Below 720px this nav is hidden and BottomNav takes over. Trades counts the trades
+// waiting for this person, Chats the unread messages (components/Notifications.tsx).
 const APP_NAV = [
   { to: '/', label: 'Home' },
   { to: '/offers', label: 'Offers' },
   { to: '/trades', label: 'Trades' },
+  { to: '/chats', label: 'Chats' },
 ];
 
 export function Shell() {
-  const connected = useWallet().status === 'connected';
+  const wallet = useWallet();
+  const connected = wallet.status === 'connected';
   // One read of the wallet's coins feeds the balance in the header and the pages that need the coins.
   useWalletCoinsSync();
   const nav = connected ? APP_NAV : PUBLIC_NAV;
 
+  // The provider is always there, so connecting or disconnecting never remounts the page; it is idle without a wallet.
   return (
-    <>
+    <NotificationsProvider identity={connected ? wallet.identity : null}>
       <Banner />
       <header className="cf-header">
         <div className="s-headerbar">
@@ -50,6 +54,7 @@ export function Shell() {
               // `end` keeps "/" from matching every route.
               <NavLink key={item.to} to={item.to} end={item.to === '/'}>
                 {item.label}
+                {connected && <NavBadge to={item.to} />}
               </NavLink>
             ))}
           </nav>
@@ -61,7 +66,7 @@ export function Shell() {
       <Outlet />
       <Footer />
       {connected && <BottomNav />}
-    </>
+    </NotificationsProvider>
   );
 }
 

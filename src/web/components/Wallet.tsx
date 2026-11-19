@@ -11,6 +11,7 @@ import { Icon, type IconName } from './Icon';
 import { HashLink, shorten } from './Provenance';
 import { Notice, Skeleton } from './States';
 import { AdvancedSwitch } from './AdvancedSwitch';
+import { NavBadge } from './Notifications';
 
 // The WizardConnect button at the top right, in its four states (Shell-* screens):
 // disconnected, pairing, connecting and connected with its menu.
@@ -324,18 +325,19 @@ const BOTTOM_NAV: { to: string; label: string; icon: IconName }[] = [
   { to: '/', label: 'Home', icon: 'home' },
   { to: '/offers', label: 'Offers', icon: 'offers' },
   { to: '/trades', label: 'Trades', icon: 'trades' },
+  { to: '/chats', label: 'Chats', icon: 'chats' },
 ];
 
 // With a wallet and below 720px, the main sections move to a bar at the bottom (CSS hides it on wider screens).
+// Trades counts the trades waiting for this person and Chats the unread messages, as in the header.
 export function BottomNav() {
-  const { activeTrades } = useWallet();
   return (
     <nav className="cf-bottomnav" aria-label="Main">
       {BOTTOM_NAV.map((item) => (
         <NavLink key={item.to} to={item.to} end={item.to === '/'}>
           <Icon name={item.icon} />
           {item.label}
-          {item.to === '/trades' && activeTrades ? <span className="cf-badge">{activeTrades}</span> : null}
+          <NavBadge to={item.to} />
         </NavLink>
       ))}
     </nav>

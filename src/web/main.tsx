@@ -12,8 +12,9 @@ import './styles/create.css';
 import './styles/welcome.css';
 import './styles/pairing.css';
 import './styles/home.css';
-import './styles/chats.css';
 import './styles/chat.css';
+import './styles/chats.css';
+import './styles/notifications.css';
 import './styles/app.css';
 
 // Resume a wallet paired on an earlier visit before the first render.

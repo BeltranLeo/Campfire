@@ -1,0 +1,52 @@
+/* In-app notifications: the toast. Nav counters reuse .cf-badge from components.css. */
+
+/* The bottom bar gains Chats, as in the design (four columns); components.css still has the three of before. */
+.cf-bottomnav { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+/* In the header nav the counter follows the label. */
+.cf-nav a > .cf-badge { margin-left: var(--space-1); vertical-align: 1px; }
+
+/* Words for screen readers only, next to a bare number. */
+.nt-sronly { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+
+/* The live region is always in the page and lets clicks through; only the toast inside takes them. Above the bottom
+   bar (10), below the wallet menu (20) and dialogs (30). */
+.nt-host { position: fixed; left: 0; right: 0; bottom: var(--space-4); z-index: 15; display: flex; justify-content: center; padding: 0 var(--space-4); pointer-events: none; }
+@media (max-width: 719px) {
+  /* Clear the bar: 56px tabs, their 3px line, the bar's border and padding, and the phone's safe area. */
+  .nt-host { bottom: calc(56px + 3px + 1px + var(--space-2) + env(safe-area-inset-bottom, 0px) + var(--space-3)); }
+}
+
+.nt-toast {
+  --tone: var(--text-muted);
+  pointer-events: auto;
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-2);
+  width: min(calc(var(--layout-app-max-width) - 2 * var(--layout-app-margin)), 100%);
+  background: var(--glass);
+  -webkit-backdrop-filter: blur(18px);
+  backdrop-filter: blur(18px);
+  border: 1px solid var(--border);
+  border-top-color: var(--glass-edge);
+  border-left: 4px solid var(--tone);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-sheet);
+  animation: nt-in 160ms ease-out;
+}
+.nt-toast[data-tone="attention"] { --tone: var(--attention); }
+.nt-toast[data-tone="arbiter"] { --tone: var(--arbiter); }
+.nt-toast[data-tone="verified"] { --tone: var(--verified); }
+.nt-toast[data-tone="escrow"] { --tone: var(--escrow); }
+
+.nt-toast__link { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; padding: var(--space-3) 0 var(--space-3) var(--space-4); color: var(--text) !important; text-decoration: none; border-radius: var(--radius-lg) 0 0 var(--radius-lg); }
+.nt-toast__link:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px; }
+.nt-toast__label { font: 600 12px/16px var(--font-text); letter-spacing: 0.06em; text-transform: uppercase; color: var(--tone); }
+.nt-toast__title { font: 600 15px/20px var(--font-text); }
+.nt-toast__body { font: 400 13px/18px var(--font-text); color: var(--text-muted); overflow-wrap: anywhere; }
+
+.nt-toast__close { flex: none; display: grid; place-items: center; width: 44px; height: 44px; margin: var(--space-1) var(--space-1) 0 0; border: 0; border-radius: var(--radius-md); background: none; color: var(--text-muted); font: 400 22px/1 var(--font-text); cursor: pointer; }
+.nt-toast__close:hover { color: var(--text); background: var(--bg); }
+.nt-toast__close:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: -2px; }
+
+@keyframes nt-in { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
+@media (prefers-reduced-motion: reduce) { .nt-toast { animation: none; } }
