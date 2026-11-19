@@ -14,7 +14,9 @@ import { Details } from '../components/Details';
 import { HashLink, ProvenanceTag, SimBox } from '../components/Provenance';
 import { EmptyState, Notice, Skeleton } from '../components/States';
 import { StatusPill } from '../components/StatusPill';
+import { TradeChat } from '../components/TradeChat';
 import { Countdown, Timeline, confirmationsText } from '../components/Timeline';
+import { NO_CHAT_KEY } from '../chat';
 import { useConfig } from '../config';
 import { electrum } from '../electrum';
 import {
@@ -61,7 +63,7 @@ import { WalletDeclined, useWallet } from '../wallet';
 // card (the only part that changes with the state), progress, and the on-chain details folded away.
 // The buyer can mark paid, open a dispute and cancel; the arbiter console is its own page (Arbiter.tsx).
 // The seller's own view is in SellerTrade.tsx. On a buy offer the buyer also accepts the seller's request here
-// (Trade-BuyOffer-Buyer). Not here yet: the chat (step 12).
+// (Trade-BuyOffer-Buyer). Under progress the buyer and the seller get the trade chat (TradeChat.tsx).
 
 const POLL_MS = 3000;
 // Invented copy: generic reasons for a dispute, chosen from a list.
@@ -71,7 +73,6 @@ const DISPUTE_REASONS = [
   'The seller is not answering',
   'Something else',
 ];
-const NO_KEY = 'This browser does not have the key for this trade. Open it on the device where you started it.';
 
 export function TradePage() {
   const { id = '' } = useParams();
@@ -193,6 +194,8 @@ function TradeView({ trade, role, onUpdate, reload }: { trade: Trade; role: Role
         )}
 
         <ProgressCard steps={timeline(trade, view, amount)} />
+
+        {(view === 'buyer' || view === 'seller') && <TradeChat trade={trade} role={view} />}
 
         <OnChainDetails trade={trade} asset={asset} amount={amount} fiat={fiat} payout={payout} check={check} ds={ds} view={view} />
       </div>
@@ -625,7 +628,7 @@ function PaymentDetails({ trade, fiat }: { trade: Trade; fiat: string }) {
   }, [trade.id, trade.side, trade.tradeId, trade.encryptedPaymentDetails, trade.paymentDetailsSignature, trade.sellerSessionPk]);
 
   if (state.kind === 'loading') return <Skeleton height={96} />;
-  if (state.kind === 'nokey') return <Notice tone="attention">{NO_KEY}</Notice>;
+  if (state.kind === 'nokey') return <Notice tone="attention">{NO_CHAT_KEY}</Notice>;
   // Invented copy: the key is here but does not open the details.
   if (state.kind === 'failed') return <Notice tone="attention">The payment details could not be decrypted with this browser's key for the trade.</Notice>;
   // Invented copy.

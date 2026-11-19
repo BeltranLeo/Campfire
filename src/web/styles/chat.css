@@ -1,0 +1,8 @@
+/* Trade chat card on /trade/:id (.cf-chat and .cf-msg live in components.css). */
+
+/* The list scrolls inside the card, so a long chat never pushes the on-chain details far down the page; it follows
+   new messages only while the reader is at the newest one (TradeChat.tsx). The arbiter's chat is not capped. */
+.tr-chat .cf-chat { max-height: min(45vh, 360px); overflow-y: auto; }
+.tr-chat .cf-msg { overflow-wrap: anywhere; }
+/* /trade/:id?chat scrolls the card into view; from 720 px the header is sticky and would cover its heading. */
+@media (min-width: 720px) { .tr-chat { scroll-margin-top: 88px; } }
