@@ -178,21 +178,16 @@ export class CampfireService {
   async registerIdentity(params: {
     defiXpub: string;
     receiveXpub: string;
-    changeXpub?: string;
   }): Promise<UserIdentityRecord> {
     const identity = identityFromDefiXpub(params.defiXpub);
-    // Validate receiveXpub (and optional changeXpub) by deriving index 0.
+    // Validate receiveXpub by deriving index 0.
     verifyDerivedPayoutPkh(params.receiveXpub, 0, new Uint8Array(20));
-    if (params.changeXpub) {
-      verifyDerivedPayoutPkh(params.changeXpub, 0, new Uint8Array(20));
-    }
     const now = this.nowSeconds();
     const existing = await this.options.storage.getIdentity(identity);
     const record: UserIdentityRecord = {
       identity,
       defiXpub: params.defiXpub.trim(),
       receiveXpub: params.receiveXpub.trim(),
-      changeXpub: params.changeXpub?.trim(),
       createdAt: existing?.createdAt ?? now,
       updatedAt: now,
     };

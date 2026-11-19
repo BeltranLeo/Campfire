@@ -22,7 +22,6 @@ export interface UserIdentityRecord {
   identity: string;
   defiXpub: string;
   receiveXpub: string;
-  changeXpub?: string;
   createdAt: number;
   updatedAt: number;
 }

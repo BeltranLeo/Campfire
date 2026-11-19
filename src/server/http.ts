@@ -104,7 +104,6 @@ export function createApiHandler(deps: {
         const body = await readJson<{
           defiXpub: string;
           receiveXpub: string;
-          changeXpub?: string;
         }>(req);
         const record = await service.registerIdentity(body);
         const reputation = await service.getReputation(record.identity);

@@ -10,7 +10,7 @@ The protocol, including the contract, the offer format and the trade states, is 
 
 Please read this before connecting a wallet.
 
-- **Your wallet's three extended public keys** (`defi`, `receive` and `change`). Connecting a wallet sends them to the service, which stores them unencrypted and does not delete them. It needs them to check the keys and payout addresses of each trade.
+- **Two of your wallet's extended public keys** (`defi` and `receive`). Connecting a wallet sends them to the service, which stores them unencrypted and does not delete them. It needs them to check the keys and payout addresses of each trade. The `change` key stays in your browser: the service never receives it.
 - **What that allows.** Whoever can read the service's database can derive every address of your wallet on those paths, see their balances and history, and link all your trades together. They cannot spend your coins: no private key ever reaches the service.
 - **Who else sees them.** No endpoint returns your keys to other users. Your counterparty receives only the keys derived for the trade you share.
 - **What the network sees.** The browser reads balances from a public Electrum server, which sees the addresses it is asked about and your IP address.

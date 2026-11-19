@@ -255,7 +255,6 @@ class WalletController {
       const result = await apiPost<RegisteredIdentity>('/api/identities', {
         defiXpub: xpubs.defi,
         receiveXpub: xpubs.receive,
-        changeXpub: xpubs.change,
       });
       if (this.manager !== manager) return;
       this.registeredDefi = defi;

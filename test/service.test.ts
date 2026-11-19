@@ -741,6 +741,22 @@ describe('CampfireService & HTTP API end-to-end lifecycle', () => {
   });
 });
 
+describe('Identity registration', () => {
+  it('stores only the defi and receive keys, even when an old client also sends the change key', async () => {
+    const ctx = setupTestContext();
+    const reg = await ctx.jsonReq('POST', '/api/identities', {
+      defiXpub: seller.defiXpub,
+      receiveXpub: seller.receiveXpub,
+      changeXpub: buyer.receiveXpub,
+    });
+    expect(reg.status).toBe(201);
+    expect(reg.data.record).not.toHaveProperty('changeXpub');
+    const stored = await ctx.storage.getIdentity(reg.data.identity);
+    expect(stored).not.toBeNull();
+    expect(Object.keys(stored!).sort()).toEqual(['createdAt', 'defiXpub', 'identity', 'receiveXpub', 'updatedAt']);
+  });
+});
+
 describe('Service fees (protocol section 5.1)', () => {
   // Publishes a floating BCH offer, takes 0.01 BCH of it and accepts, so the terms carry the fees.
   async function acceptedFloatingTrade(ctx: ReturnType<typeof setupTestContext>) {
