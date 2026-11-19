@@ -130,7 +130,7 @@ function TakeOffer({ offer }: { offer: Offer }) {
   const [wanted, setWanted] = useState<AmountMode>('fiat');
   const [fiatInput, setFiatInput] = useState<string | null>(null);
   const [coinInput, setCoinInput] = useState(() => toAmountInput(doc.min, asset));
-  const mode = effectiveMode(wanted, { isBch: asset.isBch, hasPrice: priced });
+  const mode = effectiveMode(wanted, { hasPrice: priced });
   const priceArgs = unitPrice ? { unitPrice, marginBps, assetDecimals: doc.assetDecimals } : null;
   const fiatOf = (units: bigint) => (priceArgs && priced ? fiatForUnits({ units, ...priceArgs }) : null);
   // Until the buyer types, the field offers the fiat price of the smallest amount.
@@ -242,21 +242,18 @@ function TakeOffer({ offer }: { offer: Offer }) {
         <section className="cf-card" data-pad>
           <div className="s-form">
             <div className="cf-field" data-invalid={!inRange || undefined}>
-              {asset.isBch ? (
-                <div className="tk-label">
-                  <label htmlFor="amount">You pay</label>
-                  <div className="cf-seg" role="group" aria-label="Type the amount in">
-                    <button type="button" aria-pressed={mode === 'fiat'} disabled={!priced} title={priced ? undefined : priceUnavailable} onClick={() => chooseMode('fiat')}>
-                      {doc.fiat}
-                    </button>
-                    <button type="button" aria-pressed={mode === 'coin'} onClick={() => chooseMode('coin')}>
-                      {asset.symbol}
-                    </button>
-                  </div>
+              {/* Pesos or coins for every coin: a PUSD buyer thinks in their own money as much as a BCH buyer. */}
+              <div className="tk-label">
+                <label htmlFor="amount">You pay</label>
+                <div className="cf-seg" role="group" aria-label="Type the amount in">
+                  <button type="button" aria-pressed={mode === 'fiat'} disabled={!priced} title={priced ? undefined : priceUnavailable} onClick={() => chooseMode('fiat')}>
+                    {doc.fiat}
+                  </button>
+                  <button type="button" aria-pressed={mode === 'coin'} onClick={() => chooseMode('coin')}>
+                    {asset.symbol}
+                  </button>
                 </div>
-              ) : (
-                <label htmlFor="amount">Amount to buy</label>
-              )}
+              </div>
               <div className="cf-inputgroup">
                 <input
                   id="amount"

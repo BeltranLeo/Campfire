@@ -11,9 +11,9 @@ export function usablePrice(unitPrice: string | null, marginBps: number, assetDe
   return unitPrice !== null && unitsForFiat({ fiatCents: 100n, unitPrice, marginBps, assetDecimals }) !== null;
 }
 
-/** Fiat input only for BCH with a usable price; tokens and offers without a price fall back to typing the coin. */
-export function effectiveMode(wanted: AmountMode, opts: { isBch: boolean; hasPrice: boolean }): AmountMode {
-  return wanted === 'fiat' && opts.isBch && opts.hasPrice ? 'fiat' : 'coin';
+/** Fiat input whenever the offer has a usable price, for BCH and tokens alike; without one, the coin is typed. */
+export function effectiveMode(wanted: AmountMode, opts: { hasPrice: boolean }): AmountMode {
+  return wanted === 'fiat' && opts.hasPrice ? 'fiat' : 'coin';
 }
 
 export interface AmountResult {
