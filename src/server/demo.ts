@@ -34,14 +34,17 @@ import {
   buildPublishOfferTransaction,
   buildReleaseRequest,
   createEscrowContract,
+  deriveSharedTradeKey,
   derivePayoutPkhFromXpub,
   expectedEscrowFunding,
   derivePubkeyFromXpub,
+  encryptChatMessage,
   encryptPaymentDetails,
   identityFromDefiXpub,
   matchesEscrowFunding,
   pkhToCashAddress,
   pkhToLockingBytecode,
+  signChatMessage,
   signPaymentDetails,
   toBytes,
   validateOfferDocument,
@@ -68,6 +71,8 @@ const ACTIVE_STATES: TradeState[] = ['Requested', 'Accepted', 'Funded', 'Paid', 
 const SELLER_PAYOUT_STATES: TradeState[] = ['Cancelled', 'ResolvedSeller', 'Refunded'];
 
 export const DEMO_PAYMENT_METHOD = 'simulated';
+export const DEMO_GREETING =
+  'Automatic message from the demo seller: the coins are locked in the escrow. Send the simulated payment and mark it as paid.';
 export const DEMO_OFFER_TERMS =
   'DEMO OFFER. The fiat payment is simulated: do not send any money, just mark the trade as paid. ' +
   'The escrow, the release and every other on-chain step are real mainnet transactions.';
@@ -490,9 +495,39 @@ export class DemoSeller {
     });
   }
 
+  // Funds the escrow of an accepted trade and, once it is funded, says so in the chat.
+  private async fundAccepted(tradeRecordId: string): Promise<StoredTrade> {
+    const trade = await this.fundEscrow(tradeRecordId);
+    await this.greet(trade);
+    return trade;
+  }
+
+  // One automatic chat message once the escrow is funded, so a visitor sees the chat working against the bot.
+  // The text says it is automatic: the bot is a demo, never presented as a person. Best effort and posted once:
+  // a failure here never fails the trade, and a message the bot already wrote is not repeated.
+  private async greet(trade: StoredTrade): Promise<void> {
+    if (trade.status !== 'Funded' || !trade.tradeId || !trade.buyerSessionPk) return;
+    const service = this.options.service;
+    try {
+      const messages = await service.listChatMessages(trade.id);
+      if (messages.some((m) => m.senderIdentity === this.identity)) return;
+      const sessionKey = this.options.wallet.sessionPrivateKey(trade.id);
+      const ciphertext = await encryptChatMessage(deriveSharedTradeKey(sessionKey, trade.buyerSessionPk), DEMO_GREETING);
+      await service.postChatMessage({
+        idOrTradeId: trade.id,
+        senderIdentity: this.identity,
+        ciphertext,
+        // The signature covers the contract's trade id, not the record id.
+        signature: signChatMessage(sessionKey, trade.tradeId, ciphertext),
+      });
+    } catch (err) {
+      console.warn(`Demo seller could not post its chat message on ${trade.id}: ${err instanceof Error ? err.message : String(err)}`);
+    }
+  }
+
   // Funds the escrow of an accepted trade. Idempotent: if the escrow already holds the exact funding
   // it records it, and if a funding transaction was already signed it only rebroadcasts that one.
-  private async fundAccepted(tradeRecordId: string): Promise<StoredTrade> {
+  private async fundEscrow(tradeRecordId: string): Promise<StoredTrade> {
     const service = this.options.service;
     const trade = await service.getTrade(tradeRecordId, undefined, true);
     if (!trade || trade.status !== 'Accepted' || !trade.terms || !trade.tradeId) {
@@ -687,6 +722,11 @@ export class DemoSeller {
     try {
       if (trade.status === 'Accepted' || (trade.status === 'Requested' && trade.side !== 'buy')) {
         await this.acceptAndFund(tradeRecordId);
+      } else if (trade.status === 'Funded') {
+        // A greeting lost to a failed request is posted on a later read. Checked outside the lock first, so the
+        // polls of a funded trade do not queue behind the bot's deposits; greet checks again inside it.
+        const messages = await this.options.service.listChatMessages(trade.id);
+        if (!messages.some((m) => m.senderIdentity === this.identity)) await this.exclusive(() => this.greet(trade));
       } else if (trade.status === 'Paid') {
         await this.release(tradeRecordId);
       }

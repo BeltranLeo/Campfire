@@ -220,6 +220,20 @@ export interface Trade extends TradeSummary {
   completedAt?: number;
 }
 
+/** A chat message as GET /api/trades/:id/chat returns it (src/server/storage.ts, StoredChatMessage): ciphertext only. */
+export interface ChatMessage {
+  id: string;
+  tradeRecordId: string;
+  senderIdentity: string;
+  /** The role whose session key signed it, as the service checked; absent on messages from before signatures. */
+  senderRole?: 'buyer' | 'seller';
+  signature?: string;
+  /** `<iv hex>:<AES-GCM ciphertext hex>`, encrypted with the key buyer and seller share. */
+  ciphertext: string;
+  /** Unix seconds, on the service's clock. */
+  createdAt: number;
+}
+
 /** GET /api/trades/:id/chat?arbiter=true: the messages as the arbiter reads them after a party handed over the key. */
 export interface ArbiterChat {
   messages: unknown[];

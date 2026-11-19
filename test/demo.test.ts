@@ -26,7 +26,9 @@ import {
   buildCancelRequest,
   buildPublishOfferTransaction,
   createEscrowContract,
+  decryptChatMessage,
   decryptPaymentDetails,
+  deriveSharedTradeKey,
   derivePayoutPkhFromXpub,
   derivePubkeyFromXpub,
   deriveWalletAddressMap,
@@ -34,10 +36,12 @@ import {
   pkhToCashAddress,
   pkhToLockingBytecode,
   tagWalletUtxos,
+  verifyChatMessageSignature,
   type OfferDocument,
 } from '../src/protocol/index.js';
 import {
   CampfireService,
+  DEMO_GREETING,
   DEMO_TRADE_INDEX_BASE,
   DemoSeller,
   MemoryStorage,
@@ -306,6 +310,22 @@ describe('Demo seller bot (protocol section 8)', () => {
     );
     expect(details.simulated).toBe(true);
     expect(details.notice).toMatch(/SIMULATED/);
+
+    // The bot writes one automatic message once the escrow is funded, signed with its session key and readable
+    // with the key the buyer shares with it. Reading the trade again does not repeat it.
+    await ctx.jsonReq('GET', `/api/trades/${trade.id}`);
+    const chat = await ctx.jsonReq<{ messages: { senderIdentity: string; senderRole?: string; ciphertext: string; signature: string }[] }>(
+      'GET',
+      `/api/trades/${trade.id}/chat`,
+    );
+    expect(chat.data.messages).toHaveLength(1);
+    const [greeting] = chat.data.messages;
+    expect(greeting.senderIdentity).toBe(botWallet.identity);
+    expect(greeting.senderRole).toBe('seller');
+    expect(verifyChatMessageSignature(trade.sellerSessionPk!, trade.tradeId!, greeting.ciphertext, greeting.signature)).toBe(true);
+    const chatKey = deriveSharedTradeKey(taken.session.privateKey, trade.sellerSessionPk!);
+    expect(await decryptChatMessage(chatKey, greeting.ciphertext)).toBe(DEMO_GREETING);
+    expect(DEMO_GREETING).toMatch(/^Automatic message/);
 
     const paid = await ctx.jsonReq<{ trade: StoredTrade }>('POST', `/api/trades/${trade.id}/paid`, {
       buyerIdentity: ctx.buyerId,

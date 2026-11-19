@@ -25,6 +25,8 @@ import {
   decryptChatMessage,
   identityFromDefiXpub,
   isCompressedPubkeyHex,
+  MAX_CHAT_CIPHERTEXT_LENGTH,
+  MAX_CHAT_MESSAGE_CHARS,
   matchesEscrowFunding,
   pkhToCashAddress,
   pkhToLockingBytecode,
@@ -48,6 +50,7 @@ import type {
   StoredChatMessage,
   StoredOffer,
   StoredTrade,
+  TradeState,
   UserIdentityRecord,
 } from './storage.js';
 
@@ -85,6 +88,9 @@ export interface SponsorshipStatus extends SponsorshipLimits {
   /** Paid offers the given identity has open now (0 when no identity was asked about). */
   openNow: number;
 }
+
+// States in which the trade is over, so its chat no longer takes messages.
+const CHAT_CLOSED_STATES: ReadonlySet<TradeState> = new Set(['Released', 'ResolvedBuyer', 'ResolvedSeller', 'Cancelled', 'Refunded', 'Dropped']);
 
 export interface DecryptedChatMessage {
   id: string;
@@ -1277,11 +1283,18 @@ export class CampfireService {
     ) {
       throw new Error('Only trade participants can post chat messages');
     }
-    if (!params.ciphertext || !params.ciphertext.includes(':')) {
+    if (typeof params.ciphertext !== 'string' || !params.ciphertext.includes(':')) {
       throw new Error('Chat message must be an encrypted AES-GCM payload');
+    }
+    if (params.ciphertext.length > MAX_CHAT_CIPHERTEXT_LENGTH) {
+      throw new Error(`Chat messages can be at most ${MAX_CHAT_MESSAGE_CHARS} characters long`);
     }
     if (!trade.tradeId || !trade.buyerSessionPk || !trade.sellerSessionPk) {
       throw new Error('The chat opens once the trade is accepted');
+    }
+    // A finished trade keeps its chat as a record; nothing new can be added to it.
+    if (CHAT_CLOSED_STATES.has(trade.status)) {
+      throw new Error('The chat closed when the trade ended');
     }
     // The role whose session key signed it; a person trading with themselves holds both roles.
     const roles: ('buyer' | 'seller')[] = [];

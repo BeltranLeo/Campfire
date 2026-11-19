@@ -21,6 +21,8 @@ import {
   BCH_ASSET,
   BCH_DECIMALS,
   PUSD_CATEGORY,
+  MAX_CHAT_CIPHERTEXT_LENGTH,
+  MAX_CHAT_MESSAGE_CHARS,
   PUSD_DECIMALS,
   VERDICT_BUYER,
   VERDICT_SELLER,
@@ -411,6 +413,18 @@ describe('CampfireService & HTTP API end-to-end lifecycle', () => {
     });
     expect(replay.status).toBe(400);
     expect(replay.data.error).toMatch(/already posted/);
+    // The service sees only ciphertext, so it caps its length: a message above the limit is refused.
+    const tooLong = await encryptChatMessage(sharedKey, 'x'.repeat(3 * MAX_CHAT_MESSAGE_CHARS + 1));
+    const oversize = await ctx.jsonReq('POST', `/api/trades/${acceptedTrade.tradeId}/chat`, {
+      senderIdentity: buyerId,
+      ciphertext: tooLong,
+      signature: signChatMessage(buyerSession.privateKey, acceptedTrade.tradeId!, tooLong),
+    });
+    expect(oversize.status).toBe(400);
+    expect(oversize.data.error).toMatch(/at most 2000 characters/);
+    // The longest message the interface allows, in characters that take 3 bytes each, still fits.
+    const longest = await encryptChatMessage(sharedKey, '€'.repeat(MAX_CHAT_MESSAGE_CHARS));
+    expect(longest.length).toBeLessThanOrEqual(MAX_CHAT_CIPHERTEXT_LENGTH);
 
     const paidRes = await ctx.jsonReq<{ trade: StoredTrade }>(
       'POST',
@@ -445,6 +459,18 @@ describe('CampfireService & HTTP API end-to-end lifecycle', () => {
     expect(settleRes.status).toBe(200);
     expect(settleRes.data.trade.status).toBe('Released');
     expect(settleRes.data.trade.settlementTxid).toMatch(/^[0-9a-f]{64}$/);
+
+    // A finished trade keeps its chat, read-only.
+    const late = await encryptChatMessage(sharedKey, 'Thanks!');
+    const afterEnd = await ctx.jsonReq('POST', `/api/trades/${acceptedTrade.tradeId}/chat`, {
+      senderIdentity: buyerId,
+      ciphertext: late,
+      signature: signChatMessage(buyerSession.privateKey, acceptedTrade.tradeId!, late),
+    });
+    expect(afterEnd.status).toBe(400);
+    expect(afterEnd.data.error).toMatch(/chat closed/);
+    const history = await ctx.jsonReq('GET', `/api/trades/${acceptedTrade.tradeId}/chat`);
+    expect(history.data.messages).toHaveLength(1);
 
     // 8. Check reputation counters for both seller and buyer.
     const sellerRep = await ctx.jsonReq('GET', `/api/identities/${sellerId}/reputation`);
