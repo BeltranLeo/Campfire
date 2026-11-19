@@ -9,6 +9,9 @@ html, body { margin: 0; min-height: 100%; background: var(--bg); }
 
 /* The design draws the pairing dialog and the wallet menu in place on artboards; in the app they float. */
 .s-overlay[data-modal] { position: fixed; inset: 0; z-index: 30; overflow-y: auto; }
+/* The dialog is mounted on document.body, outside the .cf wrapper that sets the text styles, so it sets them itself
+   (not the background: the overlay has its own scrim). */
+.s-overlay[data-modal] { font-family: var(--font-text); font-size: 16px; line-height: 24px; color: var(--text); -webkit-font-smoothing: antialiased; }
 .s-dialog:focus { outline: none; }
 .s-walletanchor { position: relative; }
 .s-walletanchor > .s-menu { position: absolute; right: 0; top: calc(100% + var(--space-2)); z-index: 20; width: min(320px, calc(100vw - 2 * var(--space-4))); }
