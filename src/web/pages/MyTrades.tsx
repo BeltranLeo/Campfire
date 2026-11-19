@@ -1,10 +1,11 @@
 import { useState } from 'react';
 import { Link, useSearchParams } from 'react-router';
+import { aliasFor } from '../alias';
 import { ApiError, apiGet, apiPost, type Offer, type Trade } from '../api';
 import { assetInfo } from '../assets';
 import { Button, WALLET_DECLINED } from '../components/Button';
 import { useAdvanced } from '../advanced';
-import { HashLink, ProvenanceTag, shorten } from '../components/Provenance';
+import { HashLink, ProvenanceTag } from '../components/Provenance';
 import { EmptyState, Notice, Skeleton } from '../components/States';
 import { StatusPill } from '../components/StatusPill';
 import { Countdown } from '../components/Timeline';
@@ -146,7 +147,7 @@ function ActiveTab({ trades, identity }: { trades: Trade[]; identity: string }) 
     <section className="cf-card" data-flush>
       {rows.map(({ trade, next }) => {
         const role = sideOf(trade, identity);
-        const other = role === 'buyer' ? (trade.isDemo ? 'Demo seller' : shorten(trade.sellerIdentity)) : shorten(trade.buyerIdentity);
+        const other = role === 'buyer' ? (trade.isDemo ? 'Demo seller' : aliasFor(trade.sellerIdentity).name) : aliasFor(trade.buyerIdentity).name;
         return (
           <Link key={trade.id} className="s-item" to={`/trade/${trade.id}`}>
             <span className="s-cell">

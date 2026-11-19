@@ -1,11 +1,11 @@
 import { useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router';
+import { aliasFor } from '../alias';
 import { ApiError, apiGet, isFinalState, type Trade } from '../api';
 import { assetInfo } from '../assets';
 import { chatState, createChatFeed, createChatReader, lastRead, onChatRead, type ChatFeed, type ChatRole } from '../chat';
 import { IMAGE_PREVIEW, chatRow, formatChatTime, listsChat, mapLimit, sortChatRows, type ChatEntry, type ChatRow } from '../chats';
 import { Button } from '../components/Button';
-import { shorten } from '../components/Provenance';
 import { EmptyState, Notice, Skeleton } from '../components/States';
 import { useConfig } from '../config';
 import { formatAmount } from '../format';
@@ -207,14 +207,14 @@ function ChatItem({ row, now }: { row: Row; now: number }) {
   const config = useConfig();
   const { trade, role } = row.entry;
   const asset = assetInfo(trade.asset, trade.assetDecimals, config);
-  // The demo bot is shown by what it is; anyone else by the other side's role and shortened identity.
+  // The demo bot is shown by what it is; anyone else by the other side's role and the same name the offer list shows.
   const other = trade.isDemo
     ? role === 'buyer'
       ? 'Demo seller'
       : 'Demo buyer' // Invented copy
     : role === 'buyer'
-      ? `Seller ${shorten(trade.sellerIdentity)}`
-      : `Buyer ${shorten(trade.buyerIdentity)}`; // Invented copy: mirrors the design's "Seller …"
+      ? `Seller ${aliasFor(trade.sellerIdentity).name}`
+      : `Buyer ${aliasFor(trade.buyerIdentity).name}`; // Invented copy: mirrors the design's "Seller …"
   return (
     <Link className="s-item" to={row.href}>
       <span className="s-cell">

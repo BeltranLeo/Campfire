@@ -34,6 +34,13 @@ Connecting a wallet with WizardConnect is the only sign-in. There are no account
 - The service treats the extended public key presented by the client as the user, without a further proof of possession. This is acceptable because sign-in never controls funds: every movement of funds needs a wallet signature or an arbiter verdict.
 - With the extended public key the service can check that the signing keys and payout addresses of a trade belong to that identity. It can therefore link all trades of one wallet, while those trades remain unlinked on-chain.
 
+**What the service holds.** On connection the client sends the `defi`, `receive` and `change` extended public keys to `POST /api/identities`, and the service stores them unencrypted (in Postgres on Vercel) and never deletes them. It needs them to check the keys and payout addresses of each trade and to build the marker address of a buy offer. Whoever can read that database can derive every address of the wallet's `receive`, `change` and `defi` paths, read their balances and history, and link all of its trades. They cannot spend: no private key ever reaches the service. No endpoint returns these keys to anyone else, and a counterparty receives only the keys derived for the trade they share. The wallet's addresses are also visible to the public Electrum server the browser queries to read balances and find unused addresses, together with the visitor's IP address.
+
+**Names.** The interface does not show the identity hash. It shows a name derived from it, such as «Quiet Cedar» with its initials, the same on every screen, including the connected wallet's own button and menu (under «You appear as»). The hash stays in the menu as «Your fingerprint».
+
+- The name is provisional. Nobody chooses it, which keeps the sign-in free of steps, but it is a label to recognise someone, not a proof of who they are. There are 1,024 names, so two identities can share one, and since an identity costs nothing, a user could generate wallets until one lands on the name of a trusted seller.
+- Planned, not built: a personal name that the user picks. It must be signed by the wallet, so that nobody can claim another identity's name, and unique across the service. Until then, trade counts and the offer page, not the name, are what a visitor should judge by.
+
 ### Reputation
 
 The service shows, for each identity, the number of completed trades as seller and as buyer and the date of the first one.

@@ -2,6 +2,7 @@ import { useCallback, useEffect, useId, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { Link, NavLink } from 'react-router';
 import QRCode from 'qrcode';
+import { aliasFor } from '../alias';
 import { spendableBch, tokenBalance } from '../coins';
 import { useConfig } from '../config';
 import { formatBchBalance, fromBaseUnits } from '../format';
@@ -9,7 +10,7 @@ import { refreshWalletCoins, useWalletCoins } from '../walletCoins';
 import { useWallet } from '../wallet';
 import { CopyButton } from './CopyButton';
 import { Icon, type IconName } from './Icon';
-import { HashLink, shorten } from './Provenance';
+import { HashLink } from './Provenance';
 import { Notice, Skeleton } from './States';
 import { AdvancedSwitch } from './AdvancedSwitch';
 import { NavBadge } from './Notifications';
@@ -62,7 +63,8 @@ export function WalletButton() {
         }}
       >
         <span className="cf-wallet__dot" aria-hidden="true" />
-        <span className="cf-mono cf-wallet__id">{shorten(wallet.identity)}</span>
+        {/* The same name other people see in the offer list, not the hash it comes from. */}
+        <span className="cf-wallet__id">{aliasFor(wallet.identity).name}</span>
         <PillBalance />
       </button>
       {menuOpen && <WalletMenu onClose={closeMenu} />}
@@ -145,11 +147,25 @@ function WalletMenu({ onClose }: { onClose: () => void }) {
 
   if (!wallet.identity) return null;
   const rep = wallet.reputation;
+  const alias = aliasFor(wallet.identity);
 
   return (
     <div className="s-menu" role="menu" ref={ref}>
       <div className="cf-stack" data-gap="1">
-        <span className="cf-label">Your identity</span>
+        <span className="cf-label">You appear as</span>
+        <span className="cf-row" data-nowrap>
+          <span className="o-avatar" aria-hidden="true">
+            {alias.initials}
+          </span>
+          <strong>{alias.name}</strong>
+        </span>
+        <span className="cf-small cf-subtle">
+          This is the name other people see on your offers and trades. It comes from your wallet, so it is the same every
+          time and nobody can pick it.
+        </span>
+      </div>
+      <div className="cf-stack" data-gap="1">
+        <span className="cf-label">Your fingerprint</span>
         <span className="cf-row" data-nowrap>
           <HashLink value={wallet.identity} kind="plain" />
           <CopyButton value={wallet.identity} />
