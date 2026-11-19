@@ -19,6 +19,7 @@ import {
   hexToBin,
   secp256k1,
   sha256,
+  stringify,
   utf8ToBin,
 } from '@bitauth/libauth';
 import {
@@ -74,6 +75,13 @@ import {
   type OfferDocument,
   type TradeTerms,
 } from '../src/protocol/index.js';
+import {
+  buildSignInRequest,
+  signInCoinTxid,
+  signInNonce,
+  verifySignInTransaction,
+} from '../src/protocol/signin.js';
+import { signSignInLocally } from './signin-helper.js';
 
 function makeWalletFixture(seedLabel: string) {
   const seed = new Uint8Array(64);
@@ -171,6 +179,46 @@ describe('keys and identity (section 1 & 5)', () => {
     if (typeof p2shAddr === 'string') throw new Error(p2shAddr);
     expect(() => cashAddressToPkh(p2shAddr.address)).toThrow(/Expected P2PKH address/);
     expect(() => cashAddressToPkh(qAddr, 'bchtest')).toThrow(/Expected network prefix/);
+  });
+});
+
+describe('sign-in challenge (section 1)', () => {
+  const secret = sha256.hash(utf8ToBin('signin-test-secret'));
+  const nonceFor = (receiveXpub: string) =>
+    signInNonce(secret, { identity: 'ab'.repeat(32), receiveXpub, expiresAt: 1_800_000_000, salt: 'cd'.repeat(16) });
+
+  it('binds the nonce to the receive key, the expiry and the salt', () => {
+    const base = { identity: 'ab'.repeat(32), receiveXpub: buyerWallet.receiveXpub, expiresAt: 1_800_000_000, salt: 'cd'.repeat(16) };
+    const nonce = signInNonce(secret, base);
+    expect(nonce).toMatch(/^[0-9a-f]{64}$/);
+    expect(signInNonce(secret, { ...base, receiveXpub: sellerWallet.receiveXpub })).not.toBe(nonce);
+    expect(signInNonce(secret, { ...base, expiresAt: base.expiresAt + 1 })).not.toBe(nonce);
+    expect(signInNonce(secret, { ...base, salt: 'ce'.repeat(16) })).not.toBe(nonce);
+  });
+
+  it('asks the wallet to sign with defi/0 the same transaction the check accepts once signed', () => {
+    const provider = new MockNetworkProvider();
+    provider.network = Network.MAINNET;
+    const nonce = nonceFor(buyerWallet.receiveXpub);
+    const defiPubkey = derivePubkeyFromXpub(buyerWallet.defiXpub, 0);
+    const { hex, request, inputPaths } = buildSignInRequest(provider, { nonce, defiPubkey });
+    expect(inputPaths).toEqual([[0, 'defi', 0]]);
+    expect(request.transaction).toBe(hex);
+    expect(request.broadcast).toBe(false);
+
+    const unsigned = decodeTransactionUnsafe(hexToBin(hex));
+    const signedHex = signSignInLocally(nonce, buyerWallet.defiPrivKey(0));
+    const signed = decodeTransactionUnsafe(hexToBin(signedHex));
+    // The wallet only fills in the unlocking bytecode: everything it signs is what the dapp asked for.
+    expect(binToHex(unsigned.inputs[0].outpointTransactionHash)).toBe(signInCoinTxid(nonce));
+    expect(unsigned.inputs[0].unlockingBytecode.length).toBe(0);
+    expect(stringify(signed.outputs)).toBe(stringify(unsigned.outputs));
+    expect(signed.locktime).toBe(unsigned.locktime);
+
+    expect(verifySignInTransaction(signedHex, { nonce, defiPubkey })).toBe(true);
+    expect(verifySignInTransaction(hex, { nonce, defiPubkey })).toMatch(/does not match/);
+    expect(verifySignInTransaction(signedHex, { nonce: nonceFor(sellerWallet.receiveXpub), defiPubkey })).toMatch(/does not answer/);
+    expect(verifySignInTransaction(signedHex, { nonce, defiPubkey: derivePubkeyFromXpub(sellerWallet.defiXpub, 0) })).toMatch(/does not match/);
   });
 });
 

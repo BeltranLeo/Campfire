@@ -91,8 +91,7 @@ export interface DemoSellerLimits {
   offerLifetimeSec: number;
 }
 
-// Identity is a hash of a presented xpub with no proof of possession (D29), so per-wallet limits are
-// trivially bypassed with a fresh wallet. The limits that bound the bot's losses are global.
+// A fresh wallet is a new identity, so per-wallet limits are trivially bypassed. The limits that bound the bot's losses are global.
 export const DEFAULT_DEMO_LIMITS: DemoSellerLimits = {
   minBchSats: 5_000n,
   maxBchSats: 20_000n,
@@ -238,10 +237,11 @@ export class DemoSeller {
   }
 
   async init(): Promise<void> {
-    await this.options.service.registerIdentity({
-      defiXpub: this.options.wallet.defiXpub,
-      receiveXpub: this.options.wallet.receiveXpub,
-    });
+    // The server holds the demo seller's keys, so it needs no sign-in challenge.
+    await this.options.service.registerIdentity(
+      { defiXpub: this.options.wallet.defiXpub, receiveXpub: this.options.wallet.receiveXpub },
+      { trusted: true },
+    );
   }
 
   // --- Wallet ---

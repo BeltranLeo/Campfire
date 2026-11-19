@@ -9,6 +9,9 @@ import { DappConnectionManager, clearSession, loadSession } from '@wizardconnect
 import type { DappRelayResult, SignTransactionRequest } from '@wizardconnect/core';
 import { initiateDappRelay } from './dappRelay';
 import { ApiError, apiGet, apiPost, isFinalState, type RegisteredIdentity, type Reputation, type TradeSummary } from './api';
+import { derivePubkeyFromXpub } from '../protocol/keys.js';
+import { buildSignInRequest, type SignInChallenge } from '../protocol/signin.js';
+import { electrum } from './electrum';
 
 const SESSION_KEY = 'campfire.wallet';
 const DAPP_NAME = 'Campfire';
@@ -172,6 +175,32 @@ class WalletController {
     }
   }
 
+  // Asks the wallet to sign the service's sign-in challenge with defi/0 (docs/protocol.md, section 1). The
+  // transaction spends a coin that does not exist, so it is never broadcast and moves nothing.
+  private async proveOwnership(manager: DappConnectionManager, xpubs: WalletXpubs) {
+    const { challenge } = await apiPost<{ challenge: SignInChallenge }>('/api/identities/challenge', {
+      defiXpub: xpubs.defi,
+      receiveXpub: xpubs.receive,
+    });
+    const { request, inputPaths } = buildSignInRequest(electrum(), {
+      nonce: challenge.nonce,
+      defiPubkey: derivePubkeyFromXpub(xpubs.defi, 0),
+    });
+    this.set({ signing: true });
+    try {
+      const response = await manager.signTransaction(
+        { transaction: request as unknown as SignTransactionRequest['transaction'], inputPaths },
+        { signal: AbortSignal.timeout(SIGN_TIMEOUT_MS) },
+      );
+      if (response.error || !response.signedTransaction) throw new Error(response.error ?? 'No signature');
+      return { expiresAt: challenge.expiresAt, salt: challenge.salt, signedTransaction: response.signedTransaction };
+    } catch {
+      throw new ApiError(401, 'Your wallet did not confirm the sign-in. Connect again and approve the request in your wallet.');
+    } finally {
+      this.set({ signing: false });
+    }
+  }
+
   private open(existing?: { privateKey: string; secret: string; walletPublicKey: string }): DappRelayResult {
     const manager = new DappConnectionManager(DAPP_NAME, undefined, { session: { key: SESSION_KEY } });
     this.manager = manager;
@@ -252,10 +281,18 @@ class WalletController {
     this.registering = true;
     if (this.state.status !== 'connected') this.set({ status: 'connecting', pairing: null });
     try {
-      const result = await apiPost<RegisteredIdentity>('/api/identities', {
-        defiXpub: xpubs.defi,
-        receiveXpub: xpubs.receive,
-      });
+      const keys = { defiXpub: xpubs.defi, receiveXpub: xpubs.receive };
+      let result: RegisteredIdentity;
+      try {
+        result = await apiPost<RegisteredIdentity>('/api/identities', keys);
+      } catch (err) {
+        // 401: keys the service has not seen with this identity, so the wallet must prove it owns them.
+        if (!(err instanceof ApiError && err.status === 401)) throw err;
+        if (this.manager !== manager) return;
+        const proof = await this.proveOwnership(manager, xpubs);
+        if (this.manager !== manager) return;
+        result = await apiPost<RegisteredIdentity>('/api/identities', { ...keys, proof });
+      }
       if (this.manager !== manager) return;
       this.registeredDefi = defi;
       this.set({

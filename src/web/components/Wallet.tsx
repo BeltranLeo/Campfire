@@ -34,7 +34,7 @@ export function WalletButton() {
     return (
       <>
         <button type="button" className="cf-btn" aria-busy="true">
-          {wallet.status === 'pairing' ? 'Pairing…' : 'Connecting…'}
+          {wallet.status === 'pairing' ? 'Pairing…' : wallet.signing ? 'Approve in your wallet…' : 'Connecting…'}
         </button>
         {/* A portal, because the header's backdrop-filter makes it the containing block of any fixed
             descendant: inside it the overlay shrinks to the header's height and the dialog cannot be reached. */}

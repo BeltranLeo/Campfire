@@ -14,7 +14,7 @@ import {
 } from '../protocol/index.js';
 import { DemoLimitError, type DemoAsset, type DemoSeller } from './demo.js';
 import type { OracleService } from './oracle.js';
-import { SponsorshipLimitError, type CampfireService } from './service.js';
+import { SignInRequiredError, SponsorshipLimitError, type CampfireService, type SignInProof } from './service.js';
 import type { StoredTrade } from './storage.js';
 
 class HttpError extends Error {
@@ -99,13 +99,20 @@ export function createApiHandler(deps: {
         return jsonResponse({ ...rates, maxBps: MAX_FEE_BPS, dustLimitSats: Number(FEE_DUST_LIMIT_SATS) });
       }
 
-      // POST /api/identities
+      // POST /api/identities/challenge: a sign-in challenge for the wallet to sign with defi/0 (protocol section 1).
+      if (method === 'POST' && path === '/api/identities/challenge') {
+        const body = await readJson<{ defiXpub: string; receiveXpub: string }>(req);
+        return jsonResponse({ challenge: service.createSignInChallenge({ defiXpub: body.defiXpub, receiveXpub: body.receiveXpub }) });
+      }
+
+      // POST /api/identities: new keys need `proof`, a signed challenge; without it the answer is 401.
       if (method === 'POST' && path === '/api/identities') {
         const body = await readJson<{
           defiXpub: string;
           receiveXpub: string;
+          proof?: SignInProof;
         }>(req);
-        const record = await service.registerIdentity(body);
+        const record = await service.registerIdentity({ defiXpub: body.defiXpub, receiveXpub: body.receiveXpub, proof: body.proof });
         const reputation = await service.getReputation(record.identity);
         return jsonResponse({ identity: record.identity, record, reputation }, 201);
       }
@@ -499,6 +506,9 @@ export function createApiHandler(deps: {
       const message = err instanceof Error ? err.message : String(err);
       if (err instanceof HttpError) {
         return jsonResponse({ error: message }, err.status);
+      }
+      if (err instanceof SignInRequiredError) {
+        return jsonResponse({ error: message }, 401);
       }
       if (err instanceof DemoLimitError || err instanceof SponsorshipLimitError) {
         return jsonResponse({ error: message }, 429);

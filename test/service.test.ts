@@ -44,6 +44,7 @@ import {
   encryptPaymentDetails,
   feePkh,
   generateSessionKeyPair,
+  identityFromDefiXpub,
   missingFundingFees,
   pkhToCashAddress,
   pkhToLockingBytecode,
@@ -63,6 +64,7 @@ import {
   type StoredOffer,
   type StoredTrade,
 } from '../src/server/index.js';
+import { registerSignedIn, signInProof } from './signin-helper.js';
 
 function makeWallet(label: string) {
   const seed = new Uint8Array(64);
@@ -229,17 +231,11 @@ describe('CampfireService & HTTP API end-to-end lifecycle', () => {
     const ctx = setupTestContext();
 
     // 1. Register seller and buyer identities.
-    const sellerReg = await ctx.jsonReq('POST', '/api/identities', {
-      defiXpub: seller.defiXpub,
-      receiveXpub: seller.receiveXpub,
-    });
+    const sellerReg = await registerSignedIn(ctx.jsonReq, seller);
     expect(sellerReg.status).toBe(201);
     const sellerId: string = sellerReg.data.identity;
 
-    const buyerReg = await ctx.jsonReq('POST', '/api/identities', {
-      defiXpub: buyer.defiXpub,
-      receiveXpub: buyer.receiveXpub,
-    });
+    const buyerReg = await registerSignedIn(ctx.jsonReq, buyer);
     expect(buyerReg.status).toBe(201);
     const buyerId: string = buyerReg.data.identity;
 
@@ -521,14 +517,8 @@ describe('CampfireService & HTTP API end-to-end lifecycle', () => {
   it('handles PUSD dispute with chat decryption for arbiter and automatic payment-window expiry', async () => {
     const ctx = setupTestContext();
 
-    const { data: sellerReg } = await ctx.jsonReq('POST', '/api/identities', {
-      defiXpub: seller.defiXpub,
-      receiveXpub: seller.receiveXpub,
-    });
-    const { data: buyerReg } = await ctx.jsonReq('POST', '/api/identities', {
-      defiXpub: buyer.defiXpub,
-      receiveXpub: buyer.receiveXpub,
-    });
+    const { data: sellerReg } = await registerSignedIn(ctx.jsonReq, seller);
+    const { data: buyerReg } = await registerSignedIn(ctx.jsonReq, buyer);
     const sellerId = sellerReg.identity;
     const buyerId = buyerReg.identity;
 
@@ -744,11 +734,7 @@ describe('CampfireService & HTTP API end-to-end lifecycle', () => {
 describe('Identity registration', () => {
   it('stores only the defi and receive keys, even when an old client also sends the change key', async () => {
     const ctx = setupTestContext();
-    const reg = await ctx.jsonReq('POST', '/api/identities', {
-      defiXpub: seller.defiXpub,
-      receiveXpub: seller.receiveXpub,
-      changeXpub: buyer.receiveXpub,
-    });
+    const reg = await registerSignedIn(ctx.jsonReq, seller, { changeXpub: buyer.receiveXpub });
     expect(reg.status).toBe(201);
     expect(reg.data.record).not.toHaveProperty('changeXpub');
     const stored = await ctx.storage.getIdentity(reg.data.identity);
@@ -756,40 +742,81 @@ describe('Identity registration', () => {
     expect(Object.keys(stored!).sort()).toEqual(['createdAt', 'defiXpub', 'identity', 'receiveXpub', 'updatedAt']);
   });
 
-  // Every dapp the wallet connects to receives the same defi key, so knowing it proves nothing. Swapping the
-  // receive key would let such a dapp take offers under the victim's identity, with payouts to its own wallet.
-  it('refuses to replace the receive key of a registered identity', async () => {
+  it('asks for a signed challenge for new keys, but not when the same keys reconnect', async () => {
+    const ctx = setupTestContext();
+    const keys = { defiXpub: buyer.defiXpub, receiveXpub: buyer.receiveXpub };
+
+    const unsigned = await ctx.jsonReq('POST', '/api/identities', keys);
+    expect(unsigned.status).toBe(401);
+    expect(await ctx.storage.getIdentity(identityFromDefiXpub(buyer.defiXpub))).toBeNull();
+
+    const signed = await registerSignedIn(ctx.jsonReq, buyer);
+    expect(signed.status).toBe(201);
+
+    const again = await ctx.jsonReq('POST', '/api/identities', keys);
+    expect(again.status).toBe(201);
+    expect(again.data.identity).toBe(signed.data.identity);
+  });
+
+  it('refuses an expired, foreign or garbled sign-in', async () => {
+    const ctx = setupTestContext();
+    const keys = { defiXpub: buyer.defiXpub, receiveXpub: buyer.receiveXpub };
+
+    const expired = await signInProof(ctx.jsonReq, buyer);
+    ctx.advanceTime(301);
+    const late = await ctx.jsonReq('POST', '/api/identities', { ...keys, proof: expired });
+    expect(late.status).toBe(401);
+    expect(late.data.error).toMatch(/expired/);
+
+    // The proof of one wallet does not register another wallet's keys.
+    const sellerProof = await signInProof(ctx.jsonReq, seller);
+    const foreign = await ctx.jsonReq('POST', '/api/identities', { ...keys, proof: sellerProof });
+    expect(foreign.status).toBe(401);
+
+    // A salt or expiry the service did not issue changes the nonce, so the signature no longer answers it.
+    const proof = await signInProof(ctx.jsonReq, buyer);
+    const forged = await ctx.jsonReq('POST', '/api/identities', { ...keys, proof: { ...proof, expiresAt: proof.expiresAt + 600 } });
+    expect(forged.status).toBe(401);
+    const garbled = await ctx.jsonReq('POST', '/api/identities', { ...keys, proof: { ...proof, signedTransaction: 'zz' } });
+    expect(garbled.status).toBe(401);
+
+    expect(await ctx.storage.getIdentity((await registerSignedIn(ctx.jsonReq, buyer)).data.identity)).not.toBeNull();
+  });
+
+  // Every dapp the wallet connects to receives the same extended public keys, so knowing them proves nothing.
+  // Swapping the receive key would let such a dapp take offers in the victim's name, with payouts to its wallet.
+  it('lets only the owner of the defi key replace the receive key of an identity', async () => {
     const ctx = setupTestContext();
     const attacker = makeWallet('service-test-attacker');
 
-    const victimReg = await ctx.jsonReq('POST', '/api/identities', {
-      defiXpub: buyer.defiXpub,
-      receiveXpub: buyer.receiveXpub,
-    });
+    const victimReg = await registerSignedIn(ctx.jsonReq, buyer);
     expect(victimReg.status).toBe(201);
     const victimId: string = victimReg.data.identity;
+    const hijackKeys = { defiXpub: buyer.defiXpub, receiveXpub: attacker.receiveXpub };
 
-    // Reconnecting with the same keys still works.
-    const again = await ctx.jsonReq('POST', '/api/identities', {
-      defiXpub: buyer.defiXpub,
-      receiveXpub: buyer.receiveXpub,
-    });
-    expect(again.status).toBe(201);
-    expect(again.data.identity).toBe(victimId);
+    const unsigned = await ctx.jsonReq('POST', '/api/identities', hijackKeys);
+    expect(unsigned.status).toBe(401);
 
-    const hijack = await ctx.jsonReq('POST', '/api/identities', {
-      defiXpub: buyer.defiXpub,
-      receiveXpub: attacker.receiveXpub,
-    });
-    expect(hijack.status).toBe(400);
-    expect(hijack.data.error).toMatch(/already registered with another receive key/);
+    // The attacker can ask for a challenge with the victim's defi key, but can only sign it with its own key.
+    const attackerSigned = await signInProof(ctx.jsonReq, { ...buyer, receiveXpub: attacker.receiveXpub }, attacker.defiPriv(0));
+    const hijack = await ctx.jsonReq('POST', '/api/identities', { ...hijackKeys, proof: attackerSigned });
+    expect(hijack.status).toBe(401);
+    expect(hijack.data.error).toMatch(/does not match this wallet/);
+
+    // Nor can it reuse the victim's own sign-in: that challenge was issued for the victim's receive key.
+    const victimProof = await signInProof(ctx.jsonReq, buyer);
+    const replay = await ctx.jsonReq('POST', '/api/identities', { ...hijackKeys, proof: victimProof });
+    expect(replay.status).toBe(401);
     expect((await ctx.storage.getIdentity(victimId))!.receiveXpub).toBe(buyer.receiveXpub);
 
+    // The owner can: this undoes a receive key someone registered first without the wallet.
+    const owner = { ...buyer, receiveXpub: seller.receiveXpub };
+    expect((await registerSignedIn(ctx.jsonReq, owner)).status).toBe(201);
+    expect((await ctx.storage.getIdentity(victimId))!.receiveXpub).toBe(seller.receiveXpub);
+    expect((await registerSignedIn(ctx.jsonReq, buyer)).status).toBe(201);
+
     // So a take under the victim's identity cannot pay out to the attacker.
-    const sellerReg = await ctx.jsonReq('POST', '/api/identities', {
-      defiXpub: seller.defiXpub,
-      receiveXpub: seller.receiveXpub,
-    });
+    const sellerReg = await registerSignedIn(ctx.jsonReq, seller);
     const cfg = await ctx.jsonReq('GET', '/api/config');
     const offerDoc: OfferDocument = {
       v: 1,
@@ -844,8 +871,8 @@ describe('Identity registration', () => {
 describe('Service fees (protocol section 5.1)', () => {
   // Publishes a floating BCH offer, takes 0.01 BCH of it and accepts, so the terms carry the fees.
   async function acceptedFloatingTrade(ctx: ReturnType<typeof setupTestContext>) {
-    const sellerId = (await ctx.jsonReq('POST', '/api/identities', { defiXpub: seller.defiXpub, receiveXpub: seller.receiveXpub })).data.identity;
-    const buyerId = (await ctx.jsonReq('POST', '/api/identities', { defiXpub: buyer.defiXpub, receiveXpub: buyer.receiveXpub })).data.identity;
+    const sellerId = (await registerSignedIn(ctx.jsonReq, seller)).data.identity;
+    const buyerId = (await registerSignedIn(ctx.jsonReq, buyer)).data.identity;
     const cfg = await ctx.jsonReq('GET', '/api/config');
     const offerDoc: OfferDocument = {
       v: 1,

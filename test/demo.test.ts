@@ -53,6 +53,7 @@ import {
   type StoredOffer,
   type StoredTrade,
 } from '../src/server/index.js';
+import { registerSignedIn } from './signin-helper.js';
 
 function makeWallet(label: string) {
   const seed = new Uint8Array(64);
@@ -190,10 +191,7 @@ async function setupDemo(options?: {
     return { status: res.status, data: (await res.json()) as T };
   };
 
-  const { data: reg } = await jsonReq('POST', '/api/identities', {
-    defiXpub: buyer.defiXpub,
-    receiveXpub: buyer.receiveXpub,
-  });
+  const { data: reg } = await registerSignedIn(jsonReq, buyer);
   const buyerId: string = reg.identity;
 
   const { data: published } = await jsonReq<{ offers: StoredOffer[] }>(
@@ -545,10 +543,7 @@ describe('Demo seller bot (protocol section 8)', () => {
 
   it('ignores a client-supplied isDemo flag and keeps the console closed for other sellers', async () => {
     const ctx = await setupDemo();
-    const { data: reg } = await ctx.jsonReq('POST', '/api/identities', {
-      defiXpub: otherSeller.defiXpub,
-      receiveXpub: otherSeller.receiveXpub,
-    });
+    const { data: reg } = await registerSignedIn(ctx.jsonReq, otherSeller);
     const cfg = await ctx.jsonReq('GET', '/api/config');
     expect(cfg.data.demoSellerIdentity).toBe(botWallet.identity);
     const doc: OfferDocument = {

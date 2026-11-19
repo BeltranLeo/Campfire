@@ -41,6 +41,7 @@ import {
   type StoredOffer,
   type StoredTrade,
 } from '../src/server/index.js';
+import { registerSignedIn } from './signin-helper.js';
 
 function makeWallet(label: string) {
   const seed = new Uint8Array(64);
@@ -113,7 +114,7 @@ async function setup(options?: { limits?: Partial<SponsorshipLimits>; botSats?: 
   };
 
   const register = async (w: ReturnType<typeof makeWallet>): Promise<string> =>
-    (await req('POST', '/api/identities', { defiXpub: w.defiXpub, receiveXpub: w.receiveXpub })).data.identity;
+    (await registerSignedIn(req, w)).data.identity;
   const cfg = (await req('GET', '/api/config')).data;
 
   const buyOffer = (overrides: Partial<OfferDocument> = {}): OfferDocument => ({

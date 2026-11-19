@@ -7,6 +7,7 @@ import {
   hexToBin,
   secp256k1,
   sha256,
+  utf8ToBin,
 } from '@bitauth/libauth';
 import type { NetworkProvider } from 'cashscript';
 import {
@@ -25,6 +26,7 @@ import {
   computeTradeId,
   createEscrowContract,
   decryptChatMessage,
+  derivePubkeyFromXpub,
   identityFromDefiXpub,
   isCompressedPubkeyHex,
   MAX_CHAT_CIPHERTEXT_LENGTH,
@@ -34,6 +36,8 @@ import {
   missingFundingFees,
   pkhToCashAddress,
   pkhToLockingBytecode,
+  SIGNIN_LIFETIME_SEC,
+  signInNonce,
   signVerdict,
   toBytes,
   tradeValueSats,
@@ -44,9 +48,11 @@ import {
   verifyChatMessageSignature,
   verifyPaymentDetailsSignature,
   verifyPriceQuote,
+  verifySignInTransaction,
   verifySignedContractSpend,
   type FeeRates,
   type OfferDocument,
+  type SignInChallenge,
   type TradeFee,
   type TradeTerms,
   type VerdictHex,
@@ -69,9 +75,8 @@ export const MIN_REFUND_DELAY_SEC = 7 * 86_400;
 export const MAX_REFUND_DELAY_SEC = 30 * 86_400;
 const FEE_RATES_SETTING = 'feeRates';
 
-// What the service pays for when it publishes a buy offer on the buyer's behalf (section 2.2). Identities are
-// hashes of a presented key with no proof of possession, so the limit per identity is easy to get around with a
-// fresh wallet; the daily limit across everyone is the one that bounds what the service can spend.
+// What the service pays for when it publishes a buy offer on the buyer's behalf (section 2.2). A fresh wallet is
+// a new identity, so the limit per identity is easy to get around; the daily limit across everyone is the one that bounds what the service can spend.
 export interface SponsorshipLimits {
   /** Paid publications in any 24 hours, across all identities. */
   dailyOffers: number;
@@ -88,6 +93,16 @@ export const DEFAULT_SPONSORSHIP_LIMITS: SponsorshipLimits = {
 
 /** A limit on paid publications was reached; the HTTP layer answers 429. */
 export class SponsorshipLimitError extends Error {}
+
+/** Registering these keys needs a signed sign-in challenge (protocol section 1); the HTTP layer answers 401. */
+export class SignInRequiredError extends Error {}
+
+/** A signed sign-in challenge sent back with `POST /api/identities`. */
+export interface SignInProof {
+  expiresAt: number;
+  salt: string;
+  signedTransaction: string;
+}
 
 export interface SponsorshipStatus extends SponsorshipLimits {
   usedToday: number;
@@ -131,6 +146,8 @@ export class CampfireService {
   readonly arbiterPublicKeyHex: string;
   readonly sponsorshipLimits: SponsorshipLimits;
   private readonly arbiterPrivateKey: Uint8Array;
+  // Key of the sign-in challenge MACs, derived from the arbiter key so every instance shares it without new config.
+  private readonly signInSecret: Uint8Array;
   private readonly nowSeconds: () => number;
 
   constructor(
@@ -156,6 +173,7 @@ export class CampfireService {
       throw new Error(`Failed to derive arbiter public key: ${pub}`);
     }
     this.arbiterPublicKeyHex = binToHex(pub).toLowerCase();
+    this.signInSecret = sha256.hash(Uint8Array.from([...utf8ToBin('CMPF-SIGNIN-KEY-v1'), ...this.arbiterPrivateKey]));
     this.nowSeconds = options.nowSeconds ?? (() => Math.floor(Date.now() / 1000));
     this.sponsorshipLimits = { ...DEFAULT_SPONSORSHIP_LIMITS, ...options.sponsorshipLimits };
   }
@@ -175,19 +193,33 @@ export class CampfireService {
 
   // --- Identity & Reputation (Section 1) ---
 
-  async registerIdentity(params: {
-    defiXpub: string;
-    receiveXpub: string;
-  }): Promise<UserIdentityRecord> {
+  // A challenge for the wallet to sign with defi/0 (protocol section 1). It is bound to both keys, so the
+  // signed answer registers exactly these keys, and it expires after a few minutes.
+  createSignInChallenge(params: { defiXpub: string; receiveXpub: string }): SignInChallenge {
+    const identity = identityFromDefiXpub(params.defiXpub);
+    verifyDerivedPayoutPkh(params.receiveXpub, 0, new Uint8Array(20));
+    const expiresAt = this.nowSeconds() + SIGNIN_LIFETIME_SEC;
+    const salt = randomBytes(16).toString('hex');
+    const nonce = signInNonce(this.signInSecret, { identity, receiveXpub: params.receiveXpub, expiresAt, salt });
+    return { nonce, expiresAt, salt };
+  }
+
+  // Every dapp a wallet connects to receives the same extended public keys, so presenting them proves nothing.
+  // New keys, or a new receive key for a known identity, need the wallet's signature on a sign-in challenge.
+  // Reconnecting with the keys already on record needs none, so a returning visitor is not asked to sign.
+  // `trusted` is for the service's own demo seller, whose keys the server holds.
+  async registerIdentity(
+    params: { defiXpub: string; receiveXpub: string; proof?: SignInProof },
+    options: { trusted?: boolean } = {},
+  ): Promise<UserIdentityRecord> {
     const identity = identityFromDefiXpub(params.defiXpub);
     // Validate receiveXpub by deriving index 0.
     verifyDerivedPayoutPkh(params.receiveXpub, 0, new Uint8Array(20));
     const now = this.nowSeconds();
     const existing = await this.options.storage.getIdentity(identity);
-    // Every dapp a wallet connects to receives the same defi key, so presenting it proves nothing. The first
-    // receive key stays: replacing it would send the identity's payouts to whoever presented the defi key.
-    if (existing && existing.receiveXpub !== params.receiveXpub.trim()) {
-      throw new Error('This identity is already registered with another receive key');
+    const unchanged = existing?.receiveXpub === params.receiveXpub.trim();
+    if (!unchanged && !options.trusted) {
+      this.checkSignInProof(identity, params);
     }
     const record: UserIdentityRecord = {
       identity,
@@ -198,6 +230,24 @@ export class CampfireService {
     };
     await this.options.storage.saveIdentity(record);
     return record;
+  }
+
+  private checkSignInProof(identity: string, params: { defiXpub: string; receiveXpub: string; proof?: SignInProof }): void {
+    const proof = params.proof;
+    if (!proof) {
+      throw new SignInRequiredError('Confirm the sign-in in your wallet to register these keys');
+    }
+    if (!Number.isInteger(proof.expiresAt) || typeof proof.salt !== 'string' || typeof proof.signedTransaction !== 'string') {
+      throw new Error('Invalid sign-in proof');
+    }
+    if (this.nowSeconds() > proof.expiresAt) {
+      throw new SignInRequiredError('The sign-in request expired. Connect your wallet again.');
+    }
+    const nonce = signInNonce(this.signInSecret, { identity, receiveXpub: params.receiveXpub, expiresAt: proof.expiresAt, salt: proof.salt });
+    const verdict = verifySignInTransaction(proof.signedTransaction, { nonce, defiPubkey: derivePubkeyFromXpub(params.defiXpub, 0) });
+    if (verdict !== true) {
+      throw new SignInRequiredError(verdict);
+    }
   }
 
   async getIdentityRecord(identity: string): Promise<UserIdentityRecord | null> {
@@ -998,7 +1048,7 @@ export class CampfireService {
 
     // The payment details of a buy offer travel with the deposit. Every check on them comes before anything
     // is broadcast, so a rejected request never leaves a deposit on the network without details to go with it.
-    // Identities are not proven (section 1), and the buyer can encrypt with the same key as the seller, so only the
+    // Requests name an identity without proof (section 1), and the buyer can encrypt with the same key as the seller, so only the
     // signature by the seller's session key, committed in the terms, shows that the seller wrote them. Without it the
     // buyer could swap in an account of their own and show it to an arbiter as the one they paid.
     const details = params.encryptedPaymentDetails?.trim();
@@ -1321,8 +1371,8 @@ export class CampfireService {
 
   // --- Encrypted Chat (Section 6) ---
 
-  // A message counts only with a signature by the sender's session key, committed in the trade terms. Identities are
-  // not proven (section 1) and both parties share the chat key, so without it one party could post messages in the
+  // A message counts only with a signature by the sender's session key, committed in the trade terms. Requests name
+  // an identity without proof (section 1) and both parties share the chat key, so without it one party could post messages in the
   // other's name, such as "payment received", and show them to the arbiter.
   async postChatMessage(params: {
     idOrTradeId: string;
