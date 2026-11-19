@@ -13,6 +13,8 @@ export const NO_MESSAGES = 'No messages yet';
 export const OPENS_ON_ACCEPT = 'Chat opens once accepted';
 export const KEY_ELSEWHERE = 'Readable on the device that started it';
 export const UNREADABLE_MESSAGE = 'Message could not be read';
+/** The Chats row for a receipt image: the preview is text, so it says what was sent. */
+export const IMAGE_PREVIEW = 'Sent a receipt';
 export const NOT_LOADED = 'Messages could not be loaded';
 
 /**

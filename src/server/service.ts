@@ -26,6 +26,7 @@ import {
   identityFromDefiXpub,
   isCompressedPubkeyHex,
   MAX_CHAT_CIPHERTEXT_LENGTH,
+  MAX_CHAT_IMAGE_BYTES,
   MAX_CHAT_MESSAGE_CHARS,
   matchesEscrowFunding,
   pkhToCashAddress,
@@ -1287,7 +1288,7 @@ export class CampfireService {
       throw new Error('Chat message must be an encrypted AES-GCM payload');
     }
     if (params.ciphertext.length > MAX_CHAT_CIPHERTEXT_LENGTH) {
-      throw new Error(`Chat messages can be at most ${MAX_CHAT_MESSAGE_CHARS} characters long`);
+      throw new Error(`Chat messages can be at most ${MAX_CHAT_MESSAGE_CHARS} characters long, and images at most ${MAX_CHAT_IMAGE_BYTES / 1000} KB`);
     }
     if (!trade.tradeId || !trade.buyerSessionPk || !trade.sellerSessionPk) {
       throw new Error('The chat opens once the trade is accepted');
@@ -1332,17 +1333,19 @@ export class CampfireService {
     return msg;
   }
 
-  async listChatMessages(idOrTradeId: string): Promise<StoredChatMessage[]> {
+  // `sinceSeconds`: only messages created at or after it, so a client that polls asks for what is new.
+  async listChatMessages(idOrTradeId: string, sinceSeconds?: number): Promise<StoredChatMessage[]> {
     const trade = await this.options.storage.getTrade(idOrTradeId);
     if (!trade) {
       throw new Error('Trade not found');
     }
-    return this.options.storage.listChatMessages(trade.id);
+    return this.options.storage.listChatMessages(trade.id, sinceSeconds);
   }
 
   // In a dispute where a party handed over `sharedTradeKeyHex`, the arbiter can decrypt the chat log.
   async decryptDisputedChatForArbiter(
     idOrTradeId: string,
+    sinceSeconds?: number,
   ): Promise<DecryptedChatMessage[]> {
     const trade = await this.options.storage.getTrade(idOrTradeId);
     if (!trade) {
@@ -1351,7 +1354,7 @@ export class CampfireService {
     if (!trade.sharedTradeKeyHex) {
       throw new Error('No shared trade key has been handed to the arbiter for this trade');
     }
-    const messages = await this.options.storage.listChatMessages(trade.id);
+    const messages = await this.options.storage.listChatMessages(trade.id, sinceSeconds);
     const decrypted: DecryptedChatMessage[] = [];
     for (const m of messages) {
       const plaintext = await decryptChatMessage(trade.sharedTradeKeyHex, m.ciphertext);

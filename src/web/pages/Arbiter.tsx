@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState, type ReactNode } from 'react';
+import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 import { Link, useParams } from 'react-router';
 import { expectedEscrowFunding } from '../../protocol/escrow.js';
 import { pkhToCashAddress } from '../../protocol/keys.js';
@@ -7,7 +7,9 @@ import { ApiError, apiGet, apiPost, type ArbiterChat, type Offer, type Trade } f
 import { setArbiterToken, useArbiterToken } from '../arbiterToken';
 import { assetInfo } from '../assets';
 import { ArbiterTokenForm } from '../components/ArbiterTokenForm';
+import { sinceFor, mergeById } from '../chat';
 import { Button } from '../components/Button';
+import { ChatPlaintext } from '../components/ChatImage';
 import { HashLink, ProvenanceTag, SimBox } from '../components/Provenance';
 import { EmptyState, Notice, Skeleton } from '../components/States';
 import { StatusPill } from '../components/StatusPill';
@@ -408,13 +410,19 @@ function ChatFeed(props: {
   onError: (message: string | null) => void;
 }) {
   const { id, token, onData, onError } = props;
+  // What was decrypted so far: each poll asks only for newer messages (a receipt weighs hundreds of KB).
+  const held = useRef<NonNullable<ArbiterChat['decrypted']>>([]);
   const feed = usePoll(
-    () =>
-      apiGet<ArbiterChat>(`/api/trades/${id}/chat?arbiter=true`, token).then((c) => {
-        onData(c);
+    () => {
+      const since = sinceFor(held.current);
+      return apiGet<ArbiterChat>(`/api/trades/${id}/chat?arbiter=true${since ? `&since=${since}` : ''}`, token).then((c) => {
+        // Without the key there is nothing decrypted to keep, and a later handover must bring the whole chat.
+        held.current = c.decrypted ? mergeById(held.current, c.decrypted) : [];
+        onData(c.decrypted ? { ...c, decrypted: held.current } : c);
         onError(null);
         return c;
-      }),
+      });
+    },
     `${id}:${token ?? ''}`,
     POLL_MS,
   );
@@ -444,7 +452,8 @@ function ChatCard({ trade, chat, error }: { trade: Trade; chat: ArbiterChat | un
           <div key={m.id} className="cf-msg">
             {/* The author is the role whose session key signed the message, not the identity the request named.
                 "Not signed" is invented copy: the design has no unsigned messages. */}
-            <strong>{m.senderRole === 'seller' ? 'Seller' : m.senderRole === 'buyer' ? 'Buyer' : 'Not signed'}</strong> {m.plaintext}
+            <strong>{m.senderRole === 'seller' ? 'Seller' : m.senderRole === 'buyer' ? 'Buyer' : 'Not signed'}</strong>{' '}
+            <ChatPlaintext plaintext={m.plaintext} />
             <small>{formatHourMinute(new Date(m.createdAt * 1000))}</small>
           </div>
         ))}

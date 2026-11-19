@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from 'react';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ChangeEvent, type FormEvent, type ReactNode } from 'react';
 import { useSearchParams } from 'react-router';
 import { ApiError, isFinalState, type Trade } from '../api';
 import {
@@ -6,18 +6,21 @@ import {
   MAX_CHAT_MESSAGE_CHARS,
   NO_CHAT_KEY,
   chatState,
+  createChatFeed,
   createChatReader,
-  fetchChat,
   markMessagesRead,
+  sendChatImage,
   sendChatMessage,
   type ChatLine,
   type ChatRole,
 } from '../chat';
+import { CHAT_IMAGE_ACCEPT, prepareChatImage } from '../chatImage';
 import { formatHourMinute } from '../format';
 import { usePoll } from '../hooks/usePoll';
 import { readSessionKey } from '../take';
 import { useWallet } from '../wallet';
 import { Button } from './Button';
+import { ChatImageView } from './ChatImage';
 import { Notice, Skeleton } from './States';
 
 // The chat card on /trade/:id (Trade-* screens), for the buyer and the seller only. Messages are encrypted and
@@ -83,7 +86,9 @@ function notOpenText(trade: Trade, role: ChatRole): string {
 
 function ChatThread({ trade, role, sessionKey, open }: { trade: Trade; role: ChatRole; sessionKey: string | null; open: boolean }) {
   const { identity } = useWallet();
-  const poll = usePoll(() => fetchChat(trade.id), trade.id, open ? POLL_MS : undefined);
+  // The feed holds what was received, so each poll asks only for the messages it has not seen.
+  const feed = useMemo(() => createChatFeed(trade.id), [trade.id]);
+  const poll = usePoll(() => feed.load(), trade.id, open ? POLL_MS : undefined);
 
   // One reader per trade, role and key, so each message is decrypted and verified once, not on every poll. Keyed
   // on the fields it reads: the page hands down a new trade object on every poll.
@@ -147,6 +152,26 @@ function ChatThread({ trade, role, sessionKey, open }: { trade: Trade; role: Cha
     }
   };
 
+  // A receipt: shrunk in this browser, then sent like any message (encrypted, signed). Invented copy for the errors.
+  const fileRef = useRef<HTMLInputElement>(null);
+  const attach = async (event: ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    event.target.value = '';
+    if (!file || sending || !identity) return;
+    setSending(true);
+    setSendError(null);
+    try {
+      const image = await prepareChatImage(file);
+      await sendChatImage({ trade, role, identity, sessionPrivateKey: sessionKey, image });
+      justSent.current = true;
+      poll.reload();
+    } catch (err) {
+      setSendError(err instanceof ChatSendError || err instanceof ApiError ? err.message : 'The image could not be sent. Try again.');
+    } finally {
+      setSending(false);
+    }
+  };
+
   let messages: ReactNode;
   if (!lines) {
     // Invented copy for the error.
@@ -171,7 +196,11 @@ function ChatThread({ trade, role, sessionKey, open }: { trade: Trade; role: Cha
         {/* Invented copy: the author comes from the signature checked in this browser, and the design has no
             message that neither session key signed, nor one this browser cannot decrypt. */}
         {line.author === 'unverified' && <strong>Not signed by either party. </strong>}
-        {line.text ?? <em>This message could not be decrypted.</em>}
+        {line.image ? (
+          <ChatImageView image={line.image} />
+        ) : (
+          (line.text ?? <em>This message could not be decrypted.</em>)
+        )}
         <small>{formatHourMinute(new Date(line.createdAt * 1000))}</small>
       </div>
     ));
@@ -209,6 +238,10 @@ function ChatThread({ trade, role, sessionKey, open }: { trade: Trade; role: Cha
                 if (sendError) setSendError(null);
               }}
             />
+            <input ref={fileRef} type="file" accept={CHAT_IMAGE_ACCEPT} hidden aria-label="Receipt image" onChange={attach} />
+            <Button variant="ghost" disabled={!identity || sending} onClick={() => fileRef.current?.click()}>
+              Attach receipt
+            </Button>
             <Button type="submit" busy={sending} disabled={!identity || !text.trim()}>
               Send
             </Button>

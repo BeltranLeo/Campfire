@@ -2,7 +2,7 @@ import { createContext, useCallback, useContext, useEffect, useRef, useState, ty
 import { Link, useLocation } from 'react-router';
 import { apiGet, type ChatMessage, type Trade } from '../api';
 import { assetInfo } from '../assets';
-import { chatState, fetchChat, lastRead, onChatRead } from '../chat';
+import { chatState, createChatFeed, lastRead, onChatRead, type ChatFeed } from '../chat';
 import { useConfig } from '../config';
 import { formatAmount, formatFiatAmount } from '../format';
 import { rowTitle } from '../mytrades';
@@ -51,6 +51,8 @@ export function NotificationsProvider({ identity, children }: { identity: string
   // counts (so a chat marked read updates its count at once), and the trade whose page is open.
   const snapshotRef = useRef<Snapshot | null>(null);
   const messagesRef = useRef(new Map<string, ChatMessage[]>());
+  // One feed per chat, so each poll asks only for the messages it has not seen.
+  const feedsRef = useRef(new Map<string, ChatFeed>());
   const openTrade = openTradeId(useLocation().pathname);
   const openTradeRef = useRef(openTrade);
   openTradeRef.current = openTrade;
@@ -58,6 +60,7 @@ export function NotificationsProvider({ identity, children }: { identity: string
   useEffect(() => {
     snapshotRef.current = null;
     messagesRef.current = new Map();
+    feedsRef.current = new Map();
     setSnapshot(null);
     setQueue([]);
     if (!identity) return;
@@ -85,7 +88,9 @@ export function NotificationsProvider({ identity, children }: { identity: string
         const messages = new Map<string, ChatMessage[]>();
         await forEachLimited(open, CHAT_CONCURRENCY, async (t) => {
           try {
-            messages.set(t.id, await fetchChat(t.id));
+            let feed = feedsRef.current.get(t.id);
+            if (!feed) feedsRef.current.set(t.id, (feed = createChatFeed(t.id)));
+            messages.set(t.id, await feed.load());
           } catch {
             // Keep what the last read found, or the next good read would look like a burst of new messages.
             const kept = messagesRef.current.get(t.id);

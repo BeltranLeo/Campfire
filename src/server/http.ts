@@ -293,7 +293,13 @@ export function createApiHandler(deps: {
         const action = actionMatch[2].toLowerCase();
 
         if (action === 'chat' && method === 'GET') {
-          const messages = await service.listChatMessages(id);
+          // `?since=<unix seconds>`: only messages created at or after it (what a polling client has not seen yet).
+          const sinceParam = url.searchParams.get('since');
+          const since = sinceParam === null ? undefined : Number(sinceParam);
+          if (since !== undefined && !(Number.isInteger(since) && since >= 0)) {
+            throw new HttpError(400, 'since must be a whole number of seconds');
+          }
+          const messages = await service.listChatMessages(id, since);
           const asArbiter = url.searchParams.get('arbiter') === 'true';
           let decrypted: unknown;
           if (asArbiter) {
@@ -302,7 +308,7 @@ export function createApiHandler(deps: {
               throw new HttpError(403, 'The decrypted chat is only available to the arbiter');
             }
             try {
-              decrypted = await service.decryptDisputedChatForArbiter(id);
+              decrypted = await service.decryptDisputedChatForArbiter(id, since);
             } catch {
               decrypted = undefined;
             }

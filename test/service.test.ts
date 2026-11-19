@@ -22,6 +22,7 @@ import {
   BCH_DECIMALS,
   PUSD_CATEGORY,
   MAX_CHAT_CIPHERTEXT_LENGTH,
+  MAX_CHAT_IMAGE_PLAINTEXT_CHARS,
   MAX_CHAT_MESSAGE_CHARS,
   PUSD_DECIMALS,
   VERDICT_BUYER,
@@ -413,8 +414,8 @@ describe('CampfireService & HTTP API end-to-end lifecycle', () => {
     });
     expect(replay.status).toBe(400);
     expect(replay.data.error).toMatch(/already posted/);
-    // The service sees only ciphertext, so it caps its length: a message above the limit is refused.
-    const tooLong = await encryptChatMessage(sharedKey, 'x'.repeat(3 * MAX_CHAT_MESSAGE_CHARS + 1));
+    // The service sees only ciphertext, so it caps its length (the larger of a text and a receipt image): above it, refused.
+    const tooLong = await encryptChatMessage(sharedKey, 'x'.repeat(MAX_CHAT_IMAGE_PLAINTEXT_CHARS + 1));
     const oversize = await ctx.jsonReq('POST', `/api/trades/${acceptedTrade.tradeId}/chat`, {
       senderIdentity: buyerId,
       ciphertext: tooLong,
@@ -471,6 +472,14 @@ describe('CampfireService & HTTP API end-to-end lifecycle', () => {
     expect(afterEnd.data.error).toMatch(/chat closed/);
     const history = await ctx.jsonReq('GET', `/api/trades/${acceptedTrade.tradeId}/chat`);
     expect(history.data.messages).toHaveLength(1);
+    // A polling client asks only for what is new: from the second of its newest message (that one comes again, and
+    // the client drops it by id), and nothing once it is behind.
+    const sentAt: number = chatRes.data.message.createdAt;
+    const chatSince = (since: string) => ctx.jsonReq('GET', `/api/trades/${acceptedTrade.tradeId}/chat?since=${since}`);
+    expect((await chatSince(String(sentAt))).data.messages).toHaveLength(1);
+    expect((await chatSince(String(sentAt + 1))).data.messages).toHaveLength(0);
+    expect((await chatSince('abc')).status).toBe(400);
+    expect((await chatSince('-5')).status).toBe(400);
 
     // 8. Check reputation counters for both seller and buyer.
     const sellerRep = await ctx.jsonReq('GET', `/api/identities/${sellerId}/reputation`);
@@ -645,6 +654,11 @@ describe('CampfireService & HTTP API end-to-end lifecycle', () => {
       ADMIN,
     );
     expect(arbChat.data.decrypted[0]).toMatchObject({ plaintext: 'Receipt #777 attached', senderRole: 'buyer', verified: true });
+    // The arbiter's view takes the same cursor: only newer messages are decrypted and returned.
+    const newerThan = (at: number) =>
+      ctx.jsonReq('GET', `/api/trades/${acc1.trade.tradeId}/chat?arbiter=true&since=${at}`, undefined, ADMIN);
+    expect((await newerThan(arbChat.data.decrypted[0].createdAt)).data.decrypted).toHaveLength(1);
+    expect((await newerThan(arbChat.data.decrypted[0].createdAt + 1)).data.decrypted).toEqual([]);
 
     // Arbiter issues verdict `0x01` (buyer wins), which automatically broadcasts `arbitrate`.
     const verdictRes = await ctx.jsonReq(

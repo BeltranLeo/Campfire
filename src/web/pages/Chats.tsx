@@ -2,8 +2,8 @@ import { useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router';
 import { ApiError, apiGet, isFinalState, type Trade } from '../api';
 import { assetInfo } from '../assets';
-import { chatState, createChatReader, fetchChat, lastRead, onChatRead, type ChatRole } from '../chat';
-import { chatRow, formatChatTime, listsChat, mapLimit, sortChatRows, type ChatEntry, type ChatRow } from '../chats';
+import { chatState, createChatFeed, createChatReader, lastRead, onChatRead, type ChatFeed, type ChatRole } from '../chat';
+import { IMAGE_PREVIEW, chatRow, formatChatTime, listsChat, mapLimit, sortChatRows, type ChatEntry, type ChatRow } from '../chats';
 import { Button } from '../components/Button';
 import { shorten } from '../components/Provenance';
 import { EmptyState, Notice, Skeleton } from '../components/States';
@@ -28,6 +28,8 @@ type Reader = ReturnType<typeof createChatReader>;
 function useChatEntries(identity: string | null) {
   // Readers keep each decrypted message by id, so a poll decrypts only what is new.
   const readers = useRef(new Map<string, Reader>());
+  // One feed per chat: a poll asks the service only for the messages it has not seen.
+  const feeds = useRef(new Map<string, ChatFeed>());
   // Chats of finished trades: the service takes no message once a trade ends, so they are fetched once.
   const finished = useRef(new Map<string, ChatEntry>());
   // The last good entry of each trade, kept when one chat fails to load on a later poll.
@@ -39,7 +41,9 @@ function useChatEntries(identity: string | null) {
     const done = finished.current.get(doneKey);
     if (done) return done;
     try {
-      const messages = await fetchChat(trade.id);
+      let feed = feeds.current.get(trade.id);
+      if (!feed) feeds.current.set(trade.id, (feed = createChatFeed(trade.id)));
+      const messages = await feed.load();
       const newest = messages.reduce<(typeof messages)[number] | undefined>((a, m) => (!a || m.createdAt >= a.createdAt ? m : a), undefined);
       let last: ChatEntry['last'];
       if (newest && state === 'no-key') {
@@ -52,7 +56,7 @@ function useChatEntries(identity: string | null) {
           readers.current.set(readerKey, reader);
         }
         const [line] = await reader.read([newest]);
-        last = { text: line.text, createdAt: line.createdAt };
+        last = { text: line.image ? IMAGE_PREVIEW : line.text, createdAt: line.createdAt };
       }
       const entry: ChatEntry = { trade, role, state, messages, ...(last ? { last } : {}) };
       if (isFinalState(trade.status)) finished.current.set(doneKey, entry);

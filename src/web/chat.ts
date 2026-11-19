@@ -10,10 +10,12 @@ import {
   signChatMessage,
   verifyChatMessageSignature,
 } from '../protocol/crypto.js';
+import { encodeChatImage, looksLikeChatImage, parseChatImage, type ChatImage } from '../protocol/chatImage.js';
 import { apiGet, apiPost, isFinalState, type ChatMessage, type Trade } from './api';
 import { disputeKeyHex, type Role } from './trade';
 
 export { MAX_CHAT_MESSAGE_CHARS };
+export { MAX_CHAT_IMAGE_BYTES, type ChatImage } from '../protocol/chatImage.js';
 
 export type ChatRole = 'buyer' | 'seller';
 
@@ -77,6 +79,8 @@ export interface ChatLine {
   author: 'me' | 'peer' | 'unverified';
   role?: ChatRole;
   text: string | null;
+  /** Set when the message is a receipt image; `text` is then null. */
+  image?: ChatImage;
   createdAt: number;
 }
 
@@ -108,6 +112,7 @@ export function createChatReader(trade: ChatTrade, role: ChatRole, sessionPrivat
         if (!line) {
           const signer = signedRole(trade, m);
           let text: string | null = null;
+          let image: ChatImage | undefined;
           if (key) {
             try {
               text = await decryptChatMessage(key, m.ciphertext);
@@ -115,11 +120,17 @@ export function createChatReader(trade: ChatTrade, role: ChatRole, sessionPrivat
               text = null;
             }
           }
+          // A message that starts like an image but is not a valid one is shown as unreadable, never as raw base64.
+          if (text !== null && looksLikeChatImage(text)) {
+            image = parseChatImage(text) ?? undefined;
+            text = null;
+          }
           line = {
             id: m.id,
             author: signer === role ? 'me' : signer ? 'peer' : 'unverified',
             ...(signer ? { role: signer } : {}),
             text,
+            ...(image ? { image } : {}),
             createdAt: m.createdAt,
           };
           cache.set(m.id, line);
@@ -131,8 +142,49 @@ export function createChatReader(trade: ChatTrade, role: ChatRole, sessionPrivat
   };
 }
 
-export const fetchChat = (tradeRecordId: string) =>
-  apiGet<{ messages: ChatMessage[] }>(`/api/trades/${tradeRecordId}/chat`).then((r) => r.messages);
+export const fetchChat = (tradeRecordId: string, since?: number) =>
+  apiGet<{ messages: ChatMessage[] }>(`/api/trades/${tradeRecordId}/chat${since ? `?since=${since}` : ''}`).then((r) => r.messages);
+
+// Polling asks only for what is new (a receipt weighs hundreds of KB, and the chat is read every few seconds).
+// Messages are sorted by the service's clock in whole seconds, so two sent in the same second have no fixed order
+// and a count or an id would lose one. The cursor is therefore a time: ask from the newest `createdAt` held, a few
+// seconds back to cover clock differences between servers, and drop what is already held by `id`.
+const SINCE_SLACK_SECONDS = 5;
+
+/** What to pass as `since` after holding `known`; nothing (everything) when there is none yet. */
+export function sinceFor(known: Pick<ChatMessage, 'createdAt'>[]): number | undefined {
+  if (known.length === 0) return undefined;
+  const newest = known.reduce((max, m) => Math.max(max, m.createdAt), 0);
+  return Math.max(0, newest - SINCE_SLACK_SECONDS) || undefined;
+}
+
+/**
+ * `known` plus the `incoming` messages it does not have yet, in time order. Returns `known` itself when nothing is
+ * new, so a poll that found nothing does not make the screen read the same messages again.
+ */
+export function mergeById<T extends { id: string; createdAt: number }>(known: T[], incoming: T[]): T[] {
+  const have = new Set(known.map((m) => m.id));
+  const fresh = incoming.filter((m) => !have.has(m.id));
+  if (fresh.length === 0) return known;
+  // A stable sort: messages of the same second keep the order they arrived in.
+  return [...known, ...fresh].sort((a, b) => a.createdAt - b.createdAt);
+}
+
+/** One trade's chat, kept between polls: `load()` fetches only what is new and returns every message held. */
+export function createChatFeed(tradeRecordId: string, fetch: typeof fetchChat = fetchChat) {
+  let known: ChatMessage[] = [];
+  return {
+    async load(): Promise<ChatMessage[]> {
+      known = mergeById(known, await fetch(tradeRecordId, sinceFor(known)));
+      return known;
+    },
+    /** What was loaded so far, for a screen that keeps it when a poll fails. */
+    get messages() {
+      return known;
+    },
+  };
+}
+export type ChatFeed = ReturnType<typeof createChatFeed>;
 
 // --- Sending ---
 
@@ -140,30 +192,28 @@ export class ChatSendError extends Error {}
 
 type Post = (path: string, body: unknown) => Promise<{ message: ChatMessage }>;
 
-/**
- * Encrypts the text with the chat key and signs the ciphertext with this party's session key, so the service
- * stores only ciphertext and nobody can post in the other party's name. The signature covers the contract's trade
- * id (`trade.tradeId`); the URL uses the record id (`trade.id`).
- */
-export async function sendChatMessage(params: {
+interface SendParams {
   trade: ChatTrade;
   role: ChatRole;
   identity: string;
   sessionPrivateKey: string | null;
-  text: string;
   post?: Post;
-}): Promise<ChatMessage> {
+}
+
+/**
+ * Encrypts the plaintext with the chat key and signs the ciphertext with this party's session key, so the service
+ * stores only ciphertext and nobody can post in the other party's name. The signature covers the contract's trade
+ * id (`trade.tradeId`); the URL uses the record id (`trade.id`).
+ */
+async function sendPlaintext(params: SendParams, plaintext: string): Promise<ChatMessage> {
   const { trade, role, sessionPrivateKey } = params;
-  const text = params.text.trim();
-  if (!text) throw new ChatSendError('Write a message first.');
-  if (text.length > MAX_CHAT_MESSAGE_CHARS) throw new ChatSendError(`Messages can be at most ${MAX_CHAT_MESSAGE_CHARS} characters long.`);
   const state = chatState(trade, role, sessionPrivateKey);
   if (state === 'not-open') throw new ChatSendError('The chat opens once the trade is accepted.');
   if (state === 'no-key') throw new ChatSendError(NO_CHAT_KEY);
   if (state === 'closed') throw new ChatSendError('The chat closed when the trade ended.');
   const key = chatKeyHex(trade, role, sessionPrivateKey);
   if (!key || !sessionPrivateKey || !trade.tradeId) throw new ChatSendError(NO_CHAT_KEY);
-  const ciphertext = await encryptChatMessage(key, text);
+  const ciphertext = await encryptChatMessage(key, plaintext);
   const post: Post = params.post ?? ((path, body) => apiPost(path, body));
   const { message } = await post(`/api/trades/${trade.id}/chat`, {
     senderIdentity: params.identity,
@@ -171,6 +221,26 @@ export async function sendChatMessage(params: {
     signature: signChatMessage(sessionPrivateKey, trade.tradeId, ciphertext),
   });
   return message;
+}
+
+export async function sendChatMessage(params: SendParams & { text: string }): Promise<ChatMessage> {
+  const text = params.text.trim();
+  if (!text) throw new ChatSendError('Write a message first.');
+  if (text.length > MAX_CHAT_MESSAGE_CHARS) throw new ChatSendError(`Messages can be at most ${MAX_CHAT_MESSAGE_CHARS} characters long.`);
+  // Text that starts like an image would be shown as one, so it is not sent as text.
+  if (looksLikeChatImage(text)) throw new ChatSendError('That message cannot be sent.');
+  return sendPlaintext(params, text);
+}
+
+/** Sends a receipt: an image the browser already shrank (src/web/chatImage.ts), as one more encrypted, signed message. */
+export async function sendChatImage(params: SendParams & { image: { bytes: Uint8Array; mime: string } }): Promise<ChatMessage> {
+  let plaintext: string;
+  try {
+    plaintext = encodeChatImage(params.image.bytes, params.image.mime);
+  } catch (err) {
+    throw new ChatSendError(err instanceof Error ? err.message : 'The image could not be sent.');
+  }
+  return sendPlaintext(params, plaintext);
 }
 
 // --- Unread ---

@@ -138,7 +138,8 @@ export interface StorageAdapter {
   listTrades(filter?: { identity?: string; offerTxid?: string }): Promise<StoredTrade[]>;
 
   addChatMessage(msg: StoredChatMessage): Promise<void>;
-  listChatMessages(tradeRecordId: string): Promise<StoredChatMessage[]>;
+  /** In order of time; with `sinceSeconds`, only messages created at or after it. */
+  listChatMessages(tradeRecordId: string, sinceSeconds?: number): Promise<StoredChatMessage[]>;
 
   // Runs `fn` while holding a named lock shared by every server instance using this storage.
   // Optional: storage that lives in one process needs no cross-instance lock.
@@ -258,9 +259,12 @@ export class MemoryStorage implements StorageAdapter {
     this.flush();
   }
 
-  async listChatMessages(tradeRecordId: string): Promise<StoredChatMessage[]> {
+  async listChatMessages(tradeRecordId: string, sinceSeconds = 0): Promise<StoredChatMessage[]> {
     const list = this.chat.get(tradeRecordId) ?? [];
-    return list.map((m) => structuredClone(m)).sort((a, b) => a.createdAt - b.createdAt);
+    return list
+      .filter((m) => m.createdAt >= sinceSeconds)
+      .map((m) => structuredClone(m))
+      .sort((a, b) => a.createdAt - b.createdAt);
   }
 }
 
@@ -476,11 +480,11 @@ export class PostgresStorage implements StorageAdapter {
     );
   }
 
-  async listChatMessages(tradeRecordId: string): Promise<StoredChatMessage[]> {
+  async listChatMessages(tradeRecordId: string, sinceSeconds = 0): Promise<StoredChatMessage[]> {
     await this.ensureSchema();
     const { rows } = await this.query(
-      `SELECT data FROM campfire_chat WHERE trade_record_id = $1 ORDER BY created_at ASC`,
-      [tradeRecordId],
+      `SELECT data FROM campfire_chat WHERE trade_record_id = $1 AND created_at >= $2 ORDER BY created_at ASC`,
+      [tradeRecordId, sinceSeconds],
     );
     return rows.map((r) => r.data as StoredChatMessage);
   }

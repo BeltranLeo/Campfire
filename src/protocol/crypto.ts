@@ -7,6 +7,7 @@ import {
   sha256,
   utf8ToBin,
 } from '@bitauth/libauth';
+import { MAX_CHAT_IMAGE_PLAINTEXT_CHARS } from './chatImage.js';
 import { toBytes } from './keys.js';
 
 const TRADE_KEY_DOMAIN = 'CMPF-TRADE-KEY-v1';
@@ -17,8 +18,10 @@ const IV_BYTES = 12;
 /** Longest chat message, in JavaScript characters (UTF-16 code units), that the interface lets a person send. */
 export const MAX_CHAT_MESSAGE_CHARS = 2000;
 // One UTF-16 code unit encodes to at most 3 UTF-8 bytes (a 4-byte character takes two units). The service sees only
-// ciphertext, so it caps that: `<24 hex iv>:<hex of the bytes plus the 16-byte tag>`.
-export const MAX_CHAT_CIPHERTEXT_LENGTH = IV_BYTES * 2 + 1 + (MAX_CHAT_MESSAGE_CHARS * 3 + 16) * 2;
+// ciphertext, so it caps that: `<24 hex iv>:<hex of the bytes plus the 16-byte tag>`. A receipt image is also a
+// message, and the service cannot tell it from text, so the cap is the larger of the two.
+export const MAX_CHAT_CIPHERTEXT_LENGTH =
+  IV_BYTES * 2 + 1 + (Math.max(MAX_CHAT_MESSAGE_CHARS * 3, MAX_CHAT_IMAGE_PLAINTEXT_CHARS) + 16) * 2;
 
 export interface SessionKeyPair {
   privateKey: string;
