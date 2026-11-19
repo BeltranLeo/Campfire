@@ -20,7 +20,7 @@ export function About() {
   }, [hash]);
 
   return (
-    <main className="s-main" data-narrow>
+    <main className="s-main" data-site data-narrow>
       <div className="s-pagehead">
         <h1 className="cf-display">About Campfire</h1>
         <p className="cf-muted">

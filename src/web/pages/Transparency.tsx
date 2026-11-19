@@ -30,7 +30,7 @@ export function Transparency() {
   const ran = CONTRACT_PATHS.filter((p) => p.txid).length;
 
   return (
-    <main className="s-main">
+    <main className="s-main" data-site>
       <div className="s-pagehead">
         <h1 className="cf-display">Transparency</h1>
         <p className="cf-muted" style={{ maxWidth: 640 }}>

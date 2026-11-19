@@ -1,16 +1,18 @@
-/* Campfire screen layouts. The single-column layout starts below 720px. */
+/* Campfire screen layouts. App pages are one column of at most 480 px, centred, so the app looks the same on a
+   computer as on a phone. Site pages (data-site: landing, about, transparency) use up to 1200 px. */
 
 .s-screen { min-height: 100%; display: flex; flex-direction: column; }
-.s-main { flex: 1; width: 100%; max-width: var(--content-max); margin: 0 auto; padding: var(--space-8) var(--space-6) var(--space-12); display: flex; flex-direction: column; gap: var(--space-6); }
-.s-main[data-narrow] { max-width: calc(var(--measure) + 2 * var(--space-6)); }
+.s-main { container: s-main / inline-size; flex: 1; width: 100%; max-width: calc(var(--layout-app-max-width) + 2 * var(--layout-app-margin)); margin: 0 auto; padding: var(--space-6) var(--layout-app-margin) var(--space-12); display: flex; flex-direction: column; gap: var(--space-5); }
+.s-main[data-site] { max-width: var(--layout-site-max-width); padding: var(--space-8) var(--space-6) var(--space-12); gap: var(--space-6); }
+.s-main[data-site][data-narrow] { max-width: calc(var(--measure) + 2 * var(--space-6)); }
 .s-cols { display: grid; grid-template-columns: minmax(0, 1fr) 360px; gap: var(--space-6); align-items: start; }
 .s-col { display: flex; flex-direction: column; gap: var(--space-6); min-width: 0; }
 .s-pagehead { display: flex; flex-direction: column; gap: var(--space-2); }
 .s-back { font-size: 13px; line-height: 18px; font-weight: 600; text-decoration: none; color: var(--text-muted) !important; }
-.s-headerbar { display: flex; align-items: center; gap: var(--space-4); width: 100%; max-width: var(--content-max); margin: 0 auto; }
+.s-headerbar { display: flex; align-items: center; gap: var(--space-4); width: 100%; max-width: var(--layout-site-max-width); margin: 0 auto; }
 .cf-header { padding-left: var(--space-6); padding-right: var(--space-6); }
 .cf-banner { justify-content: center; }
-.s-footer { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-4) var(--space-8); justify-content: space-between; width: 100%; max-width: var(--content-max); margin: 0 auto; }
+.s-footer { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-4) var(--space-8); justify-content: space-between; width: 100%; max-width: var(--layout-site-max-width); margin: 0 auto; }
 .s-vote { display: flex; flex-direction: column; gap: var(--space-1); min-width: 0; }
 .s-action { border: 1px solid var(--border); }
 .s-action > .cf-card__section:first-child { display: flex; flex-direction: column; gap: var(--space-4); }
@@ -30,7 +32,8 @@
 .s-chip { display: inline-flex; align-items: center; height: 24px; padding: 0 var(--space-2); border-radius: var(--radius-sm); background: var(--bg); font-size: 13px; line-height: 18px; color: var(--text); white-space: nowrap; }
 .s-overlay { position: relative; background: color-mix(in srgb, var(--text) 55%, transparent); display: grid; place-items: center; padding: var(--space-8) var(--space-4); }
 .s-dialog { width: 100%; max-width: 420px; background: var(--surface); border-radius: var(--radius-xl); box-shadow: var(--shadow-sheet); padding: var(--space-6); display: flex; flex-direction: column; gap: var(--space-4); }
-.s-menu { width: 320px; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-lg); box-shadow: var(--shadow-sheet); padding: var(--space-4); display: flex; flex-direction: column; gap: var(--space-3); }
+/* The wallet menu is glass, like the wallet card. */
+.s-menu { width: 320px; background: var(--glass); -webkit-backdrop-filter: blur(18px); backdrop-filter: blur(18px); border: 1px solid var(--border); border-top-color: var(--glass-edge); border-radius: var(--radius-xl); box-shadow: var(--shadow-sheet); padding: var(--space-4); display: flex; flex-direction: column; gap: var(--space-3); }
 .s-statelabel { font: 600 12px/16px var(--font-text); letter-spacing: 0.06em; text-transform: uppercase; color: var(--text-muted); padding: var(--space-4) var(--space-6) var(--space-2); }
 .s-verdict { display: grid; grid-template-columns: 1fr 1fr; gap: var(--space-3); }
 .s-verdict .cf-btn { white-space: normal; height: auto; padding: var(--space-3) var(--space-4); flex-direction: column; gap: 2px; text-align: center; }
@@ -110,16 +113,27 @@
 
 .cf-card[data-pad] { padding: var(--space-6); }
 
+/* The page chrome follows the screen: under 720 px the header wraps, the banner folds and the tab bar appears. */
 @media (max-width: 719px) {
-  .s-main { padding: var(--space-6) var(--space-4) var(--space-8); gap: var(--space-4); }
-  .s-cols { grid-template-columns: minmax(0, 1fr); gap: var(--space-4); }
-  .s-col { gap: var(--space-4); }
+  .s-main[data-site] { padding: var(--space-6) var(--layout-app-margin) var(--space-8); gap: var(--space-4); }
   .cf-header { padding-left: var(--space-4); padding-right: var(--space-4); }
   .s-headerbar { flex-wrap: wrap; gap: var(--space-2) var(--space-3); }
   .s-headerbar > .cf-nav { order: 3; flex-basis: 100%; overflow-x: auto; margin: 0 calc(-1 * var(--space-2)); }
   .cf-banner { justify-content: space-between; flex-wrap: nowrap; align-items: flex-start; }
   .s-bannerfold { display: block; text-align: right; }
   .s-bannerfold[open] > .cf-banner__links { flex-direction: column; align-items: flex-end; }
+  .s-menu { width: 100%; }
+  .s-mobileonly { display: flex; }
+  .cf-bottomnav { display: grid; }
+  .s-headerbar > .cf-nav[data-app] { display: none; }
+  .s-desktoponly { display: none; }
+}
+
+/* The content follows its column, not the screen: an app page is 480 px wide on a computer too, so it gets the
+   phone layout everywhere. A site page gets it only when the screen itself is narrow. */
+@container s-main (max-width: 719px) {
+  .s-cols { grid-template-columns: minmax(0, 1fr); gap: var(--space-4); }
+  .s-col { gap: var(--space-4); }
   .s-quick3 { gap: var(--space-2); }
   .cf-display { font-size: 28px; line-height: 34px; }
   .s-filters { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
@@ -137,9 +151,6 @@
   .s-actions .cf-btn { display: flex; width: 100%; }
   .s-2 { grid-template-columns: minmax(0, 1fr); }
   .s-verdict { grid-template-columns: minmax(0, 1fr); }
-  .s-menu { width: 100%; }
-  .s-mobileonly { display: flex; }
-  .cf-bottomnav { display: grid; }
   .s-idcard { grid-template-columns: minmax(0, 1fr); gap: var(--space-4); }
   .s-idcard > div + div { border-left: 0; padding-left: 0; border-top: 1px solid var(--border); padding-top: var(--space-4); }
   .s-hero { grid-template-columns: minmax(0, 1fr); gap: var(--space-4); padding: var(--space-2) 0 0; }
@@ -149,7 +160,5 @@
   .s-home { grid-template-columns: minmax(0, 1fr); gap: var(--space-4); }
   .s-trade { gap: var(--space-4); }
   .s-balance > strong { font-size: 32px; line-height: 36px; }
-  .s-headerbar > .cf-nav[data-app] { display: none; }
-  .s-desktoponly { display: none; }
   .cf-card[data-pad] { padding: var(--space-4); }
 }

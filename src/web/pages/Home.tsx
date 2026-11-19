@@ -96,7 +96,7 @@ function WalletCard({ receiveXpub, trades }: { receiveXpub: string | null; trade
   const [receiving, setReceiving] = useState(false);
 
   return (
-    <section className="cf-card" data-pad>
+    <section className="cf-card cf-glass" data-pad>
       <div className="s-idcard">
         <div>
           <div className="s-balance">

@@ -868,7 +868,7 @@ function OnChainDetails(props: {
       )}
 
       {trade.escrowAddress && (
-        <section className="cf-card" data-flush>
+        <section className="cf-card cf-glass cf-glass--escrow" data-flush>
           <div className="cf-card__section">
             <div className="cf-row" data-between style={{ marginBottom: 'var(--space-3)' }}>
               <h2 className="cf-heading">Escrow contract</h2>

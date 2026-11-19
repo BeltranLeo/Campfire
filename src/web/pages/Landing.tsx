@@ -26,7 +26,7 @@ export function Landing() {
   const demoOffer = offers.data?.find((o) => o.isDemo && o.document.asset === 'BCH') ?? offers.data?.find((o) => o.isDemo);
 
   return (
-    <main className="s-main">
+    <main className="s-main" data-site>
       <section className="s-hero">
         <div className="cf-stack">
           <h1>Buy or sell Bitcoin Cash directly with another person</h1>

@@ -103,6 +103,12 @@
 .cf-pill[data-tone="danger"] { color: var(--danger); background: var(--danger-bg); }
 .cf-pill[data-tone="simulated"] { color: var(--simulated); border-style: dashed; background: var(--glass); }
 
+/* ---------- Glass: the contract's metaphor, it protects but you can see through it ---------- */
+/* Only for the wallet card, the contract panel, the navigation bars and the wallet menu; never behind forms,
+   long tables or much text. A blue tint (escrow) says the contract is holding the coins. */
+.cf-glass, .cf-card.cf-glass { background: var(--glass); border: 1px solid var(--border); border-top-color: var(--glass-edge); border-radius: var(--radius-xl); -webkit-backdrop-filter: blur(18px); backdrop-filter: blur(18px); box-shadow: var(--shadow-glass); }
+.cf-glass--escrow, .cf-card.cf-glass--escrow, .cf-details > .cf-details__body > .cf-card.cf-glass--escrow { background: var(--escrow-bg); }
+
 /* ---------- Card: border only; glass is the one raised surface ---------- */
 .cf-card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-lg); padding: var(--space-3) var(--space-4); }
 .cf-card[data-flush] { padding: 0; overflow: hidden; }
@@ -209,7 +215,10 @@
 .cf-banner strong { font-weight: 600; }
 .cf-banner a { color: var(--bg); }
 .cf-banner__links { display: flex; flex-wrap: wrap; gap: 2px var(--space-3); }
-.cf-header { display: flex; align-items: center; gap: var(--space-4); padding: var(--space-3) var(--space-4); background: var(--surface); border-bottom: 1px solid var(--border); }
+.cf-header { display: flex; align-items: center; gap: var(--space-4); padding: var(--space-3) var(--space-4); background: var(--glass); -webkit-backdrop-filter: blur(18px); backdrop-filter: blur(18px); border-bottom: 1px solid var(--border); }
+/* On a computer the header stays on top while the page scrolls under its glass, so the wallet is always at hand.
+   On a phone it scrolls away: it is two rows tall there, and the tab bar does the navigating. */
+@media (min-width: 720px) { .cf-header { position: sticky; top: 0; z-index: 20; } }
 /* The logo is always a file, never the word set in a font: the colour version on light, colour symbol and white word on dark. */
 .cf-logo { display: inline-flex; align-items: center; flex: none; }
 .cf-logo > img { display: block; height: 28px; width: auto; }
@@ -236,7 +245,7 @@
 .cf-badge { display: inline-grid; place-items: center; min-width: 20px; height: 20px; padding: 0 var(--space-1); border-radius: var(--radius-pill); background: var(--action); color: var(--on-action); font: 700 11px/1 var(--font-text); }
 .cf-quick > .cf-badge { position: absolute; top: var(--space-3); right: var(--space-3); }
 /* Bottom tab bar: the current tab is Brasa text under a Brasa 500 line. */
-.cf-bottomnav { position: sticky; bottom: 0; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); background: var(--surface); border-top: 1px solid var(--border); padding: 0 var(--space-2) calc(var(--space-2) + env(safe-area-inset-bottom, 0px)); }
+.cf-bottomnav { position: sticky; bottom: 0; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); background: var(--glass); -webkit-backdrop-filter: blur(18px); backdrop-filter: blur(18px); border-top: 1px solid var(--border); padding: 0 var(--space-2) calc(var(--space-2) + env(safe-area-inset-bottom, 0px)); }
 .cf-bottomnav > a { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: var(--space-1); min-height: 56px; color: var(--text-muted) !important; text-decoration: none; font: 600 12px/16px var(--font-text); position: relative; border-top: 3px solid transparent; }
 .cf-bottomnav > a[aria-current="page"] { color: var(--action-text) !important; border-top-color: var(--action-accent); }
 .cf-bottomnav > a > .cf-badge { position: absolute; top: var(--space-1); left: calc(50% + var(--space-2)); min-width: 16px; height: 16px; font-size: 10px; padding: 0 var(--space-1); }
