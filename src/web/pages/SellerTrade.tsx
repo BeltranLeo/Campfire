@@ -2,6 +2,7 @@ import { useState, type ReactNode } from 'react';
 import { expectedEscrowFunding } from '../../protocol/escrow.js';
 import { pkhToCashAddress } from '../../protocol/keys.js';
 import { aliasFor } from '../alias';
+import { verifyPriceQuote, type PriceQuote } from '../../protocol/trades.js';
 import type { TradeFee } from '../../protocol/fees.js';
 import { apiGet, apiPost, type Offer, type Reputation, type Trade } from '../api';
 import { ActionCard } from '../components/ActionCard';
@@ -12,9 +13,11 @@ import { Details } from '../components/Details';
 import { HashLink, ProvenanceTag } from '../components/Provenance';
 import { Notice, Skeleton } from '../components/States';
 import { Countdown } from '../components/Timeline';
-import { describeScan, loadWalletCoins, spendableBch } from '../coins';
+import { describeScan, loadWalletCoins } from '../coins';
+import { assetInfo } from '../assets';
+import { loadConfig, useConfig } from '../config';
 import { withKeptElectrum } from '../electrum';
-import { applyMargin, describeMargin, formatAmount, formatBch, formatDate, formatDateTime, formatFiat } from '../format';
+import { applyMargin, describeMargin, formatAmount, formatBch, formatDate, formatDateTime, formatFiat, fromBaseUnits } from '../format';
 import { usePoll } from '../hooks/usePoll';
 import { useNow } from '../hooks/useNow';
 import { useTradeAction } from '../hooks/useTradeAction';
@@ -24,14 +27,15 @@ import {
   buildAcceptBody,
   buildDeposit,
   buildSellerRelease,
+  canDeposit,
   checkAcceptedTrade,
+  checkDeposit,
   clearSavedDeposit,
   EMPTY_PAYMENT_FIELDS,
   MAX_DETAILS_LENGTH,
   accountLabel,
   clearSavedDetails,
   composePaymentDetails,
-  depositNeeds,
   findDeposit,
   loadSavedDeposit,
   loadSavedDetails,
@@ -88,9 +92,25 @@ export function SellerAction(props: { trade: Trade; amount: string; fiat: string
   const coins = useWalletCoins(preparing ? 15_000 : undefined);
 
   const isBch = trade.asset === 'BCH';
-  const deposit = isBch ? formatAmount(expectedEscrowFunding(trade).satoshis, BCH) : null;
-  const short = preparing && isBch && coins.data ? spendableBch(coins.data.coins) < depositNeeds(trade) : false;
+  const funding = expectedEscrowFunding(trade);
+  // What the escrow holds. A token always travels with some BCH, which goes to the buyer with it.
+  const deposit = isBch ? formatAmount(funding.satoshis, BCH) : `${props.amount} plus ${formatBch(funding.satoshis)}`;
+  const lockLabel = isBch ? deposit : props.amount;
+  const breakdown = isBch
+    ? `${formatAmount(trade.amount, BCH)} for the buyer plus a ${formatBch(1000n)} fee budget for the closing transaction.`
+    : `${props.amount} and ${formatBch(funding.satoshis - 1000n)} for the buyer (tokens always travel with a little BCH), plus a ${formatBch(1000n)} fee budget for the closing transaction.`;
+  const { symbol, decimals } = assetInfo(trade.asset, trade.assetDecimals, useConfig());
+  const depositCheck = preparing && coins.data ? checkDeposit(trade, coins.data.coins) : null;
+  const shortToken = depositCheck?.token !== undefined && depositCheck.token.have < depositCheck.token.need;
+  const shortBch = depositCheck !== null && depositCheck.bch.have < depositCheck.bch.need;
+  const short = depositCheck !== null && !canDeposit(depositCheck);
   const expired = trade.status === 'Requested' && trade.quoteExpiresAt !== undefined && now / 1000 >= trade.quoteExpiresAt;
+
+  /** A BCH/USD price signed by the service's oracle, to cap the fees of a token trade before locking. */
+  async function signedBchUsd(): Promise<string | null> {
+    const [config, { quote }] = await Promise.all([loadConfig(), apiGet<{ quote: PriceQuote }>('/api/oracle/quote?pair=BCH/USD')]);
+    return quote.pair === 'BCH/USD' && verifyPriceQuote(quote, config.oraclePk) ? quote.price : null;
+  }
 
   /** Asks the service to accept: the wallet must already cover the deposit, because accepting starts the funding window. */
   async function accept(): Promise<Trade> {
@@ -134,6 +154,7 @@ export function SellerAction(props: { trade: Trade; amount: string; fiat: string
         sessionPrivateKey: readSessionKey(t.id),
         offer: offer.document,
         now: Math.floor(Date.now() / 1000),
+        bchUsd: t.asset === 'BCH' ? null : await signedBchUsd(),
       });
       // On a buy offer the details go with the deposit, sealed before the wallet signs anything: the service refuses a
       // deposit without them, so they are kept next to the signed deposit for a retry after a reload.
@@ -158,11 +179,12 @@ export function SellerAction(props: { trade: Trade; amount: string; fiat: string
 
       const owned = await loadWalletCoins(provider, xpubs);
       const changeIndex = prep.data?.change ?? null;
-      const changeAddress =
+      // One change address in its two forms: plain for the BCH change, token-aware (z…) for the token change.
+      const change = (tokenAware: boolean) =>
         xpubs.change && changeIndex !== null
-          ? payoutAddress(xpubs.change, changeIndex, false)
-          : payoutAddress(xpubs.receive, t.sellerReceiveIndex ?? 0, false);
-      return { tx: buildDeposit({ trade: t, checked, coins: owned, changeAddress }), record };
+          ? payoutAddress(xpubs.change, changeIndex, tokenAware)
+          : payoutAddress(xpubs.receive, t.sellerReceiveIndex ?? 0, tokenAware);
+      return { tx: buildDeposit({ trade: t, checked, coins: owned, changeAddress: change(false), tokenChangeAddress: change(true) }), record };
     });
     if ('done' in prepared) return prepared.done;
     const { tx, record } = prepared;
@@ -242,11 +264,22 @@ export function SellerAction(props: { trade: Trade; amount: string; fiat: string
   );
   const walletNotices = (
     <>
-      {short && coins.data && (
+      {shortToken && depositCheck?.token && coins.data && (
+        // Invented copy: the design has no seller short of tokens.
+        <Notice tone="attention" title={`Your wallet does not have enough ${symbol}`}>
+          Locking needs {props.amount} and Campfire can see {fromBaseUnits(depositCheck.token.have, decimals)} {symbol} in this wallet.{' '}
+          {describeScan(coins.data)} Send some {symbol} to it: this page checks again every few seconds.{' '}
+          <button type="button" className="cf-copy" onClick={coins.reload}>
+            Check again
+          </button>
+        </Notice>
+      )}
+      {!shortToken && shortBch && depositCheck && coins.data && (
         <Notice tone="attention" title="Your wallet does not have enough BCH">
-          Locking needs about {formatBch(depositNeeds(trade))} and Campfire can see{' '}
-          {formatBch(spendableBch(coins.data.coins))} in this wallet. {describeScan(coins.data)} Send some BCH to it: this page checks
-          again every few seconds.{' '}
+          Locking needs about {formatBch(depositCheck.bch.need)}
+          {isBch ? '' : ` besides the ${symbol}, for the BCH that travels with the tokens and the fees,`} and Campfire can see{' '}
+          {formatBch(depositCheck.bch.have)} in this wallet. {describeScan(coins.data)} Send some BCH to it: this page checks again every few
+          seconds.{' '}
           <button type="button" className="cf-copy" onClick={coins.reload}>
             Check again
           </button>
@@ -258,11 +291,6 @@ export function SellerAction(props: { trade: Trade; amount: string; fiat: string
           <button type="button" className="cf-copy" onClick={coins.reload}>
             Try again
           </button>
-        </Notice>
-      )}
-      {!isBch && (
-        <Notice tone="attention" title="Locking PUSD is not available yet">
-          This trade is for a token. Only BCH trades can be locked from this page for now.
         </Notice>
       )}
     </>
@@ -364,11 +392,9 @@ export function SellerAction(props: { trade: Trade; amount: string; fiat: string
           saved={savedDetails !== null}
           hint={<>Encrypted in your browser for this buyer only. Shown once {locked} {lockVerb(trade.asset)} locked. Campfire cannot read it.</>}
         />
-        {deposit && (
-          <p className="cf-small cf-muted">
-            You lock {deposit}: {formatAmount(trade.amount, BCH)} for the buyer plus a {formatBch(1000n)} fee budget for the closing transaction.
-          </p>
-        )}
+        <p className="cf-small cf-muted">
+          You lock {deposit}: {breakdown}
+        </p>
         <FeeNote fees={trade.fees} />
         {walletNotices}
         {failure}
@@ -377,10 +403,10 @@ export function SellerAction(props: { trade: Trade; amount: string; fiat: string
             variant="primary"
             signs
             busy={busy === 'deposit'}
-            disabled={!isBch || short || (details === '' ? !savedDetails : !detailsReady) || (busy !== null && busy !== 'deposit')}
+            disabled={short || (details === '' ? !savedDetails : !detailsReady) || (busy !== null && busy !== 'deposit')}
             onClick={depositOnly}
           >
-            {deposit ? `Lock ${deposit} for this trade` : `Lock ${locked}`}
+            {`Lock ${lockLabel} for this trade`}
           </Button>
         </div>
       </ActionCard>
@@ -411,12 +437,9 @@ export function SellerAction(props: { trade: Trade; amount: string; fiat: string
               title="How the buyer should pay you"
               hint={<>Encrypted in your browser for this buyer only. Shown to them once {locked} {lockVerb(trade.asset)} locked. Campfire cannot read it.</>}
             />
-            {deposit && (
-              <Notice title={`This locks ${deposit} now.`}>
-                It can only go to the buyer or back to you: {formatAmount(trade.amount, BCH)} for the buyer plus a {formatBch(1000n)} fee budget for the
-                closing transaction.
-              </Notice>
-            )}
+            <Notice title={`This locks ${deposit} now.`}>
+              It can only go to the buyer or back to you: {breakdown}
+            </Notice>
             <FeeNote fees={trade.fees} />
             {expired && (
               <Notice tone="attention" title="This request expired">
@@ -430,10 +453,10 @@ export function SellerAction(props: { trade: Trade; amount: string; fiat: string
                 variant="primary"
                 signs
                 busy={busy === 'accept' || busy === 'deposit'}
-                disabled={!isBch || expired || !detailsReady || !prep.data || short || (busy !== null && busy !== 'accept' && busy !== 'deposit')}
+                disabled={expired || !detailsReady || !prep.data || short || (busy !== null && busy !== 'accept' && busy !== 'deposit')}
                 onClick={acceptAndDeposit}
               >
-                {deposit ? `Accept and lock ${deposit}` : 'Accept and lock'}
+                {`Accept and lock ${lockLabel}`}
               </Button>
               <Button busy={busy === 'decline'} disabled={busy !== null && busy !== 'decline'} onClick={decline}>
                 Decline
@@ -449,7 +472,7 @@ export function SellerAction(props: { trade: Trade; amount: string; fiat: string
         <ActionCard
           turn="you"
           progress={progress}
-          title={deposit ? `Lock ${deposit} for this trade` : `Lock ${locked} for this trade`}
+          title={`Lock ${lockLabel} for this trade`}
           reassurance="The contract can only pay the buyer or return the coins to you. Campfire cannot move them."
           deadline={
             trade.fundingDeadline && (
@@ -461,14 +484,13 @@ export function SellerAction(props: { trade: Trade; amount: string; fiat: string
           }
         >
           <p className="cf-muted">
-            {formatAmount(trade.amount, BCH)} for the buyer plus a {formatBch(1000n)} fee budget for the closing transaction. Your payment details are shown to the
-            buyer once {locked} {lockVerb(trade.asset)} locked.
+            You lock {deposit}: {breakdown} Your payment details are shown to the buyer once {locked} {lockVerb(trade.asset)} locked.
           </p>
           {walletNotices}
           {failure}
           <div className="s-actions">
-            <Button variant="primary" signs busy={busy === 'deposit'} disabled={!isBch || short || (busy !== null && busy !== 'deposit')} onClick={depositOnly}>
-              {deposit ? `Lock ${deposit}` : 'Lock'}
+            <Button variant="primary" signs busy={busy === 'deposit'} disabled={short || (busy !== null && busy !== 'deposit')} onClick={depositOnly}>
+              {`Lock ${lockLabel}`}
             </Button>
           </div>
         </ActionCard>

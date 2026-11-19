@@ -13,6 +13,7 @@ import {
   matchesEscrowFunding,
   type WalletContractSpendRequest,
 } from '../protocol/escrow.js';
+import { gatherFungibleTokenUtxos } from 'cashscript';
 import {
   derivePayoutPkhFromXpub,
   derivePubkeyFromXpub,
@@ -21,11 +22,12 @@ import {
   type WalletSpendableUtxo,
   type WalletTransactionRequest,
 } from '../protocol/keys.js';
-import { totalFeeSats, type TradeFee } from '../protocol/fees.js';
+import { MAX_FEE_BPS, totalFeeSats, tradeValueSats, type TradeFee } from '../protocol/fees.js';
+import { PUSD_CATEGORY } from '../protocol/offers.js';
 import { computeTradeId, type TradeTerms } from '../protocol/trades.js';
 import type { OfferDocument, Trade } from './api';
-import { spendableBch } from './coins';
-import { formatBch } from './format';
+import { spendableBch, tokenBalance } from './coins';
+import { formatBch, fromBaseUnits } from './format';
 import type { SessionStore } from './take';
 import { TradeActionError, checkForArbiter } from './trade';
 
@@ -33,6 +35,8 @@ import { TradeActionError, checkForArbiter } from './trade';
 const DEPOSIT_FEE_RESERVE_SATS = 500n;
 /** The escrow locks the seller's coins until the buyer takes them or this time passes. Longer than this is not normal. */
 const MAX_REFUND_DELAY_SEC = 30 * 86_400;
+/** How far the BCH price may have moved between the request and the deposit when the fees of a PUSD trade are capped. */
+const PUSD_FEE_PRICE_SLACK_PCT = 20n;
 
 /** What the service needs to accept a request (POST /api/trades/:id/accept). */
 export interface AcceptBody {
@@ -128,9 +132,51 @@ export async function sealPaymentDetails(params: {
   return { encryptedPaymentDetails, paymentDetailsSignature: signPaymentDetails(params.sessionPrivateKey, params.tradeId, encryptedPaymentDetails) };
 }
 
-/** The coins the wallet must hold to deposit this trade: the escrow's value, the service fees and the deposit's own fee. */
+/**
+ * The deposit of a token trade sends this much BCH beyond the escrow value and the fees: the deposit's own network
+ * fee and the dust of the token change output. It must match the margin buildFundEscrowTransaction asks for.
+ */
+const TOKEN_DEPOSIT_EXTRA_SATS = 2000n;
+
+/** The coins the wallet must hold to deposit a BCH trade: the escrow's value, the service fees and the deposit's own fee. */
 export function depositNeeds(trade: Pick<Trade, 'asset' | 'amount' | 'fees'>): bigint {
   return expectedEscrowFunding(trade).satoshis + totalFeeSats(trade.fees) + DEPOSIT_FEE_RESERVE_SATS;
+}
+
+/** What a deposit takes from the wallet and what the wallet has, for BCH and, on a token trade, for the token. */
+export interface DepositCheck {
+  bch: { need: bigint; have: bigint };
+  token?: { category: string; need: bigint; have: bigint };
+}
+
+/**
+ * Mirrors the coin selection of buildFundEscrowTransaction, so a wallet that passes here can always be built for.
+ * On a token trade the token coins it would pick carry satoshis too, and those count toward the BCH it needs.
+ */
+export function checkDeposit(trade: Pick<Trade, 'asset' | 'amount' | 'fees'>, coins: WalletSpendableUtxo[]): DepositCheck {
+  const expected = expectedEscrowFunding(trade);
+  const plain = spendableBch(coins);
+  if (!expected.token) return { bch: { need: depositNeeds(trade), have: plain } };
+  const { category, amount } = expected.token;
+  const have = tokenBalance(coins, category);
+  const outgoing = expected.satoshis + totalFeeSats(trade.fees) + TOKEN_DEPOSIT_EXTRA_SATS;
+  let tokenSats = 0n;
+  if (have >= amount) {
+    const normalized = coins.map((c) => (c.token ? { ...c, token: { ...c.token, category: c.token.category.toLowerCase() } } : c));
+    tokenSats = gatherFungibleTokenUtxos(normalized, category, amount).utxos.reduce((sum, u) => sum + u.satoshis, 0n);
+  }
+  const need = outgoing > tokenSats ? outgoing - tokenSats : 0n;
+  return { bch: { need, have: plain }, token: { category, need: amount, have } };
+}
+
+/** True when the wallet's coins cover the deposit. */
+export function canDeposit(check: DepositCheck): boolean {
+  return check.bch.have >= check.bch.need && (!check.token || check.token.have >= check.token.need);
+}
+
+/** "PUSD" for the service's dollar token; the shortened category for any other token. */
+function tokenName(category: string): string {
+  return category === PUSD_CATEGORY ? 'PUSD' : `tokens ${category.slice(0, 8)}…`;
 }
 
 /** Fees are equal when they pay the same roles, addresses and amounts, in any order. */
@@ -142,12 +188,18 @@ function sameFees(a: readonly TradeFee[] | undefined, b: readonly TradeFee[] | u
 
 /** Throws a sentence for the person if the wallet's coins cannot cover the deposit. */
 export function assertCanDeposit(trade: Pick<Trade, 'asset' | 'amount' | 'fees'>, coins: WalletSpendableUtxo[]): void {
-  if (trade.asset !== 'BCH') throw new TradeActionError('Depositing PUSD is not available yet.');
-  const have = spendableBch(coins);
-  const need = depositNeeds(trade);
-  if (have < need) {
+  const check = checkDeposit(trade, coins);
+  if (check.token && check.token.have < check.token.need) {
+    const name = tokenName(check.token.category);
+    const decimals = check.token.category === PUSD_CATEGORY ? 2 : 0;
     throw new TradeActionError(
-      `The deposit needs about ${formatBch(need)} and Campfire can see ${formatBch(have)} in this wallet. Send some BCH to it and try again.`,
+      `The deposit needs ${fromBaseUnits(check.token.need, decimals)} ${name} and Campfire can see ${fromBaseUnits(check.token.have, decimals)} in this wallet. Send some ${name} to it and try again.`,
+    );
+  }
+  if (check.bch.have < check.bch.need) {
+    const why = check.token ? ' The tokens travel with a small amount of BCH, and the fees are paid in BCH.' : '';
+    throw new TradeActionError(
+      `The deposit needs about ${formatBch(check.bch.need)} and Campfire can see ${formatBch(check.bch.have)} in this wallet.${why} Send some BCH to it and try again.`,
     );
   }
 }
@@ -174,6 +226,8 @@ export function checkAcceptedTrade(
     offer: Pick<OfferDocument, 'arbiter' | 'price' | 'oracle'> | undefined;
     /** Unix seconds. */
     now: number;
+    /** A BCH/USD price signed by the service's oracle and checked by the caller, needed to cap the fees of a PUSD trade. */
+    bchUsd?: string | null;
   },
 ): CheckedTrade {
   const stop = (what: string) => new TradeActionError(`${what} Nothing was deposited.`);
@@ -205,6 +259,14 @@ export function checkAcceptedTrade(
   if (!sameFees(terms.fees, trade.fees)) {
     throw stop('The terms charge different service fees than the ones shown with this request.');
   }
+  // The terms do not carry the BCH price a PUSD trade's fees were computed with, so the cap is checked here
+  // against a fresh one, with room for the price to move since the request.
+  if (terms.asset.toLowerCase() === PUSD_CATEGORY && totalFeeSats(terms.fees) > 0n) {
+    if (!params.bchUsd) throw stop('Campfire could not get a BCH price to check the service fees.');
+    const value = tradeValueSats({ asset: terms.asset, amount: terms.amount, assetDecimals: 2, bchUsd: params.bchUsd }) ?? 0n;
+    const cap = (value * BigInt(MAX_FEE_BPS) * (100n + PUSD_FEE_PRICE_SLACK_PCT)) / (10_000n * 100n);
+    if (totalFeeSats(terms.fees) > cap) throw stop('The service fees are above the most Campfire may charge for this trade.');
+  }
   if (params.offer && terms.arbiterPk.toLowerCase() !== params.offer.arbiter.toLowerCase()) {
     throw stop('The terms name a different arbiter than your offer.');
   }
@@ -229,12 +291,14 @@ export async function findDeposit(contract: Contract, terms: TradeTerms) {
   return utxos.find((u) => matchesEscrowFunding(u, terms));
 }
 
-/** The deposit transaction for the wallet to sign: the escrow's exact value, with the change back to the wallet. */
+/** The deposit transaction for the wallet to sign: the escrow's exact value and tokens, with the change back to the wallet. */
 export function buildDeposit(params: {
   trade: Trade;
   checked: CheckedTrade;
   coins: WalletSpendableUtxo[];
   changeAddress: string;
+  /** The same address in its token-aware form (bitcoincash:z…), where the token change of a token trade goes. */
+  tokenChangeAddress: string;
 }): WalletTransactionRequest {
   assertCanDeposit(params.trade, params.coins);
   return buildFundEscrowTransaction({
@@ -242,6 +306,7 @@ export function buildDeposit(params: {
     terms: params.checked.terms,
     utxos: params.coins,
     changeAddress: params.changeAddress,
+    tokenChangeAddress: params.tokenChangeAddress,
   });
 }
 

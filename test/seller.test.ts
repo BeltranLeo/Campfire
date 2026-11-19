@@ -1,8 +1,10 @@
 import { MockNetworkProvider, Network, randomUtxo } from 'cashscript';
-import { binToHex, deriveHdPath, deriveHdPrivateNodeFromSeed, deriveHdPublicNode, encodeHdPublicKey, secp256k1, sha256, utf8ToBin } from '@bitauth/libauth';
+import { binToHex, decodeTransactionUnsafe, hexToBin, deriveHdPath, deriveHdPrivateNodeFromSeed, deriveHdPublicNode, encodeHdPublicKey, secp256k1, sha256, utf8ToBin } from '@bitauth/libauth';
 import { describe, expect, it } from 'vitest';
 import { decryptPaymentDetails } from '../src/protocol/crypto.js';
-import { createEscrowContract } from '../src/protocol/escrow.js';
+import { createEscrowContract, matchesEscrowFunding, missingFundingFees } from '../src/protocol/escrow.js';
+import { feePkh } from '../src/protocol/fees.js';
+import { PUSD_CATEGORY } from '../src/protocol/offers.js';
 import { derivePayoutPkhFromXpub, derivePubkeyFromXpub, pkhToCashAddress, pkhToLockingBytecode, type WalletSpendableUtxo } from '../src/protocol/keys.js';
 import { computeFiatAmount, computeTradeId, signPriceQuote, type TradeTerms } from '../src/protocol/trades.js';
 import type { Trade } from '../src/web/api.js';
@@ -12,6 +14,7 @@ import {
   buildDeposit,
   buildSellerRelease,
   checkAcceptedTrade,
+  checkDeposit,
   clearSavedDeposit,
   depositNeeds,
   findDeposit,
@@ -205,13 +208,12 @@ describe('the deposit', () => {
     expect(() => assertCanDeposit(trade, [coin(251_500n)])).not.toThrow();
     // Token coins are not plain BCH.
     expect(() => assertCanDeposit(trade, [coin(900_000n, { token: { amount: 5n, category: 'd'.repeat(64) } })])).toThrow(/Send some BCH/);
-    expect(() => assertCanDeposit({ ...trade, asset: 'e'.repeat(64) }, [coin(900_000n)])).toThrow(/PUSD/);
   });
 
   it('pays exactly the escrow value to the escrow address and sends the change back to the wallet', () => {
     const checked = check(trade);
     const changeAddress = pkhToCashAddress(derivePayoutPkhFromXpub(sellerReceive, 11));
-    const tx = buildDeposit({ trade, checked, coins: [coin(400_000n)], changeAddress });
+    const tx = buildDeposit({ trade, checked, coins: [coin(400_000n)], changeAddress, tokenChangeAddress: 'unused' });
     const outputs = (tx.builder as unknown as { outputs: { to: Uint8Array | string; amount: bigint }[] }).outputs;
     expect(outputs[0]).toMatchObject({ to: trade.escrowAddress, amount: 251_000n });
     expect(outputs[1].to).toBe(changeAddress);
@@ -220,7 +222,7 @@ describe('the deposit', () => {
   });
 
   it('refuses to build one the wallet cannot pay', () => {
-    expect(() => buildDeposit({ trade, checked: check(trade), coins: [coin(1_000n)], changeAddress: 'x' })).toThrow(TradeActionError);
+    expect(() => buildDeposit({ trade, checked: check(trade), coins: [coin(1_000n)], changeAddress: 'x', tokenChangeAddress: 'x' })).toThrow(TradeActionError);
   });
 
   it('recognises a deposit that already exists, so it is never made twice', async () => {
@@ -243,6 +245,87 @@ describe('the deposit', () => {
     expect(loadSavedDeposit(s, 'other')).toBeNull();
     clearSavedDeposit(s, 'rec');
     expect(loadSavedDeposit(s, 'rec')).toBeNull();
+  });
+});
+
+describe('a PUSD deposit', () => {
+  // 0.10 PUSD at 1,450 ARS per dollar, with an arbiter fee of 1% of its value at 500 USD per BCH (200 sats).
+  const pusdQuote = signPriceQuote(oracleSk, { pair: 'PUSD/ARS', price: '1450.00', timestamp: NOW - 60 });
+  const pusdOffer = { arbiter: arbiterPk, oracle: oraclePk, price: { type: 'floating' as const, pair: 'PUSD/ARS', marginBps: 0 } };
+  const fees = [{ role: 'arbiter' as const, pkh: feePkh(arbiterPk), satoshis: '600' }];
+  const pusdTerms = {
+    asset: PUSD_CATEGORY,
+    amount: '10',
+    quote: pusdQuote,
+    marginBps: 0,
+    fiatAmount: computeFiatAmount({ amount: '10', assetDecimals: 2, unitPrice: pusdQuote.price, marginBps: 0 }),
+    fees,
+  };
+  const trade = accepted(pusdTerms, { asset: PUSD_CATEGORY, assetDecimals: 2, amount: '10', quote: pusdQuote, marginBps: 0, fiatAmount: pusdTerms.fiatAmount, fees });
+  const coin = (satoshis: bigint, token?: { amount: bigint; category: string }, keyIndex = 2): WalletSpendableUtxo => {
+    const u = randomUtxo({ satoshis, ...(token ? { token } : {}) });
+    const pkh = derivePayoutPkhFromXpub(sellerReceive, keyIndex);
+    return { ...u, lockingBytecode: binToHex(pkhToLockingBytecode(pkh)), pathName: 'receive', keyIndex, address: pkhToCashAddress(pkh) } as WalletSpendableUtxo;
+  };
+  const pusd = (amount: bigint, satoshis = 1_000n) => coin(satoshis, { amount, category: PUSD_CATEGORY }, 3);
+  const pusdCheck = (over: Partial<Parameters<typeof checkAcceptedTrade>[1]> = {}) => check(trade, { offer: pusdOffer, bchUsd: '500.00', ...over });
+
+  it('needs the tokens and the BCH that travel with them, counting the BCH already on the token coins', () => {
+    // 7,000 for the escrow + 600 of fees + 2,000 for the deposit fee and the token change = 9,600 sats.
+    expect(checkDeposit(trade, [pusd(10n), coin(8_600n)])).toEqual({
+      bch: { need: 8_600n, have: 8_600n },
+      token: { category: PUSD_CATEGORY, need: 10n, have: 10n },
+    });
+    expect(() => assertCanDeposit(trade, [pusd(10n), coin(8_600n)])).not.toThrow();
+    expect(() => assertCanDeposit(trade, [pusd(10n), coin(8_599n)])).toThrow(/Send some BCH/);
+    expect(() => assertCanDeposit(trade, [pusd(9n), coin(900_000n)])).toThrow(/needs 0.10 PUSD and Campfire can see 0.09.*Send some PUSD/);
+    // Another token is not PUSD.
+    expect(() => assertCanDeposit(trade, [coin(1_000n, { amount: 10n, category: 'd'.repeat(64) }), coin(900_000n)])).toThrow(/Send some PUSD/);
+  });
+
+  it('locks the exact tokens at the escrow, pays the fees in BCH and returns the token change to a token address', () => {
+    const checked = pusdCheck();
+    const changePkh = derivePayoutPkhFromXpub(sellerReceive, 11);
+    const tokenChangeAddress = pkhToCashAddress(changePkh, { tokenAware: true });
+    const tx = buildDeposit({
+      trade,
+      checked,
+      coins: [pusd(25n), coin(20_000n)],
+      changeAddress: pkhToCashAddress(changePkh),
+      tokenChangeAddress,
+    });
+    const decoded = decodeTransactionUnsafe(hexToBin(tx.hex));
+    const escrowOut = decoded.outputs[0];
+    expect(matchesEscrowFunding({ txid: '0'.repeat(64), vout: 0, lockingBytecode: binToHex(escrowOut.lockingBytecode), satoshis: escrowOut.valueSatoshis, token: { category: binToHex(escrowOut.token!.category), amount: escrowOut.token!.amount } }, checked.terms)).toBe(true);
+    expect(missingFundingFees(tx.hex, fees)).toBeNull();
+    const tokenChange = decoded.outputs.find((o, i) => i > 0 && o.token);
+    expect(tokenChange?.token?.amount).toBe(15n);
+    expect(binToHex(tokenChange!.lockingBytecode)).toBe(binToHex(pkhToLockingBytecode(changePkh)));
+    // The wallet signs over each input's source output, so the token on the PUSD input must reach it.
+    const sources = (tx.request as { sourceOutputs: { token?: { category: unknown; amount: unknown } }[] }).sourceOutputs;
+    // WizardConnect sends bigints as tagged strings.
+    expect(sources.map((o) => (o.token ? String(o.token.amount) : null))).toEqual(['<bigint: 25n>', null]);
+    expect(tx.inputPaths).toEqual([[0, 'receive', 3], [1, 'receive', 2]]);
+  });
+
+  it('caps the fees of a PUSD trade with a fresh BCH price', () => {
+    expect(() => pusdCheck()).not.toThrow();
+    expect(() => pusdCheck({ bchUsd: null })).toThrow(/could not get a BCH price/);
+    // At 1,000 USD per BCH the 0.10 PUSD are worth 10,000 sats: 5% is 500, 600 with the slack, so 600 passes...
+    expect(() => pusdCheck({ bchUsd: '1000' })).not.toThrow();
+    // ...and at 2,000 USD per BCH the cap is 300 sats.
+    expect(() => pusdCheck({ bchUsd: '2000' })).toThrow(/above the most/);
+  });
+
+  it('releases the tokens to the buyer', async () => {
+    const p = new MockNetworkProvider();
+    p.network = Network.MAINNET;
+    const contract = createEscrowContract(JSON.parse(trade.termsJson!), trade.tradeId!, p);
+    const utxo = p.addUtxo(contract.tokenAddress, randomUtxo({ satoshis: 7_000n, token: { category: PUSD_CATEGORY, amount: 10n } }));
+    const built = await buildSellerRelease({ ...trade, status: 'Paid', fundingTxid: utxo.txid, fundingVout: utxo.vout }, p, sellerDefi);
+    const out = decodeTransactionUnsafe(hexToBin(built.unsignedHex)).outputs[0];
+    expect(out.token?.amount).toBe(10n);
+    expect(binToHex(out.lockingBytecode)).toBe(binToHex(pkhToLockingBytecode(trade.buyerPayoutPkh!)));
   });
 });
 

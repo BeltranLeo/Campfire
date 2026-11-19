@@ -1,6 +1,7 @@
 import { useState, type ReactNode } from 'react';
 import { Link, useNavigate, useParams } from 'react-router';
 import { verifyPriceQuote } from '../../protocol/trades.js';
+import { expectedEscrowFunding } from '../../protocol/escrow.js';
 import { aliasFor } from '../alias';
 import { ApiError, apiGet, apiPost, type DemoInfo, type Offer, type PriceQuote, type Reputation, type TradeSummary } from '../api';
 import { assetInfo, type AssetInfo } from '../assets';
@@ -16,8 +17,8 @@ import { useConfig } from '../config';
 import { applyMargin, formatAmount, formatBch, formatClock, formatFiat, formatFiatAmount, formatPaymentWindow, formatRange, paymentMethodLabel, toAmountInput } from '../format';
 import { fiatForUnits } from '../fiatAmount';
 import { prepareIndices } from '../indices';
-import { depositNeeds } from '../seller';
-import { spendableBch } from '../coins';
+import { canDeposit, checkDeposit } from '../seller';
+import { spendableBch, tokenBalance } from '../coins';
 import { useWalletCoins } from '../walletCoins';
 import { useNow } from '../hooks/useNow';
 import { usePoll } from '../hooks/usePoll';
@@ -432,9 +433,14 @@ function TakeBuyOffer({ offer }: { offer: Offer }) {
   const coins = useWalletCoins(identity ? 15_000 : undefined);
   const prep = usePoll(() => (identity && xpubs ? prepareIndices(identity, xpubs, 'seller') : Promise.resolve(null)), identity ?? 'none');
   const have = coins.data ? spendableBch(coins.data.coins) : null;
-  const deposit = amount !== null && amount > 0n && asset.isBch ? depositNeeds({ asset: doc.asset, amount: amount.toString() }) : null;
-  const lock = amount !== null && asset.isBch ? formatAmount(amount + 1000n, asset) : null;
-  const short = deposit !== null && have !== null && have < deposit;
+  const haveToken = coins.data && !asset.isBch ? tokenBalance(coins.data.coins, doc.asset) : null;
+  // The fees are not known until the buyer accepts, so this checks the escrow and the deposit's own fee only.
+  const check = amount !== null && amount > 0n && coins.data ? checkDeposit({ asset: doc.asset, amount: amount.toString() }, coins.data.coins) : null;
+  const escrowSats = amount !== null && amount > 0n ? expectedEscrowFunding({ asset: doc.asset, amount: amount.toString() }).satoshis : null;
+  const lock =
+    amount === null || escrowSats === null ? null : asset.isBch ? formatAmount(escrowSats, asset) : `${formatAmount(amount, asset)} plus ${formatBch(escrowSats)}`;
+  const shortToken = check?.token !== undefined && check.token.have < check.token.need;
+  const short = check !== null && !canDeposit(check);
 
   const [taking, setTaking] = useState(false);
   const [failure, setFailure] = useState<string | null>(null);
@@ -523,7 +529,7 @@ function TakeBuyOffer({ offer }: { offer: Offer }) {
               </div>
               <span className="cf-hint">
                 {inRange ? `Between ${range}.` : `Enter an amount between ${range}.`}
-                {have !== null && ` Your wallet has ${formatBch(have)}.`}
+                {have !== null && ` Your wallet has ${haveToken !== null ? `${formatAmount(haveToken, asset)} and ` : ''}${formatBch(have)}.`}
               </span>
             </div>
 
@@ -544,12 +550,6 @@ function TakeBuyOffer({ offer }: { offer: Offer }) {
               />
             )}
 
-            {!asset.isBch && (
-              // Invented copy: the page deposits BCH only for now.
-              <Notice tone="attention" title="Selling PUSD is not available yet">
-                Only BCH can be locked from this page for now.
-              </Notice>
-            )}
             {Boolean(coins.error) && !coins.data && identity && (
               <Notice tone="danger" title="We could not read your wallet's coins">
                 The network did not answer.{' '}
@@ -558,11 +558,13 @@ function TakeBuyOffer({ offer }: { offer: Offer }) {
                 </button>
               </Notice>
             )}
-            {short && (
-              // Invented copy: the design does not show a seller without enough BCH here.
-              <Notice tone="attention" title="Your wallet does not have enough BCH">
-                Locking this amount needs about {deposit !== null && formatBch(deposit)} with the network fee, and Campfire can see{' '}
-                {have !== null && formatBch(have)}. The buyer would accept and wait for coins you cannot lock.
+            {short && check && (
+              // Invented copy: the design does not show a seller without enough coins here.
+              <Notice tone="attention" title={`Your wallet does not have enough ${shortToken ? asset.symbol : 'BCH'}`}>
+                {shortToken && check.token
+                  ? `Locking this amount needs ${formatAmount(check.token.need, asset)} and Campfire can see ${formatAmount(check.token.have, asset)}.`
+                  : `Locking this amount needs about ${formatBch(check.bch.need)} with the network fee${asset.isBch ? '' : ` besides the ${asset.symbol}`}, and Campfire can see ${formatBch(check.bch.have)}.`}{' '}
+                The buyer would accept and wait for coins you cannot lock.
               </Notice>
             )}
             {prep.error && !prep.data ? (
@@ -599,7 +601,7 @@ function TakeBuyOffer({ offer }: { offer: Offer }) {
                 <Button
                   variant="primary"
                   busy={taking}
-                  disabled={!inRange || !youReceive || !prep.data || !asset.isBch || short || have === null}
+                  disabled={!inRange || !youReceive || !prep.data || short || have === null}
                   onClick={take}
                   note={!prep.data ? 'Finding a fresh address of your wallet…' : 'No signature yet. You sign when you lock the coins.'}
                 >
