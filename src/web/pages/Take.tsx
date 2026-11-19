@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, type ReactNode } from 'react';
 import { Link, useNavigate, useParams } from 'react-router';
 import { verifyPriceQuote } from '../../protocol/trades.js';
 import { aliasFor } from '../alias';
@@ -219,56 +219,15 @@ function TakeOffer({ offer }: { offer: Offer }) {
 
   return (
     <>
-      <section className="cf-card" data-flush>
-        <div className="cf-card__section">
-          <div className="cf-row" data-between>
-            <span className="s-asset">
-              <CoinIcon asset={asset} />
-              {offer.isDemo ? `${asset.symbol} from Demo seller` : asset.symbol}
-            </span>
-            {offer.isDemo && <ProvenanceTag kind="sim">Demo seller · simulated fiat</ProvenanceTag>}
-          </div>
-          <div style={{ marginTop: 'var(--space-3)' }}>
-            <dl className="cf-dl">
-              <dt>Range</dt>
-              <dd>
-                <span className="cf-mono">{formatRange(doc.min, doc.max, asset)}</span>
-              </dd>
-              <dt>Payment</dt>
-              <dd>
-                <span className="s-chips">
-                  {doc.paymentMethods.map((method) => (
-                    <span key={method} className="s-chip">
-                      {paymentMethodLabel(method)}
-                    </span>
-                  ))}
-                  <span>· {formatPaymentWindow(doc.paymentWindowSec)}</span>
-                </span>
-              </dd>
-              <dt>Seller</dt>
-              <dd>
-                {aliasFor(offer.sellerIdentity).name}
-                {rep && ` · ${rep.completedAsSeller} completed`}
-              </dd>
-              {doc.terms && (
-                <>
-                  <dt>Terms</dt>
-                  <dd>
-                    <span className="cf-small">{doc.terms}</span>
-                  </dd>
-                </>
-              )}
-            </dl>
-          </div>
-        </div>
-      </section>
-
-      <OfferDetails
-        offer={offer}
-        party="Seller"
-        priceBy="seller"
-        quote={verified}
-        payout={identity ? { address: payout, fresh: prep.data?.fresh !== false } : null}
+      <OfferSummary
+        asset={asset}
+        title={offer.isDemo ? `${asset.symbol} from Demo seller` : asset.symbol}
+        tag={offer.isDemo && <ProvenanceTag kind="sim">Demo seller · simulated fiat</ProvenanceTag>}
+        range={formatRange(doc.min, doc.max, asset)}
+        methods={doc.paymentMethods}
+        window={formatPaymentWindow(doc.paymentWindowSec)}
+        party={`${aliasFor(offer.sellerIdentity).name}${rep ? ` · ${rep.completedAsSeller} completed` : ''}`}
+        terms={doc.terms}
       />
 
       {offer.status !== 'Published' ? (
@@ -338,18 +297,6 @@ function TakeOffer({ offer }: { offer: Offer }) {
               />
             )}
 
-            {identity ? (
-              <Notice title="You do not need any BCH.">
-                Taking an offer is free and needs no signature. The seller locks the BCH and pays its network fee. The
-                funds will be sent to {prep.data?.fresh === false ? 'an address' : 'a fresh address'} of your wallet. The
-                address is under Offer details.
-              </Notice>
-            ) : (
-              <Notice title="You do not need any BCH.">
-                You only need a wallet to receive the funds. Taking an offer is free and needs no signature.
-              </Notice>
-            )}
-
             {limit && <LimitNotice message={limit} demo={demo.data ?? null} />}
             {prep.error && !prep.data ? (
               <Notice tone="danger" title="We could not prepare your wallet for this trade">
@@ -416,9 +363,24 @@ function TakeOffer({ offer }: { offer: Offer }) {
                 </Button>
               )}
             </div>
+            {/* What reassures a first-time buyer, in one line under the button instead of a box above it. */}
+            <p className="cf-small cf-muted">
+              <strong>You do not need any BCH.</strong>{' '}
+              {identity
+                ? `Taking an offer is free. The seller locks the BCH and pays its network fee; the funds go to ${prep.data?.fresh === false ? 'an address' : 'a fresh address'} of your wallet, shown under Offer details.`
+                : 'You only need a wallet to receive the funds. Taking an offer is free.'}
+            </p>
           </div>
         </section>
       )}
+
+      <OfferDetails
+        offer={offer}
+        party="Seller"
+        priceBy="seller"
+        quote={verified}
+        payout={identity ? { address: payout, fresh: prep.data?.fresh !== false } : null}
+      />
     </>
   );
 }
@@ -521,50 +483,16 @@ function TakeBuyOffer({ offer }: { offer: Offer }) {
 
   return (
     <>
-      <section className="cf-card" data-flush>
-        <div className="cf-card__section">
-          <div className="cf-row" data-between>
-            <span className="s-asset">
-              <CoinIcon asset={asset} />A buyer wants {asset.symbol}
-            </span>
-            <ProvenanceTag kind="chain">Offer on mainnet</ProvenanceTag>
-          </div>
-          <div style={{ marginTop: 'var(--space-3)' }}>
-            <dl className="cf-dl">
-              <dt>Wants</dt>
-              <dd>
-                <span className="cf-mono">{formatRange(doc.min, doc.max, asset)}</span>
-              </dd>
-              <dt>Pays with</dt>
-              <dd>
-                <span className="s-chips">
-                  {doc.paymentMethods.map((method) => (
-                    <span key={method} className="s-chip">
-                      {paymentMethodLabel(method)}
-                    </span>
-                  ))}
-                  <span>· within {formatPaymentWindow(doc.paymentWindowSec).replace(' to pay', '')}</span>
-                </span>
-              </dd>
-              <dt>Buyer</dt>
-              <dd>
-                {aliasFor(offer.sellerIdentity).name}
-                {rep && ` · ${rep.completedAsBuyer} ${rep.completedAsBuyer === 1 ? 'trade' : 'trades'} completed`}
-              </dd>
-              {doc.terms && (
-                <>
-                  <dt>Terms</dt>
-                  <dd>
-                    <span className="cf-small">{doc.terms}</span>
-                  </dd>
-                </>
-              )}
-            </dl>
-          </div>
-        </div>
-      </section>
-
-      <OfferDetails offer={offer} party="Buyer" priceBy="buyer" quote={verified} payout={null} />
+      <OfferSummary
+        asset={asset}
+        title={`A buyer wants ${asset.symbol}`}
+        tag={<ProvenanceTag kind="chain">Offer on mainnet</ProvenanceTag>}
+        range={formatRange(doc.min, doc.max, asset)}
+        methods={doc.paymentMethods}
+        window={`within ${formatPaymentWindow(doc.paymentWindowSec).replace(' to pay', '')}`}
+        party={`${aliasFor(offer.sellerIdentity).name}${rep ? ` · ${rep.completedAsBuyer} ${rep.completedAsBuyer === 1 ? 'trade' : 'trades'} completed` : ''}`}
+        terms={doc.terms}
+      />
 
       {offer.status !== 'Published' ? (
         <section className="cf-card">
@@ -612,10 +540,6 @@ function TakeBuyOffer({ offer }: { offer: Offer }) {
                 loading={price.type === 'floating' && quote.loading && !quote.data}
               />
             )}
-
-            <Notice title="What happens next">
-              The buyer accepts. Then you lock {lock ?? 'the coins'} in the contract and share how to pay you. The buyer pays, and you release the coins.
-            </Notice>
 
             {!asset.isBch && (
               // Invented copy: the page deposits BCH only for now.
@@ -680,10 +604,61 @@ function TakeBuyOffer({ offer }: { offer: Offer }) {
                 </Button>
               )}
             </div>
+            <p className="cf-small cf-muted">
+              <strong>What happens next.</strong> The buyer accepts. Then you lock {lock ?? 'the coins'} in the contract and
+              share how to pay you. The buyer pays, and you release the coins.
+            </p>
           </div>
         </section>
       )}
+
+      <OfferDetails offer={offer} party="Buyer" priceBy="buyer" quote={verified} payout={null} />
     </>
+  );
+}
+
+// The offer at a glance in three short lines, so the amount field and the button fit on a phone's first screen.
+function OfferSummary(props: {
+  asset: AssetInfo;
+  title: string;
+  tag: ReactNode;
+  range: string;
+  methods: string[];
+  /** The payment window, already worded. */
+  window: string;
+  /** Who published it and their record. */
+  party: string;
+  terms?: string;
+}) {
+  return (
+    <section className="cf-card" data-flush>
+      <div className="cf-card__section tk-summary">
+        <div className="cf-row" data-between>
+          <span className="s-asset">
+            <CoinIcon asset={props.asset} />
+            {props.title}
+          </span>
+          {props.tag}
+        </div>
+        <span className="s-chips">
+          <span className="cf-mono">{props.range}</span>
+          {props.methods.map((method) => (
+            <span key={method} className="s-chip">
+              {paymentMethodLabel(method)}
+            </span>
+          ))}
+        </span>
+        <span className="cf-small cf-muted">
+          {props.window} · {props.party}
+        </span>
+        {/* Long terms show two lines; a tap opens the rest. */}
+        {props.terms && (
+          <details className="tk-terms cf-small cf-muted">
+            <summary>Terms: {props.terms}</summary>
+          </details>
+        )}
+      </div>
+    </section>
   );
 }
 

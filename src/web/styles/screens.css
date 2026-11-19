@@ -150,6 +150,8 @@
   .s-actions { flex-direction: column; align-items: stretch; }
   .s-actions .cf-btn { display: flex; width: 100%; }
   .s-2 { grid-template-columns: minmax(0, 1fr); }
+  /* A form's parts sit closer on a phone, so its button stays on the first screen. */
+  .s-form { gap: var(--space-4); }
   .s-verdict { grid-template-columns: minmax(0, 1fr); }
   .s-idcard { grid-template-columns: minmax(0, 1fr); gap: var(--space-4); }
   .s-idcard > div + div { border-left: 0; padding-left: 0; border-top: 1px solid var(--border); padding-top: var(--space-4); }
@@ -185,3 +187,9 @@
   .cf-footer { padding: var(--space-4); }
   .s-footer { gap: var(--space-3) var(--space-4); }
 }
+/* The trade's progress folds behind one line naming the current step, with the same Show / Hide as other folds. */
+.tr-progress > summary { cursor: pointer; list-style: none; display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 2px var(--space-3); align-items: center; }
+.tr-progress > summary::-webkit-details-marker { display: none; }
+.tr-progress > summary::after { content: "Show"; grid-column: 2; grid-row: 1 / span 2; font: 600 13px/18px var(--font-text); color: var(--escrow); }
+.tr-progress[open] > summary::after { content: "Hide"; }
+.tr-progress__now { grid-column: 1; }

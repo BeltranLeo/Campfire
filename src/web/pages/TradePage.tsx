@@ -52,6 +52,7 @@ import {
   type EscrowCheck,
   type PaymentDetailsView,
   type Role,
+  type Step,
 } from '../trade';
 import { DSPROOF_WATCH_SEC, useDoubleSpendWatch, type DoubleSpendState } from '../dsproof';
 import { WalletDeclined, useWallet } from '../wallet';
@@ -191,18 +192,32 @@ function TradeView({ trade, role, onUpdate, reload }: { trade: Trade; role: Role
           <VisitorCard trade={trade} />
         )}
 
-        <section className="cf-card" data-flush>
-          <div className="cf-card__section">
-            <h2 className="cf-heading" style={{ marginBottom: 'var(--space-4)' }}>
-              Progress
-            </h2>
-            <Timeline steps={timeline(trade, view, amount)} />
-          </div>
-        </section>
+        <ProgressCard steps={timeline(trade, view, amount)} />
 
         <OnChainDetails trade={trade} asset={asset} amount={amount} fiat={fiat} payout={payout} check={check} ds={ds} view={view} />
       </div>
     </main>
+  );
+}
+
+// The timeline folds behind one line that names the step the trade is on, so the action card above and the rest of
+// the page fit on a phone's screen. The action card already says what to do now; the full story is one tap away.
+function ProgressCard({ steps }: { steps: Step[] }) {
+  const at = steps.findIndex((step) => step.state === 'current' || step.state === 'failed');
+  const index = at >= 0 ? at : steps.length - 1;
+  const allDone = at < 0 && steps.every((step) => step.state === 'done');
+  return (
+    <details className="cf-card tr-progress" data-flush>
+      <summary className="cf-card__section">
+        <h2 className="cf-heading">Progress</h2>
+        <span className="cf-small cf-muted tr-progress__now">
+          {allDone ? `All ${steps.length} steps done` : `Step ${index + 1} of ${steps.length}: ${steps[index]?.title ?? ''}`}
+        </span>
+      </summary>
+      <div className="cf-card__section">
+        <Timeline steps={steps} />
+      </div>
+    </details>
   );
 }
 
