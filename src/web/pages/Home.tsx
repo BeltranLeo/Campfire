@@ -18,7 +18,7 @@ import { usePoll } from '../hooks/usePoll';
 import { isActive, nextStep, rowTitle, sortActive, sortHistory, historyNote } from '../mytrades';
 import { demoFirst, describeReputation, loadQuotes, loadReputations, priceOf } from '../offerData';
 import { roleOf } from '../trade';
-import { refreshWalletCoins, useWalletCoins } from '../walletCoins';
+import { describeProgress, refreshWalletCoins, useWalletCoins } from '../walletCoins';
 import { useWallet } from '../wallet';
 
 // Home (Home-* screens): what a connected person sees at "/". The balance read from the network, the four ways
@@ -82,6 +82,7 @@ function WalletCard({ receiveXpub, trades }: { receiveXpub: string | null; trade
   const quote = usePoll(() => apiGet<{ quote: PriceQuote }>(`/api/oracle/quote?pair=${BCH_USD}`).then((r) => r.quote), BCH_USD, 30_000);
 
   const scan = coins.data ?? null;
+  const scanProgress = describeProgress(coins.progress);
   const sats = scan ? spendableBch(scan.coins) : null;
   const pusd = scan && config ? tokenBalance(scan.coins, config.pusdCategory) : 0n;
   const usd = sats !== null && quote.data ? (Number(sats) / 1e8) * Number(quote.data.price) : null;
@@ -114,7 +115,8 @@ function WalletCard({ receiveXpub, trades }: { receiveXpub: string | null; trade
             ) : (
               <>
                 <Skeleton width={180} height={36} />
-                <Skeleton width={120} height={14} />
+                {/* A long-used wallet takes a while to read: say how far it has got instead of a bare bar. */}
+                {scanProgress ? <span className="cf-small cf-subtle">{scanProgress}</span> : <Skeleton width={120} height={14} />}
               </>
             )}
           </div>

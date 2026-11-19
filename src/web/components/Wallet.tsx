@@ -6,7 +6,7 @@ import { aliasFor } from '../alias';
 import { spendableBch, tokenBalance } from '../coins';
 import { useConfig } from '../config';
 import { formatBchBalance, fromBaseUnits } from '../format';
-import { refreshWalletCoins, useWalletCoins } from '../walletCoins';
+import { describeProgress, refreshWalletCoins, useWalletCoins } from '../walletCoins';
 import { useWallet } from '../wallet';
 import { CopyButton } from './CopyButton';
 import { Icon, type IconName } from './Icon';
@@ -97,6 +97,7 @@ function PillBalance() {
 
 function MenuBalance() {
   const { bch, pusd, failed } = useBalanceText();
+  const progress = describeProgress(useWalletCoins().progress);
   return (
     <div className="cf-stack" data-gap="1">
       <span className="cf-label">Your wallet</span>
@@ -112,7 +113,10 @@ function MenuBalance() {
             </span>
           </>
         ) : (
-          <Skeleton width={120} height={18} />
+          <>
+            <Skeleton width={120} height={18} />
+            {progress && <span className="cf-small cf-subtle">{progress}</span>}
+          </>
         )
       ) : (
         <>

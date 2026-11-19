@@ -13,7 +13,8 @@ import { Details } from '../components/Details';
 import { HashLink, ProvenanceTag } from '../components/Provenance';
 import { Notice, Skeleton } from '../components/States';
 import { Countdown } from '../components/Timeline';
-import { describeScan, loadWalletCoins } from '../coins';
+import { describeScan } from '../coins';
+import { READING_WALLET, useBusyStep, useFindingAddressNote } from '../hooks/useBusyStep';
 import { assetInfo } from '../assets';
 import { loadConfig, useConfig } from '../config';
 import { withKeptElectrum } from '../electrum';
@@ -48,7 +49,7 @@ import {
 } from '../seller';
 import { browserStore, commitSession, generateSessionKeyPair, loadPendingSession, payoutAddress, readSessionKey, savePendingSession } from '../take';
 import { RELEASE_CHECKS, TradeActionError, actionProgress, disputeKeyHex, lockedCoins, releaseReady, signedPayoutPkh, type ReleaseCheck } from '../trade';
-import { refreshWalletCoins, useWalletCoins } from '../walletCoins';
+import { freshWalletScan, refreshWalletCoins, useWalletCoins } from '../walletCoins';
 import { WalletDeclined, useWallet } from '../wallet';
 
 // The seller's side of one trade (Sell-Accept-*, Trade-Seller-*, Trade-BuyOffer-Seller screens): accept a request
@@ -87,9 +88,11 @@ export function SellerAction(props: { trade: Trade; amount: string; fiat: string
 
   // Keys and coins are looked up while a request waits, so the buttons are ready when the seller decides.
   const preparing = trade.status === 'Requested' || trade.status === 'Accepted';
+  const findingNote = useFindingAddressNote();
   const prep = usePoll(() => (preparing && identity && xpubs ? prepareIndices(identity, xpubs, 'seller') : Promise.resolve(null)), `${identity}:${trade.id}:${preparing}`);
   // The shared scan of the wallet's coins, asked for again every few seconds while a deposit is due.
   const coins = useWalletCoins(preparing ? 15_000 : undefined);
+  const busyStep = useBusyStep();
 
   const isBch = trade.asset === 'BCH';
   const funding = expectedEscrowFunding(trade);
@@ -116,7 +119,9 @@ export function SellerAction(props: { trade: Trade; amount: string; fiat: string
   async function accept(): Promise<Trade> {
     if (!identity || !xpubs || !prep.data || !trade.buyerSessionPk) throw new TradeActionError('Campfire is still preparing your wallet. Try again in a moment.');
     const store = browserStore();
-    assertCanDeposit(trade, await withKeptElectrum((provider) => loadWalletCoins(provider, xpubs)));
+    busyStep.setStep(READING_WALLET);
+    assertCanDeposit(trade, (await withKeptElectrum(() => freshWalletScan({ receive: xpubs.receive, change: xpubs.change }))).coins);
+    busyStep.setStep('Accepting the buyer…');
     // The session key is saved before the request, so a lost answer can still be matched to its trade.
     const session = (store && loadPendingSession(store, trade.id)) || generateSessionKeyPair();
     if (store) savePendingSession(store, trade.id, session);
@@ -145,6 +150,7 @@ export function SellerAction(props: { trade: Trade; amount: string; fiat: string
     const store = browserStore();
     // Everything read from the chain before the wallet is asked runs in one block that is repeated if the connection
     // drops while the visitor is away (see withKeptElectrum). Nothing in it signs or deposits.
+    busyStep.setStep('Checking the terms…');
     const prepared = await withKeptElectrum<Prepared>(async (provider) => {
       const { offer } = await apiGet<{ offer: Offer }>(`/api/offers/${t.offerTxid}`);
       const checked = checkAcceptedTrade(t, {
@@ -177,7 +183,8 @@ export function SellerAction(props: { trade: Trade; amount: string; fiat: string
         return { done: recorded };
       }
 
-      const owned = await loadWalletCoins(provider, xpubs);
+      busyStep.setStep(READING_WALLET);
+      const owned = (await freshWalletScan({ receive: xpubs.receive, change: xpubs.change })).coins;
       const changeIndex = prep.data?.change ?? null;
       // One change address in its two forms: plain for the BCH change, token-aware (z…) for the token change.
       const change = (tokenAware: boolean) =>
@@ -188,7 +195,9 @@ export function SellerAction(props: { trade: Trade; amount: string; fiat: string
     });
     if ('done' in prepared) return prepared.done;
     const { tx, record } = prepared;
+    busyStep.setStep(null);
     const signedTxHex = await wallet.sign(tx.request, tx.inputPaths);
+    busyStep.setStep('Recording the deposit…');
     if (store) saveDeposit(store, t.id, signedTxHex);
     const recorded = await record(signedTxHex);
     if (store) clearSavedDeposit(store, t.id);
@@ -210,6 +219,14 @@ export function SellerAction(props: { trade: Trade; amount: string; fiat: string
   }
 
   async function acceptAndDeposit() {
+    try {
+      await acceptThenDeposit();
+    } finally {
+      busyStep.setStep(null);
+    }
+  }
+
+  async function acceptThenDeposit() {
     const accepted = await run('accept', 'The request was not accepted', accept);
     if (!accepted || accepted.status !== 'Accepted') return;
     // If the answer to the accept was lost, the key is still waiting under the pending name: file it under the trade.
@@ -221,7 +238,10 @@ export function SellerAction(props: { trade: Trade; amount: string; fiat: string
     await run('deposit', `${capitalize(locked)} ${trade.asset === 'BCH' ? 'was' : 'were'} not locked`, () => makeDeposit(accepted), accepted);
   }
 
-  const depositOnly = () => run('deposit', `${capitalize(locked)} ${trade.asset === 'BCH' ? 'was' : 'were'} not locked`, () => makeDeposit(trade));
+  const depositOnly = () =>
+    run('deposit', `${capitalize(locked)} ${trade.asset === 'BCH' ? 'was' : 'were'} not locked`, () => makeDeposit(trade)).finally(() =>
+      busyStep.setStep(null),
+    );
 
   const decline = () =>
     run('decline', 'The request was not declined', () =>
@@ -403,6 +423,7 @@ export function SellerAction(props: { trade: Trade; amount: string; fiat: string
             variant="primary"
             signs
             busy={busy === 'deposit'}
+            busyLabel={busyStep.label}
             disabled={short || (details === '' ? !savedDetails : !detailsReady) || (busy !== null && busy !== 'deposit')}
             onClick={depositOnly}
           >
@@ -453,6 +474,7 @@ export function SellerAction(props: { trade: Trade; amount: string; fiat: string
                 variant="primary"
                 signs
                 busy={busy === 'accept' || busy === 'deposit'}
+                busyLabel={busyStep.label}
                 disabled={expired || !detailsReady || !prep.data || short || (busy !== null && busy !== 'accept' && busy !== 'deposit')}
                 onClick={acceptAndDeposit}
               >
@@ -462,7 +484,7 @@ export function SellerAction(props: { trade: Trade; amount: string; fiat: string
                 Decline
               </Button>
             </div>
-            {!prep.data && !prep.error && <span className="cf-small cf-subtle">Finding a fresh address of your wallet…</span>}
+            {!prep.data && !prep.error && <span className="cf-small cf-subtle">{findingNote}</span>}
           </ActionCard>
           <RequestCard trade={trade} fiat={props.fiat} />
         </>
@@ -489,7 +511,7 @@ export function SellerAction(props: { trade: Trade; amount: string; fiat: string
           {walletNotices}
           {failure}
           <div className="s-actions">
-            <Button variant="primary" signs busy={busy === 'deposit'} disabled={short || (busy !== null && busy !== 'deposit')} onClick={depositOnly}>
+            <Button variant="primary" signs busy={busy === 'deposit'} busyLabel={busyStep.label} disabled={short || (busy !== null && busy !== 'deposit')} onClick={depositOnly}>
               {`Lock ${lockLabel}`}
             </Button>
           </div>

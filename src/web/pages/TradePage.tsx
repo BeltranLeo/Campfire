@@ -35,6 +35,7 @@ import {
 import { usePoll } from '../hooks/usePoll';
 import { useTradeAction } from '../hooks/useTradeAction';
 import { SellerAction, SellerResult } from './SellerTrade';
+import { useFindingAddressNote } from '../hooks/useBusyStep';
 import { prepareIndices } from '../indices';
 import { browserStore, buildBuyerAcceptBody, commitSession, generateSessionKeyPair, loadPendingSession, readSessionKey, savePendingSession } from '../take';
 import {
@@ -453,6 +454,7 @@ function BuyRequest(props: { trade: Trade; amount: string; fiat: string; onUpdat
   const { identity, xpubs } = wallet;
   const { busy, error, run } = useTradeAction<'accept' | 'decline'>(trade, identity, props.onUpdate);
   const offer = usePoll(() => apiGet<{ offer: Offer }>(`/api/offers/${trade.offerTxid}`).then((r) => r.offer.document), trade.offerTxid);
+  const findingNote = useFindingAddressNote();
   const prep = usePoll(() => (identity && xpubs ? prepareIndices(identity, xpubs, 'buyer') : Promise.resolve(null)), `${identity}:${trade.id}`);
   const problem = offer.data ? checkBuyRequest(trade, offer.data) : null;
   const methods = offer.data?.paymentMethods.map(paymentMethodLabel).join(' or ');
@@ -520,7 +522,7 @@ function BuyRequest(props: { trade: Trade; amount: string; fiat: string; onUpdat
           busy={busy === 'accept'}
           disabled={!prep.data || !offer.data || problem !== null || (busy !== null && busy !== 'accept')}
           onClick={accept}
-          note={!prep.data ? 'Finding a fresh address of your wallet…' : 'No signature needed.'}
+          note={!prep.data ? findingNote : 'No signature needed.'}
         >
           Accept
         </Button>

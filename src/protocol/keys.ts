@@ -59,15 +59,30 @@ export function identityFromDefiXpub(defiXpub: string): string {
 }
 
 // Derives a child compressed public key at an unhardened index from an extended public key.
+// Decoding an xpub (base58 and its checksum) costs about a third of deriving one address, and a wallet scan
+// derives hundreds from the same few xpubs, so the decoded node is kept. A handful of xpubs is all a page uses.
+const decodedXpubs = new Map<string, ReturnType<typeof decodeXpubNode>>();
+const MAX_DECODED_XPUBS = 16;
+function decodeXpubNode(xpub: string) {
+  const decoded = decodeHdPublicKey(xpub);
+  if (typeof decoded === 'string') {
+    throw new Error(`Invalid extended public key: ${decoded}`);
+  }
+  return decoded.node;
+}
+
 export function derivePubkeyFromXpub(xpub: string, index: number): Uint8Array {
   if (!Number.isInteger(index) || index < 0 || index >= 0x80000000) {
     throw new Error(`Invalid derivation index: ${index}`);
   }
-  const decoded = decodeHdPublicKey(xpub.trim());
-  if (typeof decoded === 'string') {
-    throw new Error(`Invalid extended public key: ${decoded}`);
+  const key = xpub.trim();
+  let node = decodedXpubs.get(key);
+  if (!node) {
+    node = decodeXpubNode(key);
+    if (decodedXpubs.size >= MAX_DECODED_XPUBS) decodedXpubs.clear();
+    decodedXpubs.set(key, node);
   }
-  const child = deriveHdPublicNodeChild(decoded.node, index);
+  const child = deriveHdPublicNodeChild(node, index);
   if (typeof child === 'string') {
     throw new Error(`Failed to derive child public key: ${child}`);
   }

@@ -205,6 +205,30 @@ describe('the wallet coins and the publication transaction', () => {
     expect(asked.length - new Set(asked).size).toBeLessThanOrEqual(20);
   }, 30_000);
 
+  it('starts from the remembered last used address and asks the history of the new addresses only', async () => {
+    const base = new MockNetworkProvider();
+    base.network = Network.MAINNET;
+    const usedIndices = Array.from({ length: 101 }, (_, i) => i * 10);
+    base.addUtxo(address(keys.receive, 30), { txid: 'ab'.repeat(32), vout: 0, satoshis: 5_000n });
+    const used = new Set(usedIndices.map((i) => address(keys.receive, i)));
+    const remembered = new Map<string, number>();
+    const memory = { lastUsed: (x: string) => remembered.get(x), remember: (x: string, n: number) => void remembered.set(x, n) };
+    const first = withHistory(base, used);
+    await scanWalletCoins(first.provider, { receive: keys.receive }, { memory });
+    expect(remembered.get(keys.receive)).toBe(1000);
+
+    // Two new addresses were used since: the next scan asks only about the window past 1,000 and then past 1,012.
+    used.add(address(keys.receive, 1005));
+    used.add(address(keys.receive, 1012));
+    const progress: string[] = [];
+    const second = withHistory(base, used);
+    const scan = await scanWalletCoins(second.provider, { receive: keys.receive }, { memory, onProgress: (p) => progress.push(`${p.phase}:${p.done}/${p.total}`) });
+    expect(scan.paths[0].lastUsed).toBe(1012);
+    expect(second.asked.length).toBe(32);
+    expect(spendableBch(scan.coins)).toBe(5_000n);
+    expect(progress.at(-1)).toBe('coins:1013/1013');
+  }, 30_000);
+
   it('reads an unused path in one window and stops', async () => {
     const { provider, asked } = withHistory(new MockNetworkProvider(), new Set());
     const scan = await scanWalletCoins(provider, { receive: keys.receive });

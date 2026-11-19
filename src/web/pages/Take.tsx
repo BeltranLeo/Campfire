@@ -16,6 +16,7 @@ import { reversibleWarning } from '../paymentMethods';
 import { useConfig } from '../config';
 import { applyMargin, formatAmount, formatBch, formatClock, formatFiat, formatFiatAmount, formatPaymentWindow, formatRange, paymentMethodLabel, toAmountInput } from '../format';
 import { fiatForUnits } from '../fiatAmount';
+import { useFindingAddressNote } from '../hooks/useBusyStep';
 import { prepareIndices } from '../indices';
 import { canDeposit, checkDeposit } from '../seller';
 import { spendableBch, tokenBalance } from '../coins';
@@ -160,6 +161,7 @@ function TakeOffer({ offer }: { offer: Offer }) {
   // --- The buyer's keys: next Campfire indices, and a payout address never used on-chain ---
   const identity = wallet.status === 'connected' ? wallet.identity : null;
   const xpubs = wallet.xpubs;
+  const findingNote = useFindingAddressNote();
   const prep = usePoll(() => (identity && xpubs ? prepareIndices(identity, xpubs, 'buyer') : Promise.resolve(null)), identity ?? 'none');
   const payout = prep.data && xpubs ? payoutAddress(xpubs.receive, prep.data.receive, !asset.isBch) : null;
 
@@ -352,7 +354,7 @@ function TakeOffer({ offer }: { offer: Offer }) {
                   note={
                     // Say why the button waits: a long-used wallet takes a few seconds to find a fresh address.
                     !prep.data
-                      ? 'Finding a fresh address of your wallet…'
+                      ? findingNote
                       : offer.isDemo
                         ? 'No signature needed. The demo seller locks the BCH right away.'
                         : 'No signature needed.'
@@ -428,6 +430,7 @@ function TakeBuyOffer({ offer }: { offer: Offer }) {
   const identity = wallet.status === 'connected' ? wallet.identity : null;
   const xpubs = wallet.xpubs;
   const coins = useWalletCoins(identity ? 15_000 : undefined);
+  const findingNote = useFindingAddressNote();
   const prep = usePoll(() => (identity && xpubs ? prepareIndices(identity, xpubs, 'seller') : Promise.resolve(null)), identity ?? 'none');
   const have = coins.data ? spendableBch(coins.data.coins) : null;
   const haveToken = coins.data && !asset.isBch ? tokenBalance(coins.data.coins, doc.asset) : null;
@@ -600,7 +603,7 @@ function TakeBuyOffer({ offer }: { offer: Offer }) {
                   busy={taking}
                   disabled={!inRange || !youReceive || !prep.data || short || have === null}
                   onClick={take}
-                  note={!prep.data ? 'Finding a fresh address of your wallet…' : 'No signature yet. You sign when you lock the coins.'}
+                  note={!prep.data ? findingNote : 'No signature yet. You sign when you lock the coins.'}
                 >
                   {inRange && amount !== null ? `Offer to sell ${formatAmount(amount, asset)}` : 'Offer to sell'}
                 </Button>

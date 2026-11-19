@@ -8,13 +8,15 @@ import { Details } from '../components/Details';
 import { noWalletNote } from '../components/NoWalletNote';
 import { HashLink, ProvenanceTag, SimBox } from '../components/Provenance';
 import { Notice, Skeleton } from '../components/States';
-import { describeScan, scanWalletCoins, spendableBch } from '../coins';
+import { describeScan, spendableBch } from '../coins';
 import { useConfig } from '../config';
-import { findUnusedReceiveIndex, withKeptElectrum } from '../electrum';
+import { withKeptElectrum } from '../electrum';
+import { READING_WALLET, useBusyStep } from '../hooks/useBusyStep';
+import { unusedIndex } from '../indices';
 import { applyMargin, formatBch, formatDateTime, formatFiat, formatFiatAmount, toAmountInput } from '../format';
 import { usePoll } from '../hooks/usePoll';
 import { VISIBLE_METHODS, reversibleWarning } from '../paymentMethods';
-import { refreshWalletCoins, useWalletCoins } from '../walletCoins';
+import { freshWalletScan, latestWalletScan, refreshWalletCoins, useWalletCoins } from '../walletCoins';
 import {
   EXPIRIES_SEC,
   addMethods,
@@ -112,14 +114,16 @@ export function CreateOffer() {
 
   // The addresses the publication will use. A fresh marker address keeps the offer's coin apart from anything the
   // wallet shared; the change goes to a fresh change address when there is one.
+  // The shared scan already knows each path's last used address, so no address-by-address search is needed.
   const prep = usePoll(async () => {
     if (!identity || !xpubs) return null;
-    const [markerIndex, changeIndex] = await Promise.all([
-      findUnusedReceiveIndex(xpubs.receive, 0).catch(() => null),
-      xpubs.change ? findUnusedReceiveIndex(xpubs.change, 0).catch(() => null) : Promise.resolve(null),
-    ]);
-    return { markerIndex, changeIndex };
+    const scan = await latestWalletScan({ receive: xpubs.receive, change: xpubs.change }).catch(() => null);
+    return {
+      markerIndex: scan ? unusedIndex(scan, 'receive') : null,
+      changeIndex: scan && xpubs.change ? unusedIndex(scan, 'change') : null,
+    };
   }, identity ?? 'none');
+  const busyStep = useBusyStep();
 
   // The wallet's coins, from the scan shared with the header and read again every few seconds: BCH sent while the
   // page is open shows up without reloading. A buy offer spends nothing of the wallet, so it does not ask.
@@ -194,17 +198,20 @@ export function CreateOffer() {
     const markerAddress = payoutAddress(xpubs.receive, prep.data.markerIndex, false);
     const changeAddress = xpubs.change && prep.data.changeIndex !== null ? payoutAddress(xpubs.change, prep.data.changeIndex, false) : markerAddress;
     // The coins are read again now, so a coin spent since the last refresh is never used.
+    busyStep.setStep(READING_WALLET);
     const tx = await withKeptElectrum(async (provider) =>
       buildPublishOfferTransaction({
         provider,
         document: built.document,
         offerJson: built.json,
-        utxos: (await scanWalletCoins(provider, xpubs)).coins,
+        utxos: (await freshWalletScan({ receive: xpubs.receive, change: xpubs.change })).coins,
         markerAddress,
         changeAddress,
       }),
     );
+    busyStep.setStep(null);
     const signedTxHex = await wallet.sign(tx.request, tx.inputPaths);
+    busyStep.setStep('Publishing the offer…');
     const { offer } = await apiPost<{ offer: Offer }>('/api/offers', {
       sellerIdentity: identity,
       offerJson: built.json,
@@ -244,6 +251,7 @@ export function CreateOffer() {
       else if (err instanceof ApiError && err.status === 429) setLimitHit(err.message);
       else setFailure(err instanceof ApiError ? err.message : err instanceof Error ? err.message : 'Something went wrong. Try again.');
       setPublishing(false);
+      busyStep.setStep(null);
       if (buying) sponsorship.reload();
       else scan.reload();
     }
@@ -722,6 +730,7 @@ export function CreateOffer() {
                     variant="primary"
                     signs
                     busy={publishing}
+                    busyLabel={busyStep.label}
                     disabled={!config || !prep.data || !scan.data || prep.data.markerIndex === null || short}
                     onClick={publish}
                   >
