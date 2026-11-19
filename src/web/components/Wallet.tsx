@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useId, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { Link, NavLink } from 'react-router';
 import QRCode from 'qrcode';
 import { spendableBch, tokenBalance } from '../coins';
@@ -34,7 +35,13 @@ export function WalletButton() {
         <button type="button" className="cf-btn" aria-busy="true">
           {wallet.status === 'pairing' ? 'Pairing…' : 'Connecting…'}
         </button>
-        {wallet.pairing && <PairingDialog uri={wallet.pairing.uri} qrUri={wallet.pairing.qrUri} onClose={wallet.disconnect} />}
+        {/* A portal, because the header's backdrop-filter makes it the containing block of any fixed
+            descendant: inside it the overlay shrinks to the header's height and the dialog cannot be reached. */}
+        {wallet.pairing &&
+          createPortal(
+            <PairingDialog uri={wallet.pairing.uri} qrUri={wallet.pairing.qrUri} onClose={wallet.disconnect} />,
+            document.body,
+          )}
       </>
     );
   }
