@@ -13,6 +13,13 @@ export class ApiError extends Error {
   }
 }
 
+// Session token from the wallet sign-in (docs/protocol.md, section 1). Requests that act for the identity need
+// it; it travels in a header on every request, so pages never pass it around.
+let sessionToken: string | null = null;
+export const setSessionToken = (token: string | null) => {
+  sessionToken = token;
+};
+
 // A request that never answers would leave a page loading forever. Writes get longer: taking a demo
 // offer waits for the demo seller's on-chain deposit.
 const TIMEOUT_MS = { GET: 20_000, POST: 60_000 };
@@ -23,6 +30,7 @@ async function request<T>(method: 'GET' | 'POST', path: string, body?: unknown, 
   const headers: Record<string, string> = {};
   if (body !== undefined) headers['content-type'] = 'application/json';
   if (token) headers.authorization = `Bearer ${token}`;
+  if (sessionToken) headers['x-campfire-session'] = sessionToken;
   try {
     res = await fetch(path, {
       method,
@@ -95,6 +103,8 @@ export interface Reputation {
 export interface RegisteredIdentity {
   identity: string;
   reputation: Reputation;
+  /** Session token for the requests that act for this identity. */
+  session: string;
 }
 
 export interface ApiConfig {

@@ -1,10 +1,11 @@
 // Campfire protocol service: identity, offers, trade state machine, automatic expiry arbiter, chat and reputation.
 
-import { randomBytes } from 'node:crypto';
+import { randomBytes, timingSafeEqual } from 'node:crypto';
 import {
   binToHex,
   decodeTransactionUnsafe,
   hexToBin,
+  hmacSha256,
   secp256k1,
   sha256,
   utf8ToBin,
@@ -97,6 +98,10 @@ export class SponsorshipLimitError extends Error {}
 /** Registering these keys needs a signed sign-in challenge (protocol section 1); the HTTP layer answers 401. */
 export class SignInRequiredError extends Error {}
 
+// How long a session token lasts. A visitor who comes back later signs the challenge again.
+export const SESSION_LIFETIME_SEC = 30 * 86_400;
+const SESSION_TOKEN_RE = /^([0-9a-f]{64})\.([0-9]{1,12})\.([0-9a-f]{64})$/;
+
 /** A signed sign-in challenge sent back with `POST /api/identities`. */
 export interface SignInProof {
   expiresAt: number;
@@ -148,6 +153,8 @@ export class CampfireService {
   private readonly arbiterPrivateKey: Uint8Array;
   // Key of the sign-in challenge MACs, derived from the arbiter key so every instance shares it without new config.
   private readonly signInSecret: Uint8Array;
+  // Key of the session token MACs, derived the same way: tokens are checked, never stored.
+  private readonly sessionSecret: Uint8Array;
   private readonly nowSeconds: () => number;
 
   constructor(
@@ -174,6 +181,7 @@ export class CampfireService {
     }
     this.arbiterPublicKeyHex = binToHex(pub).toLowerCase();
     this.signInSecret = sha256.hash(Uint8Array.from([...utf8ToBin('CMPF-SIGNIN-KEY-v1'), ...this.arbiterPrivateKey]));
+    this.sessionSecret = sha256.hash(Uint8Array.from([...utf8ToBin('CMPF-SESSION-KEY-v1'), ...this.arbiterPrivateKey]));
     this.nowSeconds = options.nowSeconds ?? (() => Math.floor(Date.now() / 1000));
     this.sponsorshipLimits = { ...DEFAULT_SPONSORSHIP_LIMITS, ...options.sponsorshipLimits };
   }
@@ -205,21 +213,25 @@ export class CampfireService {
   }
 
   // Every dapp a wallet connects to receives the same extended public keys, so presenting them proves nothing.
-  // New keys, or a new receive key for a known identity, need the wallet's signature on a sign-in challenge.
-  // Reconnecting with the keys already on record needs none, so a returning visitor is not asked to sign.
-  // `trusted` is for the service's own demo seller, whose keys the server holds.
+  // Signing in takes either a signed sign-in challenge or a session token from an earlier sign-in with the same
+  // keys, so a returning visitor is not asked to sign again on the same browser. Either way the answer carries a
+  // fresh session token, which every request that acts for the identity must carry (protocol section 1).
+  // `trusted` is for the service's own demo seller, whose keys the server holds and which never uses HTTP.
   async registerIdentity(
-    params: { defiXpub: string; receiveXpub: string; proof?: SignInProof },
+    params: { defiXpub: string; receiveXpub: string; proof?: SignInProof; sessionToken?: string | null },
     options: { trusted?: boolean } = {},
-  ): Promise<UserIdentityRecord> {
+  ): Promise<{ record: UserIdentityRecord; sessionToken?: string }> {
     const identity = identityFromDefiXpub(params.defiXpub);
     // Validate receiveXpub by deriving index 0.
     verifyDerivedPayoutPkh(params.receiveXpub, 0, new Uint8Array(20));
     const now = this.nowSeconds();
     const existing = await this.options.storage.getIdentity(identity);
-    const unchanged = existing?.receiveXpub === params.receiveXpub.trim();
-    if (!unchanged && !options.trusted) {
-      this.checkSignInProof(identity, params);
+    if (!options.trusted) {
+      const unchanged = existing?.receiveXpub === params.receiveXpub.trim();
+      const resumed = unchanged && this.sessionIdentity(params.sessionToken) === identity;
+      if (params.proof || !resumed) {
+        this.checkSignInProof(identity, params);
+      }
     }
     const record: UserIdentityRecord = {
       identity,
@@ -229,13 +241,36 @@ export class CampfireService {
       updatedAt: now,
     };
     await this.options.storage.saveIdentity(record);
-    return record;
+    return options.trusted ? { record } : { record, sessionToken: this.issueSessionToken(identity) };
+  }
+
+  // A session token is `identity.expiresAt.mac`, with an HMAC by a key only the service has. It is checked by
+  // recomputing the MAC, so the service stores no sessions and every instance accepts the tokens of the others.
+  issueSessionToken(identity: string): string {
+    const expiresAt = this.nowSeconds() + SESSION_LIFETIME_SEC;
+    return `${identity}.${expiresAt}.${this.sessionMac(identity, expiresAt)}`;
+  }
+
+  /** The identity a session token was issued to, or null when it is missing, forged or expired. */
+  sessionIdentity(token: string | null | undefined): string | null {
+    const match = typeof token === 'string' ? SESSION_TOKEN_RE.exec(token.trim()) : null;
+    if (!match) return null;
+    const [, identity, expiresText, mac] = match;
+    const expiresAt = Number(expiresText);
+    if (this.nowSeconds() > expiresAt) return null;
+    const expected = Buffer.from(this.sessionMac(identity, expiresAt), 'hex');
+    const given = Buffer.from(mac, 'hex');
+    return expected.length === given.length && timingSafeEqual(expected, given) ? identity : null;
+  }
+
+  private sessionMac(identity: string, expiresAt: number): string {
+    return binToHex(hmacSha256(this.sessionSecret, utf8ToBin(`CMPF-SESSION-v1|${identity}|${expiresAt}`)));
   }
 
   private checkSignInProof(identity: string, params: { defiXpub: string; receiveXpub: string; proof?: SignInProof }): void {
     const proof = params.proof;
     if (!proof) {
-      throw new SignInRequiredError('Confirm the sign-in in your wallet to register these keys');
+      throw new SignInRequiredError('Confirm the sign-in in your wallet to continue');
     }
     if (!Number.isInteger(proof.expiresAt) || typeof proof.salt !== 'string' || typeof proof.signedTransaction !== 'string') {
       throw new Error('Invalid sign-in proof');
@@ -1048,7 +1083,7 @@ export class CampfireService {
 
     // The payment details of a buy offer travel with the deposit. Every check on them comes before anything
     // is broadcast, so a rejected request never leaves a deposit on the network without details to go with it.
-    // Requests name an identity without proof (section 1), and the buyer can encrypt with the same key as the seller, so only the
+    // The arbiter cannot take the service's word for who wrote them, and the buyer can encrypt with the same key as the seller, so only the
     // signature by the seller's session key, committed in the terms, shows that the seller wrote them. Without it the
     // buyer could swap in an account of their own and show it to an arbiter as the one they paid.
     const details = params.encryptedPaymentDetails?.trim();
@@ -1371,8 +1406,8 @@ export class CampfireService {
 
   // --- Encrypted Chat (Section 6) ---
 
-  // A message counts only with a signature by the sender's session key, committed in the trade terms. Requests name
-  // an identity without proof (section 1) and both parties share the chat key, so without it one party could post messages in the
+  // A message counts only with a signature by the sender's session key, committed in the trade terms. The arbiter
+  // cannot take the service's word for who wrote what, and both parties share the chat key, so without it one party could post messages in the
   // other's name, such as "payment received", and show them to the arbiter.
   async postChatMessage(params: {
     idOrTradeId: string;

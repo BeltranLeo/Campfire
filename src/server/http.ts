@@ -17,6 +17,9 @@ import type { OracleService } from './oracle.js';
 import { SignInRequiredError, SponsorshipLimitError, type CampfireService, type SignInProof } from './service.js';
 import type { StoredTrade } from './storage.js';
 
+// Header that carries the session token from sign-in (protocol section 1).
+export const SESSION_HEADER = 'x-campfire-session';
+
 class HttpError extends Error {
   constructor(
     readonly status: number,
@@ -72,6 +75,16 @@ export function createApiHandler(deps: {
     const url = new URL(req.url, 'http://localhost');
     const path = url.pathname.replace(/\/+$/, '') || '/';
     const method = req.method.toUpperCase();
+    // A request that acts for an identity must carry that identity's session token, issued at sign-in.
+    const requireSession = (identity: string | undefined): void => {
+      const signedIn = service.sessionIdentity(req.headers.get(SESSION_HEADER));
+      if (!signedIn) {
+        throw new HttpError(401, 'Your sign-in is missing or expired. Connect your wallet again.');
+      }
+      if (signedIn !== identity) {
+        throw new HttpError(403, 'This request acts for another identity than the one signed in');
+      }
+    };
 
     try {
       // GET /api/config
@@ -112,9 +125,14 @@ export function createApiHandler(deps: {
           receiveXpub: string;
           proof?: SignInProof;
         }>(req);
-        const record = await service.registerIdentity({ defiXpub: body.defiXpub, receiveXpub: body.receiveXpub, proof: body.proof });
+        const { record, sessionToken } = await service.registerIdentity({
+          defiXpub: body.defiXpub,
+          receiveXpub: body.receiveXpub,
+          proof: body.proof,
+          sessionToken: req.headers.get(SESSION_HEADER),
+        });
         const reputation = await service.getReputation(record.identity);
-        return jsonResponse({ identity: record.identity, record, reputation }, 201);
+        return jsonResponse({ identity: record.identity, record, reputation, session: sessionToken }, 201);
       }
 
       // GET /api/identities/:identity/reputation
@@ -162,6 +180,7 @@ export function createApiHandler(deps: {
             markerReceiveIndex: number;
             broadcast?: boolean;
           }>(req);
+          requireSession(body.sellerIdentity);
           // Fields are copied one by one: whether an offer is a demo offer is decided by the service, never the client.
           const offer = await service.publishOffer({
             sellerIdentity: body.sellerIdentity,
@@ -189,6 +208,7 @@ export function createApiHandler(deps: {
           throw new HttpError(404, 'Paid publication of buy offers is not enabled');
         }
         const body = await readJson<{ buyerIdentity: string; offerJson: string; markerReceiveIndex: number }>(req);
+        requireSession(body.buyerIdentity);
         const result = await demo.publishSponsored({
           buyerIdentity: body.buyerIdentity,
           offerJson: body.offerJson,
@@ -211,6 +231,7 @@ export function createApiHandler(deps: {
       const closeOfferMatch = path.match(/^\/api\/offers\/([0-9a-f]{64})\/close$/i);
       if (method === 'POST' && closeOfferMatch) {
         const body = await readJson<{ sellerIdentity: string; closeTxHex?: string }>(req);
+        requireSession(body.sellerIdentity);
         const offer = await service.closeOffer({
           offerTxid: closeOfferMatch[1].toLowerCase(),
           sellerIdentity: body.sellerIdentity,
@@ -223,6 +244,8 @@ export function createApiHandler(deps: {
       if (path === '/api/trades') {
         if (method === 'GET') {
           const identity = url.searchParams.get('identity') ?? undefined;
+          // Listing one identity's trades is for that identity only; the trades of an offer stay public.
+          if (identity !== undefined) requireSession(identity);
           const offerTxid = url.searchParams.get('offerTxid') ?? undefined;
           const trades = await service.listTrades({ identity, offerTxid });
           return jsonResponse({ trades });
@@ -250,6 +273,7 @@ export function createApiHandler(deps: {
             if (!body.sellerIdentity && body.buyerIdentity) {
               throw new HttpError(400, 'This is a buy offer: a seller takes it, not a buyer');
             }
+            requireSession(body.sellerIdentity);
             // A seller takes a buy offer. The fields are copied one by one: the record id is the demo seller's alone.
             trade = await service.requestBuyOfferTrade({
               offerTxid: body.offerTxid,
@@ -262,6 +286,7 @@ export function createApiHandler(deps: {
               sellerSessionPk: body.sellerSessionPk,
             });
           } else {
+            requireSession(body.buyerIdentity);
             const isDemoOffer = demo !== undefined && offer?.sellerIdentity === demo.identity;
             if (isDemoOffer) {
               await demo.assertCanTake();
@@ -353,6 +378,7 @@ export function createApiHandler(deps: {
                 refundTime?: number;
                 nonce?: string;
               }>(req);
+              requireSession(body.buyerIdentity);
               let trade = await service.acceptBuyOfferTrade({ ...body, tradeRecordId: id });
               if (demo && service.isDemoTrade(trade)) {
                 // The demo seller deposits within this request. If that fails, the next read of the trade retries.
@@ -375,16 +401,16 @@ export function createApiHandler(deps: {
               refundTime?: number;
               nonce?: string;
             }>(req);
+            requireSession(body.sellerIdentity);
             const trade = await service.acceptTrade({ ...body, tradeRecordId: id });
             return jsonResponse({ trade });
           }
           if (action === 'decline') {
             // The one who published the offer declines: the seller of a sell offer, the buyer of a buy offer.
             const body = await readJson<{ identity?: string; sellerIdentity?: string; buyerIdentity?: string }>(req);
-            const trade = await service.declineTrade({
-              tradeRecordId: id,
-              identity: body.identity ?? body.sellerIdentity ?? body.buyerIdentity ?? '',
-            });
+            const identity = body.identity ?? body.sellerIdentity ?? body.buyerIdentity ?? '';
+            requireSession(identity);
+            const trade = await service.declineTrade({ tradeRecordId: id, identity });
             return jsonResponse({ trade });
           }
           if (action === 'funding') {
@@ -399,6 +425,7 @@ export function createApiHandler(deps: {
           }
           if (action === 'paid') {
             const body = await readJson<{ buyerIdentity: string }>(req);
+            requireSession(body.buyerIdentity);
             let trade = await service.markPaid({
               idOrTradeId: id,
               buyerIdentity: body.buyerIdentity,
@@ -415,6 +442,7 @@ export function createApiHandler(deps: {
               reason?: string;
               sharedTradeKeyHex?: string;
             }>(req);
+            requireSession(body.callerIdentity);
             const trade = await service.openDispute({ ...body, idOrTradeId: id });
             return jsonResponse({ trade });
           }
@@ -438,6 +466,7 @@ export function createApiHandler(deps: {
           }
           if (action === 'chat') {
             const body = await readJson<{ senderIdentity: string; ciphertext: string; signature?: string }>(req);
+            requireSession(body.senderIdentity);
             const message = await service.postChatMessage({ ...body, idOrTradeId: id });
             return jsonResponse({ message }, 201);
           }

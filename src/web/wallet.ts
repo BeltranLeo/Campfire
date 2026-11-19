@@ -8,12 +8,32 @@ import { useSyncExternalStore } from 'react';
 import { DappConnectionManager, clearSession, loadSession } from '@wizardconnect/dapp';
 import type { DappRelayResult, SignTransactionRequest } from '@wizardconnect/core';
 import { initiateDappRelay } from './dappRelay';
-import { ApiError, apiGet, apiPost, isFinalState, type RegisteredIdentity, type Reputation, type TradeSummary } from './api';
+import { ApiError, apiGet, apiPost, isFinalState, setSessionToken, type RegisteredIdentity, type Reputation, type TradeSummary } from './api';
 import { derivePubkeyFromXpub } from '../protocol/keys.js';
 import { buildSignInRequest, type SignInChallenge } from '../protocol/signin.js';
 import { electrum } from './electrum';
 
 const SESSION_KEY = 'campfire.wallet';
+// The service's session token, kept so a reload or a later visit on this browser needs no new signature.
+const TOKEN_KEY = 'campfire.session-token';
+
+function storedToken(): string | null {
+  try {
+    return localStorage.getItem(TOKEN_KEY);
+  } catch {
+    return null;
+  }
+}
+
+function keepToken(token: string | null) {
+  setSessionToken(token);
+  try {
+    if (token) localStorage.setItem(TOKEN_KEY, token);
+    else localStorage.removeItem(TOKEN_KEY);
+  } catch {
+    // Without storage the token lasts until the page closes; the next visit signs in again.
+  }
+}
 const DAPP_NAME = 'Campfire';
 const PAIRING_TIMEOUT_MS = 2 * 60 * 1000;
 // A closed wallet app never answers; without a limit the button would say "Waiting for wallet…" forever.
@@ -74,6 +94,8 @@ class WalletController {
   /** The defi key registered with the service for the current manager, if any. */
   private registeredDefi: string | null = null;
   private registering = false;
+  // Whether the current pairing has heard from the wallet in this page; sign requests need it.
+  private walletAnswered = false;
 
   subscribe = (listener: () => void) => {
     this.listeners.add(listener);
@@ -136,6 +158,7 @@ class WalletController {
     // Tell the wallet only if it is paired; a pairing in progress has nobody to tell.
     this.close(this.state.status !== 'pairing');
     clearSession(SESSION_KEY);
+    keepToken(null);
     this.set(INITIAL);
   }
 
@@ -205,6 +228,7 @@ class WalletController {
     const manager = new DappConnectionManager(DAPP_NAME, undefined, { session: { key: SESSION_KEY } });
     this.manager = manager;
     this.registeredDefi = null;
+    this.walletAnswered = false;
     const relay = initiateDappRelay(
       (payload) => {
         if (this.manager !== manager) return;
@@ -220,6 +244,7 @@ class WalletController {
       // The wallet answered. A hidden page may have kept the timer running, so give the
       // rest of the pairing (Selene's second wallet_ready, with the keys) a fresh two minutes.
       if (this.state.status === 'pairing') this.startPairingTimer();
+      this.walletAnswered = true;
       this.set({ walletName: manager.walletName });
       void this.register();
     });
@@ -260,6 +285,7 @@ class WalletController {
   private endedByWallet() {
     this.close();
     clearSession(SESSION_KEY);
+    keepToken(null);
     this.set(INITIAL);
   }
 
@@ -282,18 +308,24 @@ class WalletController {
     if (this.state.status !== 'connected') this.set({ status: 'connecting', pairing: null });
     try {
       const keys = { defiXpub: xpubs.defi, receiveXpub: xpubs.receive };
+      // A token from an earlier sign-in on this browser resumes it without a new signature.
+      setSessionToken(storedToken());
       let result: RegisteredIdentity;
       try {
         result = await apiPost<RegisteredIdentity>('/api/identities', keys);
       } catch (err) {
-        // 401: keys the service has not seen with this identity, so the wallet must prove it owns them.
+        // 401: no valid token for these keys, so the wallet must prove it owns them.
         if (!(err instanceof ApiError && err.status === 401)) throw err;
         if (this.manager !== manager) return;
+        // After a reload the relay reconnects in the background, and a sign request sent before the wallet
+        // answers fails. Stay "connecting": the wallet_ready that follows runs this again and asks then.
+        if (!this.walletAnswered) return;
         const proof = await this.proveOwnership(manager, xpubs);
         if (this.manager !== manager) return;
         result = await apiPost<RegisteredIdentity>('/api/identities', { ...keys, proof });
       }
       if (this.manager !== manager) return;
+      keepToken(result.session);
       this.registeredDefi = defi;
       this.set({
         status: 'connected',

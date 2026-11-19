@@ -41,7 +41,7 @@ import {
   type StoredOffer,
   type StoredTrade,
 } from '../src/server/index.js';
-import { registerSignedIn } from './signin-helper.js';
+import { registerSignedIn, sessionHeaders } from './signin-helper.js';
 
 function makeWallet(label: string) {
   const seed = new Uint8Array(64);
@@ -106,7 +106,7 @@ async function setup(options?: { limits?: Partial<SponsorshipLimits>; botSats?: 
     const res = await api(
       new Request(`http://localhost${path}`, {
         method,
-        headers: body ? { 'content-type': 'application/json' } : {},
+        headers: { ...sessionHeaders(path, body), ...(body ? { 'content-type': 'application/json' } : {}) },
         body: body ? JSON.stringify(body) : undefined,
       }),
     );
@@ -319,13 +319,13 @@ describe('Buy offers published and paid for by the service', () => {
     ).rejects.toThrow(/buy offer/);
 
     const taken = await ctx.req<{ trade: StoredTrade }>('POST', '/api/trades', { offerTxid: offer.offerTxid, amount: '200000', sellerIdentity: sellerId, ...sellerKeys(0) });
-    // The seller who took the request cannot accept it for the buyer.
+    // The seller who took the request cannot accept it for the buyer: the buyer's route needs the buyer's session.
     const viaSellerRoute = await ctx.req('POST', `/api/trades/${taken.data.trade.id}/accept`, {
       sellerIdentity: sellerId,
       ...sellerKeys(1),
       encryptedPaymentDetails: 'x:y',
     });
-    expect(viaSellerRoute.status).toBe(400);
+    expect(viaSellerRoute.status).toBe(403);
     // The amount is chosen by the seller within the offer's range.
     const outOfRange = await ctx.req('POST', '/api/trades', { offerTxid: offer.offerTxid, amount: '50', sellerIdentity: sellerId, ...sellerKeys(2) });
     expect(outOfRange.status).toBe(400);
@@ -416,9 +416,9 @@ describe('Limits on offers the service pays for', () => {
     expect(sell.status).toBe(400);
     expect(sell.data.error).toMatch(/only pays for buy offers/);
 
+    // An identity nobody signed in as has no session token.
     const unknown = await ctx.publish('f'.repeat(64), ctx.buyOffer(), 1);
-    expect(unknown.status).toBe(400);
-    expect(unknown.data.error).toMatch(/not registered/);
+    expect(unknown.status).toBe(401);
     // Nothing was spent on the refused ones: one publication so far.
     expect((await ctx.req('GET', '/api/offers/sponsored')).data.usedToday).toBe(1);
   });

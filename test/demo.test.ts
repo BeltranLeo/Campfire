@@ -53,7 +53,7 @@ import {
   type StoredOffer,
   type StoredTrade,
 } from '../src/server/index.js';
-import { registerSignedIn } from './signin-helper.js';
+import { registerSignedIn, sessionHeaders } from './signin-helper.js';
 
 function makeWallet(label: string) {
   const seed = new Uint8Array(64);
@@ -179,7 +179,7 @@ async function setupDemo(options?: {
     body?: unknown,
     extraHeaders?: Record<string, string>,
   ): Promise<{ status: number; data: T }> => {
-    const headers: Record<string, string> = { ...extraHeaders };
+    const headers: Record<string, string> = { ...sessionHeaders(path, body), ...extraHeaders };
     if (body) headers['content-type'] = 'application/json';
     const res = await api(
       new Request(`http://localhost${path}`, {

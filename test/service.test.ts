@@ -64,7 +64,7 @@ import {
   type StoredOffer,
   type StoredTrade,
 } from '../src/server/index.js';
-import { registerSignedIn, signInProof } from './signin-helper.js';
+import { registerSignedIn, sessionHeaders, signInProof } from './signin-helper.js';
 
 function makeWallet(label: string) {
   const seed = new Uint8Array(64);
@@ -141,7 +141,7 @@ function setupTestContext(initialNow = 1_794_900_000) {
     body?: unknown,
     extraHeaders?: Record<string, string>,
   ): Promise<{ status: number; data: T }> => {
-    const headers: Record<string, string> = { ...extraHeaders };
+    const headers: Record<string, string> = { ...sessionHeaders(path, body), ...extraHeaders };
     if (body) headers['content-type'] = 'application/json';
     const res = await api(
       new Request(`http://localhost${path}`, {
@@ -742,7 +742,7 @@ describe('Identity registration', () => {
     expect(Object.keys(stored!).sort()).toEqual(['createdAt', 'defiXpub', 'identity', 'receiveXpub', 'updatedAt']);
   });
 
-  it('asks for a signed challenge for new keys, but not when the same keys reconnect', async () => {
+  it('signs in with a challenge, then resumes with the session token and nothing else', async () => {
     const ctx = setupTestContext();
     const keys = { defiXpub: buyer.defiXpub, receiveXpub: buyer.receiveXpub };
 
@@ -752,10 +752,45 @@ describe('Identity registration', () => {
 
     const signed = await registerSignedIn(ctx.jsonReq, buyer);
     expect(signed.status).toBe(201);
+    expect(signed.data.session).toMatch(/^[0-9a-f]{64}\.[0-9]+\.[0-9a-f]{64}$/);
 
-    const again = await ctx.jsonReq('POST', '/api/identities', keys);
-    expect(again.status).toBe(201);
-    expect(again.data.identity).toBe(signed.data.identity);
+    // Knowing the keys is not enough once registered: whoever presents them without a token must sign.
+    const keysOnly = await ctx.jsonReq('POST', '/api/identities', keys);
+    expect(keysOnly.status).toBe(401);
+
+    // The same browser resumes with its token, and gets a fresh one.
+    const resumed = await ctx.jsonReq('POST', '/api/identities', keys, { 'x-campfire-session': signed.data.session });
+    expect(resumed.status).toBe(201);
+    expect(resumed.data.identity).toBe(signed.data.identity);
+    expect(resumed.data.session).toMatch(/^[0-9a-f]{64}\./);
+
+    // A token does not carry over to other keys, and expires after 30 days.
+    const sellerKeys = { defiXpub: seller.defiXpub, receiveXpub: seller.receiveXpub };
+    expect((await ctx.jsonReq('POST', '/api/identities', sellerKeys, { 'x-campfire-session': signed.data.session })).status).toBe(401);
+    ctx.advanceTime(30 * 86_400 + 1);
+    expect((await ctx.jsonReq('POST', '/api/identities', keys, { 'x-campfire-session': signed.data.session })).status).toBe(401);
+  });
+
+  it('acts for an identity only with its own session token', async () => {
+    const ctx = setupTestContext();
+    const buyerId: string = (await registerSignedIn(ctx.jsonReq, buyer)).data.identity;
+    const sellerReg = await registerSignedIn(ctx.jsonReq, seller);
+    const sellerId: string = sellerReg.data.identity;
+    const listPath = `/api/trades?identity=${buyerId}`;
+
+    // The test helper sends the named identity's token; these calls set the header by hand to override it.
+    expect((await ctx.jsonReq('GET', listPath)).status).toBe(200);
+    expect((await ctx.jsonReq('GET', listPath, undefined, { 'x-campfire-session': '' })).status).toBe(401);
+    expect((await ctx.jsonReq('GET', listPath, undefined, { 'x-campfire-session': sellerReg.data.session })).status).toBe(403);
+    const forged = `${buyerId}.${ctx.getNow() + 3600}.${'0'.repeat(64)}`;
+    expect((await ctx.jsonReq('GET', listPath, undefined, { 'x-campfire-session': forged })).status).toBe(401);
+
+    // Acting for someone else is refused before the service looks at the request.
+    const tradeId = 'ab'.repeat(16);
+    const paid = await ctx.jsonReq('POST', `/api/trades/${tradeId}/paid`, { buyerIdentity: buyerId }, { 'x-campfire-session': sellerReg.data.session });
+    expect(paid.status).toBe(403);
+    const decline = await ctx.jsonReq('POST', `/api/trades/${tradeId}/decline`, { identity: sellerId }, { 'x-campfire-session': '' });
+    expect(decline.status).toBe(401);
   });
 
   it('refuses an expired, foreign or garbled sign-in', async () => {

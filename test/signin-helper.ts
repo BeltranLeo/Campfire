@@ -47,8 +47,27 @@ export async function signInProof(req: Req, wallet: SignInWallet, signer = walle
   return { expiresAt, salt, signedTransaction: signSignInLocally(nonce, signer) };
 }
 
+// Session tokens from sign-ins in these tests, by identity. Test request helpers send the one of the identity a
+// request acts for, as the web client sends its own on every request.
+const sessions = new Map<string, string>();
+
 /** Registers the wallet's keys with a signed challenge, as the web client does on first connection. */
 export async function registerSignedIn(req: Req, wallet: SignInWallet, extra: Record<string, unknown> = {}) {
   const proof = await signInProof(req, wallet);
-  return req('POST', '/api/identities', { defiXpub: wallet.defiXpub, receiveXpub: wallet.receiveXpub, proof, ...extra });
+  const res = await req('POST', '/api/identities', { defiXpub: wallet.defiXpub, receiveXpub: wallet.receiveXpub, proof, ...extra });
+  if (res.status === 201 && res.data.session) sessions.set(res.data.identity, res.data.session);
+  return res;
+}
+
+export const SESSION_HEADER = 'x-campfire-session';
+
+/** The session header for the identity a request names, in its body or its `identity` query parameter. */
+export function sessionHeaders(path: string, body?: unknown): Record<string, string> {
+  const fields = (body ?? {}) as Record<string, unknown>;
+  const named = ['identity', 'senderIdentity', 'callerIdentity', 'buyerIdentity', 'sellerIdentity']
+    .map((k) => fields[k])
+    .find((v): v is string => typeof v === 'string');
+  const identity = named ?? new URL(path, 'http://localhost').searchParams.get('identity');
+  const token = identity ? sessions.get(identity) : undefined;
+  return token ? { [SESSION_HEADER]: token } : {};
 }
