@@ -49,6 +49,7 @@ import {
   StaticPriceFeed,
   createApiHandler,
   deriveDemoSellerWallet,
+  feeAddress,
   type DemoSellerLimits,
   type StoredOffer,
   type StoredTrade,
@@ -619,5 +620,60 @@ describe('Demo seller bot (protocol section 8)', () => {
     const nextDay = await ctx.take(ctx.bchOffer.offerTxid, '10000');
     expect(nextDay.status).toBe(201);
     expect(nextDay.data.trade.status).toBe('Funded');
+  });
+
+  describe('administration panel: GET /api/admin/accounts', () => {
+    it('shows the bot balance and the fee addresses only to the admin, and the fees a trade paid', async () => {
+      const ctx = await setupDemo();
+      // 5% each, so a 0.0002 BCH trade pays fees above the dust limit.
+      await ctx.service.setFeeRates({ arbiterBps: 500, oracleBps: 500 });
+
+      const anon = await ctx.jsonReq('GET', '/api/admin/accounts');
+      expect(anon.status).toBe(403);
+
+      const before = await ctx.jsonReq('GET', '/api/admin/accounts', undefined, ADMIN);
+      expect(before.status).toBe(200);
+      expect(before.data.bchUsd).toBe('450.00');
+      expect(before.data.bot.address).toBe(botWallet.receiveAddress(0));
+      expect(before.data.bot.tokenAddress).toBe(botWallet.receiveAddress(0, true));
+      expect(before.data.bot.pusdUnits).toBe('1000');
+      expect(before.data.bot.addressCount).toBe(1);
+      expect(before.data.bot.canFundMax).toEqual({ BCH: true, PUSD: true });
+      expect(before.data.bot.maxBchSats).toBe('20000');
+      // The same coins the bot decides with: the panel and spendableUtxos never disagree.
+      const coins = await ctx.demo.spendableUtxos();
+      expect(before.data.bot.bchSats).toBe(coins.reduce((sum, u) => sum + u.satoshis, 0n).toString());
+      expect(before.data.oracle.address).toBe(feeAddress(ctx.service.oraclePublicKeyHex));
+      expect(before.data.arbiter.address).toBe(feeAddress(ctx.service.arbiterPublicKeyHex));
+      expect(before.data.oracle.bchSats).toBe('0');
+      expect(before.data.arbiter.bchSats).toBe('0');
+
+      const taken = await ctx.take(ctx.bchOffer.offerTxid, '20000');
+      expect(taken.data.trade.status).toBe('Funded');
+      const after = await ctx.jsonReq('GET', '/api/admin/accounts', undefined, ADMIN);
+      expect(after.data.oracle.bchSats).toBe('1000');
+      expect(after.data.arbiter.bchSats).toBe('1000');
+    });
+
+    it('warns when the bot cannot fund a trade at its maximum', async () => {
+      const ctx = await setupDemo({ botSats: 10_000n, botPusd: 0n });
+      const { data } = await ctx.jsonReq('GET', '/api/admin/accounts', undefined, ADMIN);
+      expect(data.bot.pusdUnits).toBe('0');
+      expect(data.bot.canFundMax).toEqual({ BCH: false, PUSD: false });
+    });
+
+    it('counts the coins a trade returned to the bot at its payout address', async () => {
+      const ctx = await setupDemo();
+      const taken = await ctx.take(ctx.bchOffer.offerTxid, '15000');
+      ctx.advanceTime(301);
+      const expired = await ctx.jsonReq<{ trade: StoredTrade }>('GET', `/api/trades/${taken.data.trade.id}`);
+      expect(expired.data.trade.status).toBe('ResolvedSeller');
+      const { data } = await ctx.jsonReq('GET', '/api/admin/accounts', undefined, ADMIN);
+      expect(data.bot.addressCount).toBe(2);
+      const back = await ctx.provider.getUtxos(botWallet.receiveAddress(DEMO_TRADE_INDEX_BASE));
+      const main = await ctx.provider.getUtxos(botWallet.receiveAddress(0));
+      const total = [...back, ...main].reduce((sum, u) => sum + u.satoshis, 0n);
+      expect(data.bot.bchSats).toBe(total.toString());
+    });
   });
 });

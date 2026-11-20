@@ -12,6 +12,7 @@ import {
   type FeeRates,
   type VerdictHex,
 } from '../protocol/index.js';
+import { readServiceAccounts } from './accounts.js';
 import { DemoLimitError, type DemoAsset, type DemoSeller } from './demo.js';
 import type { OracleService } from './oracle.js';
 import { SignInRequiredError, SponsorshipLimitError, type CampfireService, type SignInProof } from './service.js';
@@ -110,6 +111,13 @@ export function createApiHandler(deps: {
         const body = await readJson<FeeRates>(req);
         const rates = await service.setFeeRates(body);
         return jsonResponse({ ...rates, maxBps: MAX_FEE_BPS, dustLimitSats: Number(FEE_DUST_LIMIT_SATS) });
+      }
+
+      // GET /api/admin/accounts (admin): addresses and balances of the bot and of the arbiter and oracle fee
+      // addresses. The addresses are public, but each read is a mainnet lookup, so only the admin triggers it.
+      if (method === 'GET' && path === '/api/admin/accounts') {
+        requireAdmin(req);
+        return jsonResponse(await readServiceAccounts({ service, oracle, demo }));
       }
 
       // POST /api/identities/challenge: a sign-in challenge for the wallet to sign with defi/0 (protocol section 1).

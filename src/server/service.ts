@@ -10,7 +10,7 @@ import {
   sha256,
   utf8ToBin,
 } from '@bitauth/libauth';
-import type { NetworkProvider } from 'cashscript';
+import type { NetworkProvider, Utxo } from 'cashscript';
 import {
   BCH_ASSET,
   DEFAULT_FEE_RATES,
@@ -192,6 +192,11 @@ export class CampfireService {
 
   get demoSellerIdentity(): string | undefined {
     return this.options.demoSellerIdentity;
+  }
+
+  // Coins at an address, for the balances of the service's own accounts (accounts.ts).
+  getAddressUtxos(address: string): Promise<Utxo[]> {
+    return this.options.provider.getUtxos(address);
   }
 
   // A trade is a demo trade only when the demo seller bot is its seller; clients cannot claim it.
@@ -685,8 +690,11 @@ export class CampfireService {
   }
 
   // The oracle is paid only when the offer floats with the market, so it signed the trade's price. Public so the
-  // demo seller can count the fees before it takes a buy offer.
-  async feesFor(doc: OfferDocument, amount: string): Promise<TradeFee[]> {
+  // demo seller can count the fees before it takes a buy offer, or before a trade it might fund.
+  async feesFor(
+    doc: Pick<OfferDocument, 'asset' | 'assetDecimals' | 'arbiter' | 'oracle'> & { price: Pick<OfferDocument['price'], 'type'> },
+    amount: string,
+  ): Promise<TradeFee[]> {
     const rates = await this.getFeeRates();
     const oraclePk = doc.price.type === 'floating' ? doc.oracle?.toLowerCase() : undefined;
     if (rates.arbiterBps === 0 && (rates.oracleBps === 0 || !oraclePk)) return [];

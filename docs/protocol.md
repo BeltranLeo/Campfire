@@ -394,6 +394,7 @@ The seller pays a fee to the arbiter and, on a floating-price trade, to the pric
 - **Value.** A BCH trade is worth its amount. A PUSD trade is worth its dollar amount at the oracle's BCH/USD price at request time. A trade in any other token pays no fee.
 - **Paid in BCH.** Each fee is a P2PKH output, without tokens, to `hash160` of the role's key in the terms (`arbiterPk`, `oraclePk`). If the offer names another arbiter, that arbiter is paid.
 - **Rounding and dust.** Fees round down; a fee below 546 sats is left out.
+- **Balances.** `GET /api/admin/accounts` (admin token) returns the addresses and BCH and PUSD balances of the service's fee addresses and of the demo seller (section 8), and whether the demo seller can fund a trade at its maximum. The arbiter console shows them.
 - **Fixed-price offers** have no oracle, so they pay no oracle fee.
 - **Checks.** The terms are refused if a fee pays a key other than its role's, appears twice, is below the dust limit, or, on a BCH trade, is above 5% of the amount. The seller's client refuses terms whose fees differ from the ones shown with the request. The service counts the trade as funded only if the funding transaction has an output of at least each fee to its address.
 - **Not refundable.** The fees are paid with the deposit, so they stay paid if the trade is later cancelled or refunded.

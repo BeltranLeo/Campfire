@@ -5,6 +5,7 @@ import { ArbiterTokenForm } from '../components/ArbiterTokenForm';
 import { Button } from '../components/Button';
 import { FeeRatesForm } from '../components/FeeRatesForm';
 import { ProvenanceTag } from '../components/Provenance';
+import { ServiceAccounts } from '../components/ServiceAccounts';
 import { EmptyState, Notice, Skeleton } from '../components/States';
 import { useConfig } from '../config';
 import { formatAmount, formatDateTime, formatFiatAmount } from '../format';
@@ -35,6 +36,12 @@ export function ArbiterList() {
             <div className="cf-card__section cf-stack">
               <h2 className="cf-heading">Service fees</h2>
               <FeeRatesForm token={token} />
+            </div>
+          </section>
+          <section className="cf-card" data-flush>
+            <div className="cf-card__section cf-stack">
+              <h2 className="cf-heading">Service accounts</h2>
+              <ServiceAccounts token={token} />
             </div>
           </section>
         </>

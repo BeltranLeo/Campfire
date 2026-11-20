@@ -52,6 +52,7 @@ import {
   type OfferDocument,
   type WalletSpendableUtxo,
 } from '../protocol/index.js';
+import { sumCoins } from './accounts.js';
 import { FUNDING_WINDOW_SEC, SponsorshipLimitError, type CampfireService, type OfferView } from './service.js';
 import type { StoredTrade, TradeState } from './storage.js';
 
@@ -184,6 +185,19 @@ function compressedPublicKeyHex(privateKey: Uint8Array): string {
   return binToHex(pub);
 }
 
+// The rule the bot funds by: the escrow's sats, the fees and 2,000 sats of margin for the funding fee and the
+// change outputs, plus the tokens of a token trade. Shared by checkBalance and the administration panel.
+export function hasFundsFor(utxos: readonly Utxo[], trade: Pick<StoredTrade, 'asset' | 'amount' | 'fees'>): boolean {
+  const expected = expectedEscrowFunding(trade);
+  const sats = utxos.reduce((sum, u) => sum + u.satoshis, 0n);
+  const tokens = expected.token
+    ? utxos
+        .filter((u) => u.token?.category.toLowerCase() === expected.token!.category && !u.token.nft)
+        .reduce((sum, u) => sum + u.token!.amount, 0n)
+    : 0n;
+  return sats >= expected.satoshis + totalFeeSats(trade.fees) + 2000n && (!expected.token || tokens >= expected.token.amount);
+}
+
 export function demoAssetId(asset: DemoAsset): string {
   return asset === 'BCH' ? BCH_ASSET : PUSD_CATEGORY;
 }
@@ -259,15 +273,20 @@ export class DemoSeller {
     return trades.filter((t) => t.sellerIdentity === this.identity);
   }
 
-  // Spendable coins: the main address plus the payout addresses of trades that paid the bot back
-  // (cancel, arbitrate for the seller, refund). Offer markers are never spent here.
-  async spendableUtxos(): Promise<WalletSpendableUtxo[]> {
+  // The receive indices that hold spendable coins: the main address plus the payout addresses of trades
+  // that paid the bot back (cancel, arbitrate for the seller, refund). Offer markers are never spent here.
+  private async walletIndices(): Promise<Set<number>> {
     const indices = new Set<number>([DEMO_MAIN_INDEX]);
     for (const t of await this.botTrades()) {
       if (SELLER_PAYOUT_STATES.includes(t.status) && t.sellerReceiveIndex !== undefined) {
         indices.add(t.sellerReceiveIndex);
       }
     }
+    return indices;
+  }
+
+  async spendableUtxos(walletIndices?: Set<number>): Promise<WalletSpendableUtxo[]> {
+    const indices = walletIndices ?? (await this.walletIndices());
     const seen = new Set<string>();
     const result: WalletSpendableUtxo[] = [];
     for (const index of indices) {
@@ -407,21 +426,46 @@ export class DemoSeller {
   // Declines before accepting when the bot cannot pay the escrow, so an empty bot does not keep
   // trades stuck in Accepted (holding active slots) until the funding window ends.
   private async checkBalance(trade: Pick<StoredTrade, 'asset' | 'amount' | 'fees'>): Promise<void> {
-    const expected = expectedEscrowFunding(trade);
-    const feeSats = totalFeeSats(trade.fees);
-    const utxos = await this.spendableUtxos();
-    const sats = utxos.reduce((sum, u) => sum + u.satoshis, 0n);
-    const tokens = expected.token
-      ? utxos
-          .filter((u) => u.token?.category.toLowerCase() === expected.token!.category && !u.token.nft)
-          .reduce((sum, u) => sum + u.token!.amount, 0n)
-      : 0n;
-    // 2,000 sats of margin for the funding fee and the change outputs.
-    if (sats < expected.satoshis + feeSats + 2000n || (expected.token && tokens < expected.token.amount)) {
+    if (!hasFundsFor(await this.spendableUtxos(), trade)) {
       throw new DemoLimitError(
         'The demo seller has run out of funds for this offer. Please try again later.',
       );
     }
+  }
+
+  // What the bot holds and whether it can fund a trade at its maximum, for the administration panel.
+  // The fees are counted as on the bot's own offers: floating price, so the oracle is paid too.
+  async balance(): Promise<{
+    sats: bigint;
+    pusdUnits: bigint;
+    addressCount: number;
+    canFundMax: Record<DemoAsset, boolean | null>;
+  }> {
+    const service = this.options.service;
+    const indices = await this.walletIndices();
+    const utxos = await this.spendableUtxos(indices);
+    const canFundMax = async (asset: DemoAsset): Promise<boolean | null> => {
+      const isBch = asset === 'BCH';
+      const amount = (isBch ? this.limits.maxBchSats : this.limits.maxPusdUnits).toString();
+      try {
+        const fees = await service.feesFor(
+          {
+            asset: demoAssetId(asset),
+            assetDecimals: isBch ? BCH_DECIMALS : PUSD_DECIMALS,
+            arbiter: service.arbiterPublicKeyHex,
+            oracle: service.oraclePublicKeyHex,
+            price: { type: 'floating' },
+          },
+          amount,
+        );
+        return hasFundsFor(utxos, { asset: demoAssetId(asset), amount, fees });
+      } catch {
+        // A PUSD trade's fees need the BCH/USD price; without it the answer is unknown, not "no".
+        return null;
+      }
+    };
+    const [bch, pusd] = await Promise.all([canFundMax('BCH'), canFundMax('PUSD')]);
+    return { ...sumCoins(utxos), addressCount: indices.size, canFundMax: { BCH: bch, PUSD: pusd } };
   }
 
   // Called before a take on a demo offer is recorded.

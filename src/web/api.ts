@@ -66,6 +66,35 @@ export interface FeeRatesInfo {
   dustLimitSats: number;
 }
 
+/** One of the service's own accounts, as GET /api/admin/accounts returns it (src/server/accounts.ts). */
+export interface AccountBalance {
+  address: string;
+  tokenAddress: string;
+  /** Base units as strings: sats and PUSD cents. */
+  bchSats: string;
+  pusdUnits: string;
+}
+
+/** An account whose lookup failed; the others are still shown. */
+export interface AccountError {
+  address: string;
+  error: string;
+}
+
+export interface BotAccount extends AccountBalance {
+  addressCount: number;
+  canFundMax: { BCH: boolean | null; PUSD: boolean | null };
+  maxBchSats: string;
+  maxPusdUnits: string;
+}
+
+export interface ServiceAccounts {
+  bchUsd: string | null;
+  bot: BotAccount | AccountError | null;
+  oracle: AccountBalance | AccountError;
+  arbiter: AccountBalance | AccountError;
+}
+
 // --- Shapes used by the web app (see src/server/http.ts and src/server/service.ts) ---
 
 export type TradeState =
