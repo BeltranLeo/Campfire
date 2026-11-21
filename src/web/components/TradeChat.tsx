@@ -19,6 +19,8 @@ import { formatHourMinute } from '../format';
 import { usePoll } from '../hooks/usePoll';
 import { readSessionKey } from '../take';
 import { useWallet } from '../wallet';
+import { useMessages } from '../lang';
+import type { Messages } from '../messages';
 import { Button } from './Button';
 import { ChatImageView } from './ChatImage';
 import { Notice, Skeleton } from './States';
@@ -28,11 +30,11 @@ import { Notice, Skeleton } from './States';
 // `/trade/:id?chat` scrolls the card into view once (the /chats rows link there).
 
 const POLL_MS = 3000;
-const INTRO = 'End-to-end encrypted. Campfire relays ciphertext it cannot read. The arbiter can read this chat only if a dispute is opened.';
 // Within this many pixels of the end the list counts as scrolled to the newest message.
 const BOTTOM_SLACK = 24;
 
 export function TradeChat({ trade, role }: { trade: Trade; role: ChatRole }) {
+  const t = useMessages().chat;
   const sessionKey = readSessionKey(trade.id);
   const state = chatState(trade, role, sessionKey);
   const sectionRef = useRef<HTMLElement>(null);
@@ -57,7 +59,7 @@ export function TradeChat({ trade, role }: { trade: Trade; role: ChatRole }) {
     body = (
       <div className="cf-chat">
         <div className="cf-msg" data-system>
-          {notOpenText(trade, role)}
+          {notOpenText(t, trade, role)}
         </div>
       </div>
     );
@@ -67,8 +69,8 @@ export function TradeChat({ trade, role }: { trade: Trade; role: ChatRole }) {
     <section ref={sectionRef} id="chat" className="cf-card tr-chat" data-flush>
       <div className="cf-card__section">
         <div className="cf-row" data-between style={{ marginBottom: 'var(--space-3)' }}>
-          <h2 className="cf-heading">Chat</h2>
-          <span className="cf-small cf-muted">Encrypted</span>
+          <h2 className="cf-heading">{t.title}</h2>
+          <span className="cf-small cf-muted">{t.encrypted}</span>
         </div>
         {body}
       </div>
@@ -78,14 +80,15 @@ export function TradeChat({ trade, role }: { trade: Trade; role: ChatRole }) {
 
 // Invented copy: the design only shows an open chat. The chat opens when the trade is accepted, which on a sell
 // offer is the seller's step and on a buy offer the buyer's.
-function notOpenText(trade: Trade, role: ChatRole): string {
-  if (isFinalState(trade.status)) return 'There is no chat: the trade ended before it was accepted.';
+function notOpenText(t: Messages['chat'], trade: Trade, role: ChatRole): string {
+  if (isFinalState(trade.status)) return t.endedBeforeAccept;
   const accepter: ChatRole = trade.side === 'buy' ? 'buyer' : 'seller';
-  return accepter === role ? 'The chat opens once you accept the trade.' : `The chat opens once the ${accepter} accepts the trade.`;
+  return accepter === role ? t.opensOnYourAccept : t.opensOnTheirAccept(accepter);
 }
 
 function ChatThread({ trade, role, sessionKey, open }: { trade: Trade; role: ChatRole; sessionKey: string | null; open: boolean }) {
   const { identity } = useWallet();
+  const t = useMessages().chat;
   // The feed holds what was received, so each poll asks only for the messages it has not seen.
   const feed = useMemo(() => createChatFeed(trade.id), [trade.id]);
   const poll = usePoll(() => feed.load(), trade.id, open ? POLL_MS : undefined);
@@ -146,7 +149,7 @@ function ChatThread({ trade, role, sessionKey, open }: { trade: Trade; role: Cha
       poll.reload();
     } catch (err) {
       // Invented copy for anything other than the module's and the service's own messages.
-      setSendError(err instanceof ChatSendError || err instanceof ApiError ? err.message : 'The message could not be sent. Try again.');
+      setSendError(err instanceof ChatSendError || err instanceof ApiError ? err.message : t.notSent);
     } finally {
       setSending(false);
     }
@@ -166,7 +169,7 @@ function ChatThread({ trade, role, sessionKey, open }: { trade: Trade; role: Cha
       justSent.current = true;
       poll.reload();
     } catch (err) {
-      setSendError(err instanceof ChatSendError || err instanceof ApiError ? err.message : 'The image could not be sent. Try again.');
+      setSendError(err instanceof ChatSendError || err instanceof ApiError ? err.message : t.imageNotSent);
     } finally {
       setSending(false);
     }
@@ -177,7 +180,7 @@ function ChatThread({ trade, role, sessionKey, open }: { trade: Trade; role: Cha
     // Invented copy for the error.
     messages =
       poll.error && !poll.loading ? (
-        <Notice tone="danger" title="The chat could not be loaded">
+        <Notice tone="danger" title={t.loadError}>
           {poll.error instanceof Error ? poll.error.message : String(poll.error)}
         </Notice>
       ) : (
@@ -187,7 +190,7 @@ function ChatThread({ trade, role, sessionKey, open }: { trade: Trade; role: Cha
     // "No messages yet." is from the design; the closed variant is invented copy.
     messages = (
       <div className="cf-msg" data-system>
-        {open ? 'No messages yet.' : 'No messages were sent in this trade.'}
+        {open ? t.noMessages : t.noMessagesClosed}
       </div>
     );
   } else {
@@ -195,11 +198,11 @@ function ChatThread({ trade, role, sessionKey, open }: { trade: Trade; role: Cha
       <div key={line.id} className="cf-msg" data-own={line.author === 'me' || undefined}>
         {/* Invented copy: the author comes from the signature checked in this browser, and the design has no
             message that neither session key signed, nor one this browser cannot decrypt. */}
-        {line.author === 'unverified' && <strong>Not signed by either party. </strong>}
+        {line.author === 'unverified' && <strong>{t.unsigned}</strong>}
         {line.image ? (
           <ChatImageView image={line.image} />
         ) : (
-          (line.text ?? <em>This message could not be decrypted.</em>)
+          (line.text ?? <em>{t.undecryptable}</em>)
         )}
         <small>{formatHourMinute(new Date(line.createdAt * 1000))}</small>
       </div>
@@ -210,13 +213,13 @@ function ChatThread({ trade, role, sessionKey, open }: { trade: Trade; role: Cha
     <>
       <div ref={listRef} className="cf-chat" onScroll={onScroll}>
         <div className="cf-msg" data-system>
-          {INTRO}
+          {t.intro}
         </div>
         {messages}
         {!open && (
           // Invented copy.
           <div className="cf-msg" data-system>
-            The chat closed when the trade ended.
+            {t.closed}
           </div>
         )}
       </div>
@@ -226,8 +229,8 @@ function ChatThread({ trade, role, sessionKey, open }: { trade: Trade; role: Cha
             <input
               id="chat-input"
               className="cf-input cf-grow"
-              aria-label="Message"
-              placeholder="Write a message"
+              aria-label={t.message}
+              placeholder={t.placeholder}
               autoComplete="off"
               maxLength={MAX_CHAT_MESSAGE_CHARS}
               value={text}
@@ -238,12 +241,12 @@ function ChatThread({ trade, role, sessionKey, open }: { trade: Trade; role: Cha
                 if (sendError) setSendError(null);
               }}
             />
-            <input ref={fileRef} type="file" accept={CHAT_IMAGE_ACCEPT} hidden aria-label="Receipt image" onChange={attach} />
+            <input ref={fileRef} type="file" accept={CHAT_IMAGE_ACCEPT} hidden aria-label={t.receiptImage} onChange={attach} />
             <Button variant="ghost" disabled={!identity || sending} onClick={() => fileRef.current?.click()}>
-              Attach receipt
+              {t.attach}
             </Button>
             <Button type="submit" busy={sending} disabled={!identity || !text.trim()}>
-              Send
+              {t.send}
             </Button>
           </div>
           {sendError && <Notice tone="danger">{sendError}</Notice>}

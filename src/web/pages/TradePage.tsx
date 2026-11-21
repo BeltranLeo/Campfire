@@ -656,6 +656,7 @@ function PaymentDetails({ trade, fiat }: { trade: Trade; fiat: string }) {
     );
   }
   const { simulated, notice: _notice, method, reference, ...rest } = state.view.fields;
+  const detailLabels = text().seller.detailLabels;
   const rows = (
     <dl className="cf-dl">
       {method !== undefined && (
@@ -674,7 +675,8 @@ function PaymentDetails({ trade, fiat }: { trade: Trade; fiat: string }) {
       )}
       {Object.entries(rest).map(([label, value]) => (
         <span key={label} style={{ display: 'contents' }}>
-          <dt>{label}</dt>
+          {/* The seller's browser writes the field names in English; known ones are shown in the reader's language. */}
+          <dt>{detailLabels[label] ?? label}</dt>
           <dd>{String(value)}</dd>
         </span>
       ))}

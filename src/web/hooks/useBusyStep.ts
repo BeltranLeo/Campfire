@@ -2,8 +2,8 @@ import { useState } from 'react';
 import { text } from '../messages';
 import { describeProgress, useWalletCoins } from '../walletCoins';
 
-/** The step that reads the wallet's coins: its label follows the scan ("Reading your balance… 25%"). */
-export const READING_WALLET = 'Reading your wallet…';
+/** The step that reads the wallet's coins: its label follows the scan ("Reading your balance… 25%"). A marker, not the label. */
+export const READING_WALLET = 'reading-wallet';
 
 /**
  * What a long action is doing right now, for its busy button, so a slow wallet never looks like a frozen page.
@@ -12,7 +12,7 @@ export const READING_WALLET = 'Reading your wallet…';
 export function useBusyStep() {
   const [step, setStep] = useState<string | null>(null);
   const { progress } = useWalletCoins();
-  const label = step === READING_WALLET ? (describeProgress(progress) ?? READING_WALLET) : step;
+  const label = step === READING_WALLET ? (describeProgress(progress) ?? text().seller.readingWallet) : step;
   return { label, setStep };
 }
 

@@ -210,9 +210,9 @@ interface SendParams {
 async function sendPlaintext(params: SendParams, plaintext: string): Promise<ChatMessage> {
   const { trade, role, sessionPrivateKey } = params;
   const state = chatState(trade, role, sessionPrivateKey);
-  if (state === 'not-open') throw new ChatSendError('The chat opens once the trade is accepted.');
+  if (state === 'not-open') throw new ChatSendError(text().chat.notOpen);
   if (state === 'no-key') throw new ChatSendError(noChatKey());
-  if (state === 'closed') throw new ChatSendError('The chat closed when the trade ended.');
+  if (state === 'closed') throw new ChatSendError(text().chat.closed);
   const key = chatKeyHex(trade, role, sessionPrivateKey);
   if (!key || !sessionPrivateKey || !trade.tradeId) throw new ChatSendError(noChatKey());
   const ciphertext = await encryptChatMessage(key, plaintext);
@@ -226,12 +226,13 @@ async function sendPlaintext(params: SendParams, plaintext: string): Promise<Cha
 }
 
 export async function sendChatMessage(params: SendParams & { text: string }): Promise<ChatMessage> {
-  const text = params.text.trim();
-  if (!text) throw new ChatSendError('Write a message first.');
-  if (text.length > MAX_CHAT_MESSAGE_CHARS) throw new ChatSendError(`Messages can be at most ${MAX_CHAT_MESSAGE_CHARS} characters long.`);
+  const t = text().chat;
+  const message = params.text.trim();
+  if (!message) throw new ChatSendError(t.writeFirst);
+  if (message.length > MAX_CHAT_MESSAGE_CHARS) throw new ChatSendError(t.tooLong(MAX_CHAT_MESSAGE_CHARS));
   // Text that starts like an image would be shown as one, so it is not sent as text.
-  if (looksLikeChatImage(text)) throw new ChatSendError('That message cannot be sent.');
-  return sendPlaintext(params, text);
+  if (looksLikeChatImage(message)) throw new ChatSendError(t.cannotSend);
+  return sendPlaintext(params, message);
 }
 
 /** Sends a receipt: an image the browser already shrank (src/web/chatImage.ts), as one more encrypted, signed message. */
@@ -240,7 +241,7 @@ export async function sendChatImage(params: SendParams & { image: { bytes: Uint8
   try {
     plaintext = encodeChatImage(params.image.bytes, params.image.mime);
   } catch (err) {
-    throw new ChatSendError(err instanceof Error ? err.message : 'The image could not be sent.');
+    throw new ChatSendError(err instanceof Error ? err.message : text().chat.imageFailed);
   }
   return sendPlaintext(params, plaintext);
 }

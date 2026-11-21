@@ -24,6 +24,17 @@ describe('the interface language', () => {
         : [path];
     expect(keys(MESSAGES.es)).toEqual(keys(MESSAGES.en));
     expect(MESSAGES.es.landing.how).toHaveLength(MESSAGES.en.landing.how.length);
+    expect(MESSAGES.es.tradePage.disputeReasons).toHaveLength(MESSAGES.en.tradePage.disputeReasons.length);
+    expect(MESSAGES.es.seller.disputeReasons).toHaveLength(MESSAGES.en.seller.disputeReasons.length);
+  });
+
+  it('has a label for every field name the seller seals, which stay in English', async () => {
+    const { accountLabel, composePaymentDetails } = await import('../src/web/seller.js');
+    for (const fiat of ['ARS', 'USD']) {
+      const sealed = JSON.parse(composePaymentDetails({ account: 'a', holder: 'h', note: 'n' }, fiat)) as Record<string, string>;
+      expect(Object.keys(sealed)).toEqual([accountLabel(fiat), 'Account holder', 'Note']);
+      for (const key of Object.keys(sealed)) expect(MESSAGES.es.seller.detailLabels[key]).toBeTruthy();
+    }
   });
 });
 
@@ -35,6 +46,10 @@ describe('Spanish outside components', () => {
     try {
       expect(tradeTitle('Released', 'buyer', '0.001 BCH', '493.82 ARS')).toBe('Compraste 0.001 BCH por 493.82 ARS');
       expect(lockedCoins('BCH')).toBe('los BCH');
+      const { describeScan } = await import('../src/web/coins.js');
+      expect(describeScan({ paths: [{ name: 'receive', scanned: 20, lastUsed: -1 }], noChangePath: true } as never)).toBe(
+        'Campfire revisó 20 direcciones de recepción. Esta billetera no compartió sus direcciones de cambio, así que no se ven las monedas enviadas ahí.',
+      );
     } finally {
       setActiveLang('en');
     }

@@ -28,6 +28,7 @@ import { computeTradeId, type TradeTerms } from '../protocol/trades.js';
 import type { OfferDocument, Trade } from './api';
 import { spendableBch, tokenBalance } from './coins';
 import { formatBch, fromBaseUnits } from './format';
+import { text } from './messages';
 import type { SessionStore } from './take';
 import { TradeActionError, checkForArbiter } from './trade';
 
@@ -64,7 +65,7 @@ export async function buildAcceptBody(params: {
   details: string;
 }): Promise<AcceptBody> {
   const details = params.details.trim();
-  if (details.length === 0) throw new TradeActionError('Write the payment details the buyer should pay to.');
+  if (details.length === 0) throw new TradeActionError(text().seller.writeDetails);
   return {
     sellerIdentity: params.identity,
     sellerPk: binToHex(derivePubkeyFromXpub(params.defiXpub, params.defiIndex)),
@@ -127,7 +128,7 @@ export async function sealPaymentDetails(params: {
   details: string;
 }): Promise<SealedDetails> {
   const details = params.details.trim();
-  if (details.length === 0) throw new TradeActionError('Write how the buyer should pay you.');
+  if (details.length === 0) throw new TradeActionError(text().seller.writeHow);
   const encryptedPaymentDetails = await encryptPaymentDetails(params.sessionPrivateKey, params.buyerSessionPk, details);
   return { encryptedPaymentDetails, paymentDetailsSignature: signPaymentDetails(params.sessionPrivateKey, params.tradeId, encryptedPaymentDetails) };
 }
@@ -193,14 +194,11 @@ export function assertCanDeposit(trade: Pick<Trade, 'asset' | 'amount' | 'fees'>
     const name = tokenName(check.token.category);
     const decimals = check.token.category === PUSD_CATEGORY ? 2 : 0;
     throw new TradeActionError(
-      `The deposit needs ${fromBaseUnits(check.token.need, decimals)} ${name} and Campfire can see ${fromBaseUnits(check.token.have, decimals)} in this wallet. Send some ${name} to it and try again.`,
+      text().seller.depositNeedsToken(fromBaseUnits(check.token.need, decimals), name, fromBaseUnits(check.token.have, decimals)),
     );
   }
   if (check.bch.have < check.bch.need) {
-    const why = check.token ? ' The tokens travel with a small amount of BCH, and the fees are paid in BCH.' : '';
-    throw new TradeActionError(
-      `The deposit needs about ${formatBch(check.bch.need)} and Campfire can see ${formatBch(check.bch.have)} in this wallet.${why} Send some BCH to it and try again.`,
-    );
+    throw new TradeActionError(text().seller.depositNeedsBch(formatBch(check.bch.need), formatBch(check.bch.have), Boolean(check.token)));
   }
 }
 
@@ -230,58 +228,59 @@ export function checkAcceptedTrade(
     bchUsd?: string | null;
   },
 ): CheckedTrade {
-  const stop = (what: string) => new TradeActionError(`${what} Nothing was deposited.`);
+  const stop = (what: string) => new TradeActionError(text().seller.nothingDeposited(what));
+  const why = text().seller.stop;
   if (!trade.termsJson || !trade.tradeId || !trade.escrowAddress || trade.sellerDefiIndex === undefined || trade.sellerReceiveIndex === undefined) {
-    throw stop('This trade has no escrow yet.');
+    throw stop(why.noEscrow);
   }
   let terms: TradeTerms;
   let contract: Contract;
   try {
     terms = JSON.parse(trade.termsJson) as TradeTerms;
-    if (binToHex(computeTradeId(trade.termsJson)) !== trade.tradeId.toLowerCase()) throw stop('The trade ID is not the hash of the terms.');
+    if (binToHex(computeTradeId(trade.termsJson)) !== trade.tradeId.toLowerCase()) throw stop(why.badId);
     contract = createEscrowContract(terms, trade.tradeId, params.provider);
   } catch (err) {
     if (err instanceof TradeActionError) throw err;
-    throw stop('The terms of this trade are not valid.');
+    throw stop(why.badTerms);
   }
-  if (contract.address !== trade.escrowAddress) throw stop('The escrow address is not the contract these terms make.');
+  if (contract.address !== trade.escrowAddress) throw stop(why.badAddress);
   if (!verifyDerivedPubkey(params.defiXpub, trade.sellerDefiIndex, terms.sellerPk)) {
-    throw stop('The terms name a signing key that does not belong to this wallet. Connect the wallet you accepted with.');
+    throw stop(why.foreignKey);
   }
   if (!verifyDerivedPayoutPkh(params.receiveXpub, trade.sellerReceiveIndex, terms.sellerPayoutPkh)) {
-    throw stop('The terms return the coins to an address that does not belong to this wallet.');
+    throw stop(why.foreignRefund);
   }
   if (terms.amount !== trade.amount || terms.asset !== trade.asset || terms.offerTxid !== trade.offerTxid) {
-    throw stop('The terms do not match the request.');
+    throw stop(why.notRequest);
   }
   // The fees were shown with the request; the terms must not charge anything else. Their addresses and the
   // cap on BCH trades were already checked with the terms (validateTradeFees).
   if (!sameFees(terms.fees, trade.fees)) {
-    throw stop('The terms charge different service fees than the ones shown with this request.');
+    throw stop(why.otherFees);
   }
   // The terms do not carry the BCH price a PUSD trade's fees were computed with, so the cap is checked here
   // against a fresh one, with room for the price to move since the request.
   if (terms.asset.toLowerCase() === PUSD_CATEGORY && totalFeeSats(terms.fees) > 0n) {
-    if (!params.bchUsd) throw stop('Campfire could not get a BCH price to check the service fees.');
+    if (!params.bchUsd) throw stop(why.noBchPrice);
     const value = tradeValueSats({ asset: terms.asset, amount: terms.amount, assetDecimals: 2, bchUsd: params.bchUsd }) ?? 0n;
     const cap = (value * BigInt(MAX_FEE_BPS) * (100n + PUSD_FEE_PRICE_SLACK_PCT)) / (10_000n * 100n);
-    if (totalFeeSats(terms.fees) > cap) throw stop('The service fees are above the most Campfire may charge for this trade.');
+    if (totalFeeSats(terms.fees) > cap) throw stop(why.feesTooHigh);
   }
   if (params.offer && terms.arbiterPk.toLowerCase() !== params.offer.arbiter.toLowerCase()) {
-    throw stop('The terms name a different arbiter than your offer.');
+    throw stop(why.otherArbiter);
   }
   if (terms.refundTime > params.now + MAX_REFUND_DELAY_SEC) {
-    throw stop('The refund time is unusually far away, so your coins could stay locked for too long.');
+    throw stop(why.farRefund);
   }
   if (params.sessionPrivateKey) {
     const pk = secp256k1.derivePublicKeyCompressed(hexToBin(params.sessionPrivateKey));
     if (typeof pk === 'string' || binToHex(pk) !== terms.sellerSessionPk.toLowerCase()) {
-      throw stop("The terms name a different chat key than this browser's.");
+      throw stop(why.otherChatKey);
     }
   }
   const prices = checkForArbiter(trade, params.offer);
-  if (prices.quote === 'wrong-signature' || prices.quote === 'other-oracle') throw stop("The price quote is not signed by your offer's oracle.");
-  if (prices.fiat && !prices.fiat.ok) throw stop('The fiat amount does not match the price and the margin.');
+  if (prices.quote === 'wrong-signature' || prices.quote === 'other-oracle') throw stop(why.otherOracle);
+  if (prices.fiat && !prices.fiat.ok) throw stop(why.badFiat);
   return { terms, contract };
 }
 
@@ -317,19 +316,19 @@ export function buildDeposit(params: {
  */
 export async function buildSellerRelease(trade: Trade, provider: NetworkProvider, sellerDefiXpub: string): Promise<WalletContractSpendRequest> {
   if (!trade.termsJson || !trade.tradeId || !trade.fundingTxid || trade.sellerDefiIndex === undefined) {
-    throw new TradeActionError('There is no deposit to release yet.');
+    throw new TradeActionError(text().seller.noDepositYet);
   }
   const terms = JSON.parse(trade.termsJson) as TradeTerms;
   // The wallet signs with whatever key it is told to and does not compare it with the contract (docs/decisions.md).
   if (!verifyDerivedPubkey(sellerDefiXpub, trade.sellerDefiIndex, terms.sellerPk)) {
-    throw new TradeActionError('This wallet is not the one that accepted this trade. Connect the wallet you used to accept it.');
+    throw new TradeActionError(text().seller.notYourWallet);
   }
   const contract = createEscrowContract(terms, trade.tradeId, provider);
   const utxos = await provider.getUtxos(contract.address);
   const utxo = utxos.find(
     (u) => u.txid === trade.fundingTxid && (trade.fundingVout === undefined || u.vout === trade.fundingVout) && matchesEscrowFunding(u, terms),
   );
-  if (!utxo) throw new TradeActionError('The deposit is not visible on-chain. Try again in a moment.');
+  if (!utxo) throw new TradeActionError(text().seller.depositNotVisible);
   return buildReleaseRequest({ contract, utxo, buyerPayoutPkh: terms.buyerPayoutPkh, sellerDefiIndex: trade.sellerDefiIndex });
 }
 

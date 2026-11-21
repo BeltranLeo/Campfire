@@ -8,6 +8,8 @@ import { offers } from './i18n/offers';
 import { take } from './i18n/take';
 import { trade } from './i18n/trade';
 import { tradePage } from './i18n/tradePage';
+import { seller } from './i18n/seller';
+import { chat } from './i18n/chat';
 
 export type Lang = 'en' | 'es';
 
@@ -102,9 +104,8 @@ const en = {
   take: take.en,
   trade: trade.en,
   tradePage: tradePage.en,
-  chat: {
-    noKey: 'This browser does not have the key for this trade. Open it on the device where you started it.',
-  },
+  seller: seller.en,
+  chat: chat.en,
   landing: {
     title: 'Buy or sell Bitcoin Cash directly with another person',
     lead: 'No exchange holds your money. A contract on the Bitcoin Cash network locks the seller’s coins until the payment is done.',
@@ -267,9 +268,8 @@ const es: Messages = {
   take: take.es,
   trade: trade.es,
   tradePage: tradePage.es,
-  chat: {
-    noKey: 'Este navegador no tiene la clave de esta operación. Ábrela en el dispositivo donde la empezaste.',
-  },
+  seller: seller.es,
+  chat: chat.es,
   landing: {
     title: 'Compra o vende Bitcoin Cash directamente con otra persona',
     lead: 'Ninguna plataforma guarda tu dinero. Un contrato en la red de Bitcoin Cash bloquea las monedas del vendedor hasta que se completa el pago.',

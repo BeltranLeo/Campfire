@@ -3,6 +3,7 @@
 
 import { binToHex, hash160 } from '@bitauth/libauth';
 import type { NetworkProvider, Utxo } from 'cashscript';
+import { text } from './messages';
 import {
   derivePubkeyFromXpub,
   pkhToCashAddress,
@@ -278,11 +279,10 @@ export function tokenBalance(coins: WalletSpendableUtxo[], category: string): bi
 
 /** One sentence on where the scan looked, to show when the balance is not what the person expects. */
 export function describeScan(scan: WalletScan): string {
+  const t = text();
   const looked = [...scan.paths]
     .sort((a, b) => a.name.localeCompare(b.name))
-    .map((p) => `${p.scanned} ${p.name} addresses`)
-    .join(' and ');
-  return scan.noChangePath
-    ? `Campfire looked at ${looked}. This wallet did not share its change addresses, so coins sent there cannot be seen.`
-    : `Campfire looked at ${looked}.`;
+    .map((p) => t.seller.scannedPaths(p.scanned, p.name))
+    .join(` ${t.common.and} `);
+  return scan.noChangePath ? t.seller.noChangePath(looked) : t.seller.lookedAt(looked);
 }

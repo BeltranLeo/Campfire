@@ -34,7 +34,6 @@ import {
   clearSavedDeposit,
   EMPTY_PAYMENT_FIELDS,
   MAX_DETAILS_LENGTH,
-  accountLabel,
   clearSavedDetails,
   composePaymentDetails,
   findDeposit,
@@ -48,9 +47,11 @@ import {
   type SealedDetails,
 } from '../seller';
 import { browserStore, commitSession, generateSessionKeyPair, loadPendingSession, payoutAddress, readSessionKey, savePendingSession } from '../take';
-import { RELEASE_CHECKS, TradeActionError, actionProgress, disputeKeyHex, lockedCoins, releaseReady, signedPayoutPkh, type ReleaseCheck } from '../trade';
+import { RELEASE_CHECKS, TradeActionError, actionProgress, disputeKeyHex, releaseReady, signedPayoutPkh, type ReleaseCheck } from '../trade';
 import { freshWalletScan, refreshWalletCoins, useWalletCoins } from '../walletCoins';
 import { WalletDeclined, useWallet } from '../wallet';
+import { useMessages } from '../lang';
+import { MESSAGES, text } from '../messages';
 
 // The seller's side of one trade (Sell-Accept-*, Trade-Seller-*, Trade-BuyOffer-Seller screens): accept a request
 // and deposit into the escrow, wait for the buyer, release after checking the payment, or open a dispute. On a buy
@@ -58,13 +59,9 @@ import { WalletDeclined, useWallet } from '../wallet';
 // and the release; everything else is off-chain. The seller checks the terms the service built before every
 // signature (seller.ts), so a wrong address or key stops here and not on-chain.
 
-// Invented copy: generic reasons for a dispute, chosen from a list.
-const DISPUTE_REASONS = [
-  'The buyer marked it as paid but I received nothing',
-  'The amount I received is wrong',
-  'The buyer is not answering',
-  'Something else',
-];
+// Invented copy: generic reasons for a dispute, chosen from a list. Sent to the arbiter in English.
+const disputeReasons = () =>
+  MESSAGES.en.seller.disputeReasons.map((value, i) => ({ value, label: text().seller.disputeReasons[i] ?? value }));
 const BCH = { symbol: 'BCH', decimals: 8, isBch: true } as const;
 /** Stands in for localStorage when the browser blocks it: nothing is saved, nothing is found. */
 const NO_STORE = { getItem: () => null, setItem: () => undefined, removeItem: () => undefined };
@@ -76,6 +73,9 @@ export function SellerAction(props: { trade: Trade; amount: string; fiat: string
   const wallet = useWallet();
   const { identity, xpubs } = wallet;
   const { busy, error, run } = useTradeAction<Action>(trade, identity, props.onUpdate);
+  const messages = useMessages();
+  const t = messages.seller;
+  const tp = messages.tradePage;
   const [fields, setFields] = useState<PaymentFields>(EMPTY_PAYMENT_FIELDS);
   // The fields travel as one text, sealed for the buyer; '' while nothing is typed, so an earlier saved version counts.
   const details = composePaymentDetails(fields, trade.fiat);
@@ -84,7 +84,6 @@ export function SellerAction(props: { trade: Trade; amount: string; fiat: string
   const [ticked, setTicked] = useState<ReadonlySet<ReleaseCheck>>(new Set());
   const now = useNow(1000);
   const progress = actionProgress(trade.status, 'seller', trade.side);
-  const locked = lockedCoins(trade.asset);
 
   // Keys and coins are looked up while a request waits, so the buttons are ready when the seller decides.
   const preparing = trade.status === 'Requested' || trade.status === 'Accepted';
@@ -97,11 +96,11 @@ export function SellerAction(props: { trade: Trade; amount: string; fiat: string
   const isBch = trade.asset === 'BCH';
   const funding = expectedEscrowFunding(trade);
   // What the escrow holds. A token always travels with some BCH, which goes to the buyer with it.
-  const deposit = isBch ? formatAmount(funding.satoshis, BCH) : `${props.amount} plus ${formatBch(funding.satoshis)}`;
+  const deposit = isBch ? formatAmount(funding.satoshis, BCH) : t.depositPlus(props.amount, formatBch(funding.satoshis));
   const lockLabel = isBch ? deposit : props.amount;
   const breakdown = isBch
-    ? `${formatAmount(trade.amount, BCH)} for the buyer plus a ${formatBch(1000n)} fee budget for the closing transaction.`
-    : `${props.amount} and ${formatBch(funding.satoshis - 1000n)} for the buyer (tokens always travel with a little BCH), plus a ${formatBch(1000n)} fee budget for the closing transaction.`;
+    ? t.breakdownBch(formatAmount(trade.amount, BCH), formatBch(1000n))
+    : t.breakdownToken(props.amount, formatBch(funding.satoshis - 1000n), formatBch(1000n));
   const { symbol, decimals } = assetInfo(trade.asset, trade.assetDecimals, useConfig());
   const depositCheck = preparing && coins.data ? checkDeposit(trade, coins.data.coins) : null;
   const shortToken = depositCheck?.token !== undefined && depositCheck.token.have < depositCheck.token.need;
@@ -117,11 +116,11 @@ export function SellerAction(props: { trade: Trade; amount: string; fiat: string
 
   /** Asks the service to accept: the wallet must already cover the deposit, because accepting starts the funding window. */
   async function accept(): Promise<Trade> {
-    if (!identity || !xpubs || !prep.data || !trade.buyerSessionPk) throw new TradeActionError('Campfire is still preparing your wallet. Try again in a moment.');
+    if (!identity || !xpubs || !prep.data || !trade.buyerSessionPk) throw new TradeActionError(tp.stillPreparing);
     const store = browserStore();
     busyStep.setStep(READING_WALLET);
     assertCanDeposit(trade, (await withKeptElectrum(() => freshWalletScan({ receive: xpubs.receive, change: xpubs.change }))).coins);
-    busyStep.setStep('Accepting the buyer…');
+    busyStep.setStep(t.accepting);
     // The session key is saved before the request, so a lost answer can still be matched to its trade.
     const session = (store && loadPendingSession(store, trade.id)) || generateSessionKeyPair();
     if (store) savePendingSession(store, trade.id, session);
@@ -150,7 +149,7 @@ export function SellerAction(props: { trade: Trade; amount: string; fiat: string
     const store = browserStore();
     // Everything read from the chain before the wallet is asked runs in one block that is repeated if the connection
     // drops while the visitor is away (see withKeptElectrum). Nothing in it signs or deposits.
-    busyStep.setStep('Checking the terms…');
+    busyStep.setStep(messages.seller.checkingTerms);
     const prepared = await withKeptElectrum<Prepared>(async (provider) => {
       const { offer } = await apiGet<{ offer: Offer }>(`/api/offers/${t.offerTxid}`);
       const checked = checkAcceptedTrade(t, {
@@ -197,7 +196,7 @@ export function SellerAction(props: { trade: Trade; amount: string; fiat: string
     const { tx, record } = prepared;
     busyStep.setStep(null);
     const signedTxHex = await wallet.sign(tx.request, tx.inputPaths);
-    busyStep.setStep('Recording the deposit…');
+    busyStep.setStep(messages.seller.recordingDeposit);
     if (store) saveDeposit(store, t.id, signedTxHex);
     const recorded = await record(signedTxHex);
     if (store) clearSavedDeposit(store, t.id);
@@ -211,8 +210,8 @@ export function SellerAction(props: { trade: Trade; amount: string; fiat: string
     const saved = store && loadSavedDetails(store, t.id);
     if (details.trim() === '' && saved) return saved;
     const key = readSessionKey(t.id);
-    if (!key) throw new TradeActionError('This browser does not have the key for this trade, so it cannot encrypt the payment details. Nothing was locked.');
-    if (!t.buyerSessionPk || !t.tradeId) throw new TradeActionError('The buyer has not accepted yet. Nothing was locked.');
+    if (!key) throw new TradeActionError(messages.seller.noKeyToSeal);
+    if (!t.buyerSessionPk || !t.tradeId) throw new TradeActionError(messages.seller.buyerNotAccepted);
     const sealedNow = await sealPaymentDetails({ sessionPrivateKey: key, buyerSessionPk: t.buyerSessionPk, tradeId: t.tradeId, details });
     if (store) saveDetails(store, t.id, sealedNow);
     return sealedNow;
@@ -227,7 +226,7 @@ export function SellerAction(props: { trade: Trade; amount: string; fiat: string
   }
 
   async function acceptThenDeposit() {
-    const accepted = await run('accept', 'The request was not accepted', accept);
+    const accepted = await run('accept', tp.notAccepted, accept);
     if (!accepted || accepted.status !== 'Accepted') return;
     // If the answer to the accept was lost, the key is still waiting under the pending name: file it under the trade.
     const store = browserStore();
@@ -235,22 +234,22 @@ export function SellerAction(props: { trade: Trade; amount: string; fiat: string
       const pending = loadPendingSession(store, trade.id);
       if (pending && pending.publicKey === accepted.sellerSessionPk) commitSession(store, accepted.id, pending);
     }
-    await run('deposit', `${capitalize(locked)} ${trade.asset === 'BCH' ? 'was' : 'were'} not locked`, () => makeDeposit(accepted), accepted);
+    await run('deposit', t.notLocked(isBch), () => makeDeposit(accepted), accepted);
   }
 
   const depositOnly = () =>
-    run('deposit', `${capitalize(locked)} ${trade.asset === 'BCH' ? 'was' : 'were'} not locked`, () => makeDeposit(trade)).finally(() =>
+    run('deposit', t.notLocked(isBch), () => makeDeposit(trade)).finally(() =>
       busyStep.setStep(null),
     );
 
   const decline = () =>
-    run('decline', 'The request was not declined', () =>
+    run('decline', tp.notDeclined, () =>
       apiPost<{ trade: Trade }>(`/api/trades/${trade.id}/decline`, { sellerIdentity: identity }).then((r) => r.trade),
     );
 
   // The wallet signs the escrow's `release` path; the service checks it and broadcasts.
   const release = () =>
-    run('release', 'The coins were not released', async () => {
+    run('release', t.notReleased, async () => {
       if (!xpubs) throw new WalletDeclined();
       const built = await withKeptElectrum((provider) => buildSellerRelease(trade, provider, xpubs.defi));
       const signedTxHex = await wallet.sign(built.request, built.inputPaths);
@@ -259,7 +258,7 @@ export function SellerAction(props: { trade: Trade; amount: string; fiat: string
 
   // The chat key goes along when this browser has it, so the arbiter can read the messages (protocol section 6).
   const openDispute = (reason: string, more: string) =>
-    run('dispute', 'The dispute was not opened', () => {
+    run('dispute', tp.notDisputed, () => {
       const sharedTradeKeyHex = disputeKeyHex(readSessionKey(trade.id), trade.buyerSessionPk);
       const extra = more.trim();
       return apiPost<{ trade: Trade }>(`/api/trades/${trade.id}/dispute`, {
@@ -276,40 +275,36 @@ export function SellerAction(props: { trade: Trade; amount: string; fiat: string
   );
   const disputeButton = !disputing && (
     <Button variant="arbiter" disabled={busy !== null} onClick={() => setDisputing(true)}>
-      Open dispute
+      {t.openDispute}
     </Button>
   );
   const disputeForm = disputing && (
-    <DisputeForm reasons={DISPUTE_REASONS.map((value) => ({ value, label: value }))} busy={busy === 'dispute'} locked={busy !== null} onSend={openDispute} onBack={() => setDisputing(false)} />
+    <DisputeForm reasons={disputeReasons()} busy={busy === 'dispute'} locked={busy !== null} onSend={openDispute} onBack={() => setDisputing(false)} />
   );
   const walletNotices = (
     <>
       {shortToken && depositCheck?.token && coins.data && (
         // Invented copy: the design has no seller short of tokens.
-        <Notice tone="attention" title={`Your wallet does not have enough ${symbol}`}>
-          Locking needs {props.amount} and Campfire can see {fromBaseUnits(depositCheck.token.have, decimals)} {symbol} in this wallet.{' '}
-          {describeScan(coins.data)} Send some {symbol} to it: this page checks again every few seconds.{' '}
+        <Notice tone="attention" title={t.shortToken(symbol)}>
+          {t.shortTokenBody(props.amount, fromBaseUnits(depositCheck.token.have, decimals), symbol, describeScan(coins.data))}{' '}
           <button type="button" className="cf-copy" onClick={coins.reload}>
-            Check again
+            {t.checkAgain}
           </button>
         </Notice>
       )}
       {!shortToken && shortBch && depositCheck && coins.data && (
-        <Notice tone="attention" title="Your wallet does not have enough BCH">
-          Locking needs about {formatBch(depositCheck.bch.need)}
-          {isBch ? '' : ` besides the ${symbol}, for the BCH that travels with the tokens and the fees,`} and Campfire can see{' '}
-          {formatBch(depositCheck.bch.have)} in this wallet. {describeScan(coins.data)} Send some BCH to it: this page checks again every few
-          seconds.{' '}
+        <Notice tone="attention" title={t.shortBch}>
+          {t.shortBchBody(formatBch(depositCheck.bch.need), isBch ? null : symbol, formatBch(depositCheck.bch.have), describeScan(coins.data))}{' '}
           <button type="button" className="cf-copy" onClick={coins.reload}>
-            Check again
+            {t.checkAgain}
           </button>
         </Notice>
       )}
       {Boolean(coins.error) && !coins.data && (
-        <Notice tone="danger" title="We could not read your wallet's coins">
-          The network did not answer.{' '}
+        <Notice tone="danger" title={t.coinsError}>
+          {t.networkSilent}{' '}
           <button type="button" className="cf-copy" onClick={coins.reload}>
-            Try again
+            {messages.common.tryAgain}
           </button>
         </Notice>
       )}
@@ -325,17 +320,19 @@ export function SellerAction(props: { trade: Trade; amount: string; fiat: string
       return next;
     });
   const checkLabels: Record<ReleaseCheck, ReactNode> = {
-    bankApp: 'I opened my bank app, not a screenshot',
+    bankApp: t.checkBankApp,
     exactAmount: (
       <>
-        I see exactly <strong>{props.fiat}</strong> from this buyer
+        {t.checkAmountBefore}
+        <strong>{props.fiat}</strong>
+        {t.checkAmountAfter}
       </>
     ),
   };
   const releaseChecks = (
     <>
-      <Notice tone="attention" title="Only your bank app counts">
-        Don't trust screenshots or messages. Once you release, {locked} can't come back.
+      <Notice tone="attention" title={t.bankOnly}>
+        {t.bankOnlyBody(isBch)}
       </Notice>
       <div className="cf-stack" data-gap="2">
         {RELEASE_CHECKS.map((check) => (
@@ -356,7 +353,7 @@ export function SellerAction(props: { trade: Trade; amount: string; fiat: string
       disabled={!releaseReady(ticked) || (busy !== null && busy !== 'release')}
       onClick={release}
     >
-      {`Release ${props.amount} to the buyer`}
+      {t.releaseTo(props.amount)}
     </Button>
   );
 
@@ -368,21 +365,18 @@ export function SellerAction(props: { trade: Trade; amount: string; fiat: string
       <ActionCard
         turn="other"
         progress={progress}
-        title="Waiting for the buyer to accept"
-        reassurance="Nothing is locked yet. You sign only when you lock the coins."
+        title={t.waitingBuyer}
+        reassurance={t.nothingLockedYet}
         deadline={
           trade.quoteExpiresAt && (
             <>
               <Countdown deadline={trade.quoteExpiresAt} windowSec={600} />
-              <span className="cf-small cf-muted">left for the buyer to accept at this price</span>
+              <span className="cf-small cf-muted">{t.leftForBuyer}</span>
             </>
           )
         }
       >
-        <p className="cf-muted">
-          When the buyer accepts, you have 30 minutes to lock {deposit ?? 'the coins'} and share how to pay you. If the buyer does not answer in time,
-          the request is dropped.
-        </p>
+        <p className="cf-muted">{t.whenBuyerAccepts(deposit)}</p>
         {walletNotices}
       </ActionCard>
     );
@@ -393,13 +387,13 @@ export function SellerAction(props: { trade: Trade; amount: string; fiat: string
       <ActionCard
         turn="you"
         progress={progress}
-        title={`The buyer accepted. Lock ${locked} and share how to pay you.`}
-        reassurance="The contract can only pay the buyer or return the coins to you. Campfire cannot move them."
+        title={t.buyerAccepted(isBch)}
+        reassurance={t.contractOnly}
         deadline={
           trade.fundingDeadline && (
             <>
               <Countdown deadline={trade.fundingDeadline} windowSec={1800} />
-              <span className="cf-small cf-muted">left to lock {locked}. After that the trade is dropped.</span>
+              <span className="cf-small cf-muted">{t.leftToLockThen(isBch)}</span>
             </>
           )
         }
@@ -408,13 +402,11 @@ export function SellerAction(props: { trade: Trade; amount: string; fiat: string
           fields={fields}
           fiat={trade.fiat}
           onChange={setFields}
-          title="How the buyer should pay you"
+          title={t.howToPay}
           saved={savedDetails !== null}
-          hint={<>Encrypted in your browser for this buyer only. Shown once {locked} {lockVerb(trade.asset)} locked. Campfire cannot read it.</>}
+          hint={t.sealedHint(isBch)}
         />
-        <p className="cf-small cf-muted">
-          You lock {deposit}: {breakdown}
-        </p>
+        <p className="cf-small cf-muted">{t.youLock(deposit, breakdown)}</p>
         <FeeNote fees={trade.fees} />
         {walletNotices}
         {failure}
@@ -427,7 +419,7 @@ export function SellerAction(props: { trade: Trade; amount: string; fiat: string
             disabled={short || (details === '' ? !savedDetails : !detailsReady) || (busy !== null && busy !== 'deposit')}
             onClick={depositOnly}
           >
-            {`Lock ${lockLabel} for this trade`}
+            {t.lockForTrade(lockLabel)}
           </Button>
         </div>
       </ActionCard>
@@ -441,12 +433,12 @@ export function SellerAction(props: { trade: Trade; amount: string; fiat: string
         <ActionCard
           turn="you"
           progress={progress}
-          title="Accept this buyer"
+          title={t.acceptBuyer}
           deadline={
             trade.quoteExpiresAt && (
               <>
                 <Countdown deadline={trade.quoteExpiresAt} windowSec={600} />
-                <span className="cf-small cf-muted">left to accept at this price.</span>
+                <span className="cf-small cf-muted">{t.leftToAcceptPrice}</span>
               </>
             )
           }
@@ -457,12 +449,12 @@ export function SellerAction(props: { trade: Trade; amount: string; fiat: string
             fields={fields}
             fiat={trade.fiat}
             onChange={setFields}
-            title="How the buyer should pay you"
-            hint="Encrypted for this buyer only. Campfire cannot read it."
+            title={t.howToPay}
+            hint={t.sealedHintShort}
           />
           {expired && (
-            <Notice tone="attention" title="This request expired">
-              The signed quote ran out. The request is dropped and nothing was locked.
+            <Notice tone="attention" title={t.expired}>
+              {t.expiredBody}
             </Notice>
           )}
           {walletNotices}
@@ -476,22 +468,19 @@ export function SellerAction(props: { trade: Trade; amount: string; fiat: string
               disabled={expired || !detailsReady || !prep.data || short || (busy !== null && busy !== 'accept' && busy !== 'deposit')}
               onClick={acceptAndDeposit}
             >
-              {`Accept and lock ${lockLabel}`}
+              {t.acceptAndLock(lockLabel)}
             </Button>
             <Button busy={busy === 'decline'} disabled={busy !== null && busy !== 'decline'} onClick={decline}>
-              Decline
+              {tp.decline}
             </Button>
           </div>
           {!prep.data && !prep.error && <span className="cf-small cf-subtle">{findingNote}</span>}
-          <Details summary="What accepting does" tag={null}>
+          <Details summary={t.whatAccepting} tag={null}>
             <div className="cf-stack" data-gap="2">
-              <p className="cf-small cf-muted">
-                Accepting locks {deposit} in the escrow right away: {breakdown} It can only go to the buyer or back to you. Your payment details are
-                shown to the buyer once {locked} {lockVerb(trade.asset)} locked.
-              </p>
+              <p className="cf-small cf-muted">{t.acceptingBody(deposit, breakdown, isBch)}</p>
               <FeeNote fees={trade.fees} />
               {trade.quote && (
-                <p className="cf-small cf-muted">The price is signed by the oracle. The signature is checked again before you lock.</p>
+                <p className="cf-small cf-muted">{t.priceSigned}</p>
               )}
               <RequestTechnical trade={trade} />
             </div>
@@ -503,25 +492,23 @@ export function SellerAction(props: { trade: Trade; amount: string; fiat: string
         <ActionCard
           turn="you"
           progress={progress}
-          title={`Lock ${lockLabel} for this trade`}
-          reassurance="The contract can only pay the buyer or return the coins to you. Campfire cannot move them."
+          title={t.lockForTrade(lockLabel)}
+          reassurance={t.contractOnly}
           deadline={
             trade.fundingDeadline && (
               <>
                 <Countdown deadline={trade.fundingDeadline} windowSec={1800} />
-                <span className="cf-small cf-muted">left to lock. If you do not lock in time the trade is dropped and nothing is charged.</span>
+                <span className="cf-small cf-muted">{t.leftToLockOrDrop}</span>
               </>
             )
           }
         >
-          <p className="cf-muted">
-            You lock {deposit}: {breakdown} Your payment details are shown to the buyer once {locked} {lockVerb(trade.asset)} locked.
-          </p>
+          <p className="cf-muted">{t.youLockShown(deposit, breakdown, isBch)}</p>
           {walletNotices}
           {failure}
           <div className="s-actions">
             <Button variant="primary" signs busy={busy === 'deposit'} busyLabel={busyStep.label} disabled={short || (busy !== null && busy !== 'deposit')} onClick={depositOnly}>
-              {`Lock ${lockLabel}`}
+              {t.lock(lockLabel)}
             </Button>
           </div>
         </ActionCard>
@@ -532,20 +519,18 @@ export function SellerAction(props: { trade: Trade; amount: string; fiat: string
         <ActionCard
           turn="other"
           progress={progress}
-          title="Waiting for the buyer's payment"
-          reassurance={`${capitalize(locked)} ${lockVerb(trade.asset)} locked. It can only go to the buyer or back to you.`}
+          title={t.waitingPayment}
+          reassurance={t.onlyBuyerOrYou(isBch)}
           deadline={
             trade.paymentDeadline && (
               <>
                 <Countdown deadline={trade.paymentDeadline} windowSec={windowSec} />
-                <span className="cf-small cf-muted">left for the buyer to pay. After that the arbiter returns the coins to you.</span>
+                <span className="cf-small cf-muted">{t.leftForBuyerPay}</span>
               </>
             )
           }
         >
-          <p className="cf-muted">
-            When the buyer marks the payment as sent, check your bank app and release. Do not release before the money is there.
-          </p>
+          <p className="cf-muted">{t.checkThenRelease}</p>
           {failure}
           {disputeForm}
           <div className="s-actions">{disputeButton}</div>
@@ -557,8 +542,8 @@ export function SellerAction(props: { trade: Trade; amount: string; fiat: string
         <ActionCard
           turn="you"
           progress={progress}
-          title="The buyer says they paid. Check your bank."
-          reassurance={`${capitalize(locked)} ${lockVerb(trade.asset)} locked until you release. Take the time to check.`}
+          title={t.buyerSaysPaid}
+          reassurance={t.lockedUntilRelease(isBch)}
         >
           {releaseChecks}
           {failure}
@@ -567,23 +552,16 @@ export function SellerAction(props: { trade: Trade; amount: string; fiat: string
             {releaseButton()}
             {disputeButton}
           </div>
-          <Details summary="Not received yet?" tag={null}>
-            <p className="cf-small cf-muted">
-              Transfers can take a few minutes. {capitalize(locked)} {lockVerb(trade.asset)} still locked while you wait. If the money doesn't arrive,
-              open a dispute and the arbiter will help.
-            </p>
+          <Details summary={t.notReceived} tag={null}>
+            <p className="cf-small cf-muted">{t.notReceivedBody(isBch)}</p>
           </Details>
         </ActionCard>
       );
     case 'Disputed': {
       const opened = trade.disputedAt !== undefined ? formatDateTime(trade.disputedAt) : null;
       return (
-        <ActionCard turn="arbiter" title="The arbiter is reviewing this trade">
-          <p className="cf-muted">
-            {trade.disputedBy === 'seller' ? 'You opened a dispute' : 'The buyer opened a dispute'}
-            {opened ? ` on ${opened}` : ''}. The arbiter can now read the chat and will decide for the buyer or the seller. If you receive the payment
-            meanwhile, you can still release.
-          </p>
+        <ActionCard turn="arbiter" title={tp.reviewing}>
+          <p className="cf-muted">{t.disputeBy(trade.disputedBy === 'seller', opened)}</p>
           {releaseChecks}
           {failure}
           <div className="s-actions">{releaseButton()}</div>
@@ -609,32 +587,33 @@ function PaymentFieldsForm(props: {
   saved?: boolean;
 }) {
   const { fields } = props;
+  const t = useMessages().seller;
   const set = (patch: Partial<PaymentFields>) => props.onChange({ ...fields, ...patch });
   const tooLong = composePaymentDetails(fields, props.fiat).length > MAX_DETAILS_LENGTH;
   return (
     <fieldset className="s-paymentfields">
       <legend>{props.title}</legend>
-      {props.saved && <span className="cf-small cf-muted">Your earlier details are kept. Fill these in only to replace them.</span>}
+      {props.saved && <span className="cf-small cf-muted">{t.savedKept}</span>}
       <div className="cf-field">
-        <label htmlFor="pay-account">{accountLabel(props.fiat)}</label>
+        <label htmlFor="pay-account">{t.accountLabel(props.fiat)}</label>
         <input id="pay-account" className="cf-input" autoComplete="off" maxLength={120} value={fields.account} onChange={(e) => set({ account: e.target.value })} />
       </div>
       <div className="cf-field">
-        <label htmlFor="pay-holder">Account holder</label>
+        <label htmlFor="pay-holder">{t.holder}</label>
         <input id="pay-holder" className="cf-input" autoComplete="off" maxLength={120} value={fields.holder} onChange={(e) => set({ holder: e.target.value })} />
       </div>
       <div className="cf-field" data-invalid={tooLong || undefined}>
-        <label htmlFor="pay-note">Note for the buyer (optional)</label>
+        <label htmlFor="pay-note">{t.noteLabel}</label>
         <input
           id="pay-note"
           className="cf-input"
           autoComplete="off"
           maxLength={200}
-          placeholder="Bank name, reference to write"
+          placeholder={t.notePlaceholder}
           value={fields.note}
           onChange={(e) => set({ note: e.target.value })}
         />
-        <span className="cf-hint">{tooLong ? `Keep the details under ${MAX_DETAILS_LENGTH} characters in total.` : props.hint}</span>
+        <span className="cf-hint">{tooLong ? t.tooLong(MAX_DETAILS_LENGTH) : props.hint}</span>
       </div>
     </fieldset>
   );
@@ -664,6 +643,7 @@ function formatSignedPercent(ratio: number): string {
  * oracle price is read only to compare, and says so.
  */
 function DealSummary({ trade, amount, fiat, symbol }: { trade: Trade; amount: string; fiat: string; symbol: string }) {
+  const t = useMessages().seller;
   const pair = `${symbol}/${trade.fiat}`;
   const bchPair = `BCH/${trade.fiat}`;
   const live = usePoll(
@@ -691,28 +671,28 @@ function DealSummary({ trade, amount, fiat, symbol }: { trade: Trade; amount: st
   return (
     <div className="cf-well cf-stack s-deal" data-gap="3">
       <dl className="s-deal__sides">
-        <dt className="cf-label">You give</dt>
+        <dt className="cf-label">{t.youGive}</dt>
         <dd className="tk-big">{amount}</dd>
-        <dt className="cf-label">You receive</dt>
+        <dt className="cf-label">{t.youReceive}</dt>
         <dd className="tk-big">{fiat}</dd>
       </dl>
       <dl className="cf-dl s-deal__terms">
-        <dt>Market price</dt>
+        <dt>{t.marketPrice}</dt>
         <dd>
           {market ? (
             <>
               <span className="cf-num">
                 {formatFiat(Number(market.price), trade.fiat)}/{symbol}
               </span>
-              {!trade.quote && <span className="cf-small cf-subtle"> · now, for reference</span>}
+              {!trade.quote && <span className="cf-small cf-subtle">{t.nowForReference}</span>}
             </>
           ) : live.loading ? (
             <Skeleton width={140} />
           ) : (
-            <span className="cf-small cf-muted">Not available right now</span>
+            <span className="cf-small cf-muted">{t.notAvailable}</span>
           )}
         </dd>
-        <dt>Your price</dt>
+        <dt>{t.yourPrice}</dt>
         <dd>
           {yourPrice !== null && (
             <span className="cf-num">
@@ -720,10 +700,10 @@ function DealSummary({ trade, amount, fiat, symbol }: { trade: Trade; amount: st
             </span>
           )}
           {marketValue !== null && gain !== null && marketValue > 0 && (
-            <span className="cf-small cf-muted"> · {formatSignedPercent(gain / marketValue)} vs market</span>
+            <span className="cf-small cf-muted">{t.vsMarket(formatSignedPercent(gain / marketValue))}</span>
           )}
         </dd>
-        <dt>{trade.asset === 'BCH' ? 'Fees' : 'BCH costs'}</dt>
+        <dt>{t.costs(trade.asset === 'BCH')}</dt>
         <dd>
           <span className="cf-num">{formatBch(costs)}</span>
           {costsFiat !== null && <span className="cf-small cf-muted"> ≈ {formatFiat(costsFiat, trade.fiat)}</span>}
@@ -731,15 +711,13 @@ function DealSummary({ trade, amount, fiat, symbol }: { trade: Trade; amount: st
       </dl>
       {result !== null && marketValue !== null && (
         <div className="s-deal__gain" data-sign={result < 0 ? 'negative' : 'positive'}>
-          <span>{result < 0 ? 'You get less than selling at market' : 'You gain over selling at market'}</span>
+          <span>{t.gain(result < 0)}</span>
           <strong className="cf-amount">
             {net !== null ? '≈ ' : ''}
             {formatSignedFiat(result, trade.fiat)}
           </strong>
           {net !== null && gain !== null && costsFiat !== null && (
-            <span className="cf-small cf-muted">
-              {formatSignedFiat(gain, trade.fiat)} from the price, −{formatFiat(costsFiat, trade.fiat)} in fees
-            </span>
+            <span className="cf-small cf-muted">{t.gainBreakdown(formatSignedFiat(gain, trade.fiat), formatFiat(costsFiat, trade.fiat))}</span>
           )}
         </div>
       )}
@@ -751,21 +729,23 @@ function DealSummary({ trade, amount, fiat, symbol }: { trade: Trade; amount: st
 function BuyerLine({ trade }: { trade: Trade }) {
   const reputation = usePoll(() => apiGet<Reputation>(`/api/identities/${trade.buyerIdentity}/reputation`), trade.buyerIdentity);
   const rep = reputation.data;
+  const messages = useMessages();
+  const t = messages.seller;
   return (
     <div className="cf-stack" data-gap="1">
       <span>
-        <span className="cf-label">Buyer</span> <strong>{aliasFor(trade.buyerIdentity).name}</strong>
+        <span className="cf-label">{messages.tradePage.buyer}</span> <strong>{aliasFor(trade.buyerIdentity).name}</strong>
         {' · '}
         {rep ? (
           <span className="cf-small">
-            {rep.completedAsBuyer} completed as buyer
-            {rep.firstCompletedAt !== null && ` since ${formatDate(rep.firstCompletedAt)}`}
+            {t.completedAsBuyer(rep.completedAsBuyer)}
+            {rep.firstCompletedAt !== null && t.since(formatDate(rep.firstCompletedAt))}
           </span>
         ) : (
           <Skeleton width={140} />
         )}
       </span>
-      <span className="cf-small cf-subtle">Counted by Campfire, not verifiable on-chain.</span>
+      <span className="cf-small cf-subtle">{t.countedByCampfire}</span>
     </div>
   );
 }
@@ -773,21 +753,20 @@ function BuyerLine({ trade }: { trade: Trade }) {
 /** Where the buyer's name comes from and, with technical details on, the buyer's key and where the coins go. */
 function RequestTechnical({ trade }: { trade: Trade }) {
   const advanced = useAdvanced();
+  const t = useMessages().seller;
   return (
     <>
-      <p className="cf-small cf-muted">
-        The buyer's name comes from their key; nobody chooses it. Their trade count can be inflated with a second wallet.
-      </p>
+      <p className="cf-small cf-muted">{t.buyerName}</p>
       {advanced && (
         <dl className="cf-dl">
-          <dt>Buyer key</dt>
+          <dt>{t.buyerKey}</dt>
           <dd>
             <HashLink value={trade.buyerIdentity} kind="plain" />
           </dd>
           {/* The buyer's payout address is checked before you lock. */}
           {trade.buyerPayoutPkh && (
             <>
-              <dt>Pays to</dt>
+              <dt>{t.paysTo}</dt>
               <dd>
                 <HashLink value={pkhToCashAddress(trade.buyerPayoutPkh)} kind="address" />
               </dd>
@@ -802,6 +781,9 @@ function RequestTechnical({ trade }: { trade: Trade }) {
 // --- Endings ---
 
 export function SellerResult({ trade, amount }: { trade: Trade; amount: string }) {
+  const messages = useMessages();
+  const t = messages.seller;
+  const tp = messages.tradePage;
   const settlement = trade.settlementTxid && (
     <>
       <HashLink value={trade.settlementTxid} kind="transaction" /> · <ProvenanceTag kind="chain" />
@@ -821,62 +803,60 @@ export function SellerResult({ trade, amount }: { trade: Trade; amount: string }
     );
   const returned = (
     <>
-      <dt>Returned to</dt>
+      <dt>{t.returnedTo}</dt>
       <dd>{backAddress}</dd>
     </>
   );
   switch (trade.status) {
     case 'Released':
       notice = (
-        <Notice tone="verified" title="Trade completed">
-          You released {amount} to the buyer. The fiat payment happened off-chain: it is between you and the buyer.
+        <Notice tone="verified" title={tp.completed}>
+          {t.youReleased(amount)}
         </Notice>
       );
-      rows = row('Release');
+      rows = row(tp.release);
       break;
     case 'ResolvedBuyer':
       notice = (
-        <Notice tone="attention" title="The arbiter decided for the buyer">
-          The {amount} went to the buyer.
+        <Notice tone="attention" title={t.decidedBuyer}>
+          {t.wentToBuyer(amount)}
         </Notice>
       );
-      rows = row('Arbitrate');
+      rows = row(tp.arbitrate);
       break;
     case 'ResolvedSeller':
       notice = trade.disputedAt ? (
-        <Notice title="The arbiter decided for you">The {amount} came back to you.</Notice>
+        <Notice title={t.decidedYou}>{t.cameBack(amount)}</Notice>
       ) : (
-        <Notice title="The payment window ended">
-          The buyer did not mark the payment as sent in time, so the arbiter returned the {amount} to you.
-        </Notice>
+        <Notice title={tp.windowEnded}>{t.windowEndedBody(amount)}</Notice>
       );
       rows = (
         <>
-          {row('Arbitrate')}
+          {row(tp.arbitrate)}
           {returned}
         </>
       );
       break;
     case 'Cancelled':
-      notice = <Notice title="The buyer cancelled the trade">The {amount} came back to you.</Notice>;
+      notice = <Notice title={t.buyerCancelled}>{t.cameBack(amount)}</Notice>;
       rows = (
         <>
-          {row('Cancel')}
+          {row(tp.cancel)}
           {returned}
         </>
       );
       break;
     case 'Refunded':
-      notice = <Notice title="The coins came back to you">The {amount} came back after the refund time.</Notice>;
+      notice = <Notice title={t.coinsBack}>{t.refundBack(amount)}</Notice>;
       rows = (
         <>
-          {row('Refund')}
+          {row(tp.refund)}
           {returned}
         </>
       );
       break;
     default:
-      notice = <Notice title="The trade was dropped">The request was declined or not funded in time. Nothing was locked.</Notice>;
+      notice = <Notice title={tp.dropped}>{t.droppedBody}</Notice>;
       rows = null;
   }
   return (
@@ -885,12 +865,12 @@ export function SellerResult({ trade, amount }: { trade: Trade; amount: string }
         {notice}
         <dl className="cf-dl">
           {rows}
-          <dt>Ended</dt>
+          <dt>{tp.ended}</dt>
           <dd>{formatDateTime(ended)}</dd>
         </dl>
         <div className="s-actions">
           <Button variant="primary" to="/trades">
-            Back to My trades
+            {t.backToTrades}
           </Button>
         </div>
       </div>
@@ -898,19 +878,13 @@ export function SellerResult({ trade, amount }: { trade: Trade; amount: string }
   );
 }
 
-const capitalize = (text: string) => text.charAt(0).toUpperCase() + text.slice(1);
-/** "is" for the BCH, "are" for the coins of a token. */
-const lockVerb = (asset: string) => (asset === 'BCH' ? 'is' : 'are');
 
 // Invented copy: the design predates the service fees (protocol section 5.1).
 /** The service fees the deposit pays besides the escrow, fixed when the trade was requested. */
 function FeeNote({ fees }: { fees?: TradeFee[] }) {
+  const messages = useMessages();
   if (!fees || fees.length === 0) return null;
-  const parts = fees.map((f) => `${formatBch(BigInt(f.satoshis))} to the ${f.role === 'oracle' ? 'price oracle' : 'arbiter'}`);
-  return (
-    <p className="cf-small cf-muted">
-      The same transaction pays the service fees: {parts.join(' and ')}. They are paid in BCH and are not returned if the trade is
-      cancelled or refunded.
-    </p>
-  );
+  const t = messages.seller;
+  const parts = fees.map((f) => t.feeTo(formatBch(BigInt(f.satoshis)), f.role === 'oracle'));
+  return <p className="cf-small cf-muted">{t.feeNote(parts.join(` ${messages.common.and} `))}</p>;
 }

@@ -4,6 +4,7 @@
 
 import { CHAT_IMAGE_MIMES, MAX_CHAT_IMAGE_BYTES } from '../protocol/chatImage.js';
 import { ChatSendError } from './chat';
+import { text } from './messages';
 
 /** What the file picker offers; a phone's camera or gallery can supply any of these. */
 export const CHAT_IMAGE_ACCEPT = CHAT_IMAGE_MIMES.join(',');
@@ -17,13 +18,13 @@ const toBlob = (canvas: HTMLCanvasElement, quality: number) =>
 
 export async function prepareChatImage(file: File): Promise<{ bytes: Uint8Array; mime: string }> {
   if (!(CHAT_IMAGE_MIMES as readonly string[]).includes(file.type)) {
-    throw new ChatSendError('Only JPEG, PNG and WebP images can be sent.');
+    throw new ChatSendError(text().chat.imageTypes);
   }
   let bitmap: ImageBitmap;
   try {
     bitmap = await createImageBitmap(file);
   } catch {
-    throw new ChatSendError('That file could not be read as an image.');
+    throw new ChatSendError(text().chat.notAnImage);
   }
   try {
     for (let side = Math.min(MAX_SIDE, Math.max(bitmap.width, bitmap.height)); side >= MIN_SIDE / 2; side = Math.floor(side * 0.75)) {
