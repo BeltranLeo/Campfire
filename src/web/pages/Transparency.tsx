@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { Link } from 'react-router';
-import { ApiError, apiGet, type Trade } from '../api';
+import { ApiError, apiGet, type PublicTrade, type PublicTradePage, type Trade } from '../api';
 import { assetInfo } from '../assets';
 import { Button } from '../components/Button';
 import { CopyButton } from '../components/CopyButton';
@@ -23,8 +23,12 @@ export function Transparency() {
   const wallet = useWallet();
   const [mine, setMine] = useState(false);
   const identity = wallet.status === 'connected' ? wallet.identity : null;
-  const trades = usePoll(
-    () => apiGet<{ trades: Trade[] }>(`/api/trades${mine && identity ? `?identity=${identity}` : ''}`).then((r) => r.trades),
+  // Everyone's trades come as the public view, newest first, one page; your own come whole, with your session.
+  const trades = usePoll<(PublicTrade | Trade)[]>(
+    () =>
+      mine && identity
+        ? apiGet<{ trades: Trade[] }>(`/api/trades?identity=${identity}`).then((r) => r.trades)
+        : apiGet<PublicTradePage>('/api/trades?limit=20').then((r) => r.trades),
     mine && identity ? `mine:${identity}` : 'all',
   );
   const recent = [...(trades.data ?? [])].sort((a, b) => b.updatedAt - a.updatedAt).slice(0, 20);

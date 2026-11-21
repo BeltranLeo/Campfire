@@ -273,6 +273,57 @@ export interface Trade extends TradeSummary {
   createdAt: number;
   updatedAt: number;
   completedAt?: number;
+  /**
+   * Set on the public view, which is what anyone but the two parties and the arbiter reads (src/server/tradeViews.ts):
+   * identities, keys, payout addresses, fiat terms and the dispute reason are left out.
+   */
+  public?: true;
+}
+
+/** The public view of a trade: only what does not name anyone or a fiat sum (src/server/tradeViews.ts). */
+export type PublicTrade = Pick<
+  Trade,
+  | 'id'
+  | 'side'
+  | 'status'
+  | 'asset'
+  | 'assetDecimals'
+  | 'amount'
+  | 'arbiterPk'
+  | 'tradeId'
+  | 'escrowAddress'
+  | 'escrowTokenAddress'
+  | 'refundTime'
+  | 'fundingDeadline'
+  | 'fundingTxid'
+  | 'fundingVout'
+  | 'fundingConfirmations'
+  | 'fundedAt'
+  | 'paymentDeadline'
+  | 'paidAt'
+  | 'disputedAt'
+  | 'verdict'
+  | 'verdictIssuedAt'
+  | 'settlementTxid'
+  | 'isDemo'
+  | 'createdAt'
+  | 'updatedAt'
+  | 'completedAt'
+> & { public: true };
+
+/** GET /api/trades without `identity`: one page of the public list, newest change first, and totals over every trade. */
+export interface PublicTradePage {
+  trades: PublicTrade[];
+  /** Pass as `cursor` for the next page; null on the last one. */
+  nextCursor: number | null;
+  stats: {
+    /** Trades whose coins went to the buyer: released, or decided for the buyer. */
+    completed: number;
+    /** BCH those trades moved, in satoshis. */
+    bchSats: string;
+    /** How many of those were against the demo seller. */
+    demo: number;
+  };
 }
 
 /** A chat message as GET /api/trades/:id/chat returns it (src/server/storage.ts, StoredChatMessage): ciphertext only. */

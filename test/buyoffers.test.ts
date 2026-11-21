@@ -41,7 +41,7 @@ import {
   type StoredOffer,
   type StoredTrade,
 } from '../src/server/index.js';
-import { registerSignedIn, sessionHeaders } from './signin-helper.js';
+import { registerSignedIn, sessionHeaders, sessionOf } from './signin-helper.js';
 
 function makeWallet(label: string) {
   const seed = new Uint8Array(64);
@@ -102,11 +102,16 @@ async function setup(options?: { limits?: Partial<SponsorshipLimits>; botSats?: 
   provider.addUtxo(botWallet.receiveAddress(0), randomUtxo({ satoshis: options?.botSats ?? 500_000n }));
   const api = createApiHandler({ service, oracle, demo, adminToken: ADMIN_TOKEN });
 
-  const req = async <T = any>(method: string, path: string, body?: unknown): Promise<{ status: number; data: T }> => {
+  const req = async <T = any>(
+    method: string,
+    path: string,
+    body?: unknown,
+    extraHeaders?: Record<string, string>,
+  ): Promise<{ status: number; data: T }> => {
     const res = await api(
       new Request(`http://localhost${path}`, {
         method,
-        headers: { ...sessionHeaders(path, body), ...(body ? { 'content-type': 'application/json' } : {}) },
+        headers: { ...sessionHeaders(path, body), ...(body ? { 'content-type': 'application/json' } : {}), ...extraHeaders },
         body: body ? JSON.stringify(body) : undefined,
       }),
     );
@@ -277,7 +282,7 @@ describe('Buy offers published and paid for by the service', () => {
       fundingTxHex: fundTx.hex,
       encryptedPaymentDetails: details,
       paymentDetailsSignature: signPaymentDetails(sellerSession.privateKey, acceptedTrade.tradeId!, details),
-    });
+    }, sessionOf(sellerId));
     expect(funded.status).toBe(200);
     expect(funded.data.trade.status).toBe('Funded');
     // Once funded, the buyer still cannot swap the details.

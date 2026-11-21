@@ -109,7 +109,8 @@ function TradeView({ trade, role, onUpdate, reload }: { trade: Trade; role: Role
   const wallet = useWallet();
   const asset = assetInfo(trade.asset, trade.assetDecimals, config);
   const amount = formatAmount(trade.amount, asset);
-  const fiat = formatFiatAmount(trade.fiatAmount, trade.fiat);
+  // The public view a visitor reads has no fiat terms (src/server/tradeViews.ts).
+  const fiat = trade.public ? '' : formatFiatAmount(trade.fiatAmount, trade.fiat);
   // On a buy offer the buyer's payout is chosen when the buyer accepts.
   const payout = trade.buyerPayoutPkh ? pkhToCashAddress(trade.buyerPayoutPkh, { tokenAware: !asset.isBch }) : null;
   const view: Role = role;
@@ -164,7 +165,7 @@ function TradeView({ trade, role, onUpdate, reload }: { trade: Trade; role: Role
               {t.backTransparency}
             </Link>
           )}
-          <h1 className="cf-title">{tradeTitle(trade.status, view, amount, fiat)}</h1>
+          <h1 className="cf-title">{trade.public ? amount : tradeTitle(trade.status, view, amount, fiat)}</h1>
           <div className="cf-row">
             <StatusPill state={trade.status} role={view} side={trade.side} />
             {trade.fundingTxid ? (
@@ -855,7 +856,7 @@ function VisitorCard({ trade }: { trade: Trade }) {
       <div className="cf-card__section">
         <div className="cf-stack">
           <Notice title={t.visitor}>
-            {t.visitorBody}
+            {trade.public ? t.visitorPublicBody : t.visitorBody}
           </Notice>
           {isFinal(trade) && (
             <dl className="cf-dl">
@@ -897,7 +898,11 @@ function OnChainDetails(props: {
   // The other person: the seller for the buyer and visitors, the buyer for the seller.
   const party = props.view === 'seller' ? 'buyer' : 'seller';
   const partyIdentity = party === 'buyer' ? trade.buyerIdentity : trade.sellerIdentity;
-  const reputation = usePoll(() => apiGet<Reputation>(`/api/identities/${partyIdentity}/reputation`), partyIdentity);
+  // The public view names nobody, so there is no one to look up.
+  const reputation = usePoll(
+    () => (partyIdentity ? apiGet<Reputation>(`/api/identities/${partyIdentity}/reputation`) : Promise.resolve(null)),
+    partyIdentity ?? '',
+  );
   const expected = expectedEscrowFunding({ asset: trade.asset, amount: trade.amount });
   const holds = expected.token
     ? `${formatAmount(expected.satoshis, { symbol: 'BCH', decimals: 8, isBch: true })} + ${props.amount}`
@@ -1021,62 +1026,73 @@ function OnChainDetails(props: {
                 </dd>
               </>
             )}
-            <dt>{t.fiatAmount}</dt>
-            <dd>
-              <span className="cf-num">{props.fiat}</span>
-            </dd>
-            <dt>{t.paidTo}</dt>
-            <dd>
-              {/* Invented copy: on a buy offer the payout is not known before the buyer accepts. */}
-              {props.payout ? <HashLink value={props.payout} kind="address" /> : <span className="cf-small cf-muted">{t.chosenOnAccept}</span>}
-              {props.view === 'buyer' && check?.payoutIsMine && (
-                <>
-                  <br />
-                  <span className="cf-small cf-muted">{t.yourAddress}</span>
-                </>
-              )}
-            </dd>
+            {!trade.public && (
+              <>
+                <dt>{t.fiatAmount}</dt>
+                <dd>
+                  <span className="cf-num">{props.fiat}</span>
+                </dd>
+                <dt>{t.paidTo}</dt>
+                <dd>
+                  {/* Invented copy: on a buy offer the payout is not known before the buyer accepts. */}
+                  {props.payout ? <HashLink value={props.payout} kind="address" /> : <span className="cf-small cf-muted">{t.chosenOnAccept}</span>}
+                  {props.view === 'buyer' && check?.payoutIsMine && (
+                    <>
+                      <br />
+                      <span className="cf-small cf-muted">{t.yourAddress}</span>
+                    </>
+                  )}
+                </dd>
+              </>
+            )}
             <dt>{t.arbiter}</dt>
             <dd>
               <HashLink value={trade.arbiterPk} kind="plain" />
             </dd>
-            <dt>{t.offer}</dt>
-            <dd>
-              <HashLink value={trade.offerTxid} kind="transaction" />
-              {/* Buy offers are only published by Campfire, which pays for them. */}
-              {trade.side === 'buy' && (
-                <>
-                  <br />
-                  <span className="cf-small cf-muted">{t.buyOfferSponsored}</span>
-                </>
-              )}
-            </dd>
+            {/* The public view leaves the offer out: the offer names its publisher. */}
+            {trade.offerTxid && (
+              <>
+                <dt>{t.offer}</dt>
+                <dd>
+                  <HashLink value={trade.offerTxid} kind="transaction" />
+                  {/* Buy offers are only published by Campfire, which pays for them. */}
+                  {trade.side === 'buy' && (
+                    <>
+                      <br />
+                      <span className="cf-small cf-muted">{t.buyOfferSponsored}</span>
+                    </>
+                  )}
+                </dd>
+              </>
+            )}
           </dl>
         </div>
       </section>
 
-      <section className="cf-card" data-flush>
-        <div className="cf-card__section">
-          <div className="cf-row" data-between style={{ marginBottom: 'var(--space-2)' }}>
-            <h2 className="cf-heading">{party === 'buyer' ? t.buyer : t.seller}</h2>
-            {party === 'seller' && trade.isDemo && <ProvenanceTag kind="sim">{m.trade.simulatedFiat}</ProvenanceTag>}
-          </div>
-          <div className="cf-stack" data-gap="1">
-            <span>
-              {party === 'seller' && trade.isDemo && <strong>{t.demoSeller}</strong>}
-              <HashLink value={partyIdentity} kind="plain" />
-            </span>
-            {rep && (
-              <span className="cf-small">
-                <strong>{party === 'buyer' ? rep.completedAsBuyer : rep.completedAsSeller}</strong>
-                {t.completedAs(party)}
-                {rep.firstCompletedAt !== null && t.since(formatDate(rep.firstCompletedAt))}
+      {partyIdentity && (
+        <section className="cf-card" data-flush>
+          <div className="cf-card__section">
+            <div className="cf-row" data-between style={{ marginBottom: 'var(--space-2)' }}>
+              <h2 className="cf-heading">{party === 'buyer' ? t.buyer : t.seller}</h2>
+              {party === 'seller' && trade.isDemo && <ProvenanceTag kind="sim">{m.trade.simulatedFiat}</ProvenanceTag>}
+            </div>
+            <div className="cf-stack" data-gap="1">
+              <span>
+                {party === 'seller' && trade.isDemo && <strong>{t.demoSeller}</strong>}
+                <HashLink value={partyIdentity} kind="plain" />
               </span>
-            )}
-            <span className="cf-small cf-subtle">{t.countedByCampfire}</span>
+              {rep && (
+                <span className="cf-small">
+                  <strong>{party === 'buyer' ? rep.completedAsBuyer : rep.completedAsSeller}</strong>
+                  {t.completedAs(party)}
+                  {rep.firstCompletedAt !== null && t.since(formatDate(rep.firstCompletedAt))}
+                </span>
+              )}
+              <span className="cf-small cf-subtle">{t.countedByCampfire}</span>
+            </div>
           </div>
-        </div>
-      </section>
+        </section>
+      )}
     </Details>
   );
 }

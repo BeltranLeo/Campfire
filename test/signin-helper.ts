@@ -61,13 +61,21 @@ export async function registerSignedIn(req: Req, wallet: SignInWallet, extra: Re
 
 export const SESSION_HEADER = 'x-campfire-session';
 
-/** The session header for the identity a request names, in its body or its `identity` query parameter. */
+/** The session header of an identity signed in with `registerSignedIn`, for a request that names nobody. */
+export function sessionOf(identity: string): Record<string, string> {
+  const token = sessions.get(identity);
+  if (!token) throw new Error(`No session for ${identity}`);
+  return { [SESSION_HEADER]: token };
+}
+
+/** The session header for the identity a request names, in its body or its `identity` or `viewer` query parameter. */
 export function sessionHeaders(path: string, body?: unknown): Record<string, string> {
   const fields = (body ?? {}) as Record<string, unknown>;
   const named = ['identity', 'senderIdentity', 'callerIdentity', 'buyerIdentity', 'sellerIdentity']
     .map((k) => fields[k])
     .find((v): v is string => typeof v === 'string');
-  const identity = named ?? new URL(path, 'http://localhost').searchParams.get('identity');
+  const query = new URL(path, 'http://localhost').searchParams;
+  const identity = named ?? query.get('identity') ?? query.get('viewer');
   const token = identity ? sessions.get(identity) : undefined;
   return token ? { [SESSION_HEADER]: token } : {};
 }

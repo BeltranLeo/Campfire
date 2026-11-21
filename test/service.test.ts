@@ -71,7 +71,7 @@ import {
   type StoredOffer,
   type StoredTrade,
 } from '../src/server/index.js';
-import { registerSignedIn, sessionHeaders, signInProof } from './signin-helper.js';
+import { registerSignedIn, sessionHeaders, sessionOf, signInProof } from './signin-helper.js';
 
 function makeWallet(label: string) {
   const seed = new Uint8Array(64);
@@ -412,6 +412,7 @@ describe('CampfireService & HTTP API end-to-end lifecycle', () => {
       `/api/trades/${acceptedTrade.tradeId}/funding`,
       // A caller cannot claim confirmations: that would switch off the buyer's double-spend watch.
       { fundingTxHex: fundTx.hex, confirmations: 1 },
+      sessionOf(sellerId),
     );
     expect(fundRes.status).toBe(200);
     expect(fundRes.data.trade.status).toBe('Funded');
@@ -552,7 +553,8 @@ describe('CampfireService & HTTP API end-to-end lifecycle', () => {
     // A polling client asks only for what is new: from the second of its newest message (that one comes again, and
     // the client drops it by id), and nothing once it is behind.
     const sentAt: number = chatRes.data.message.createdAt;
-    const chatSince = (since: string) => ctx.jsonReq('GET', `/api/trades/${acceptedTrade.tradeId}/chat?since=${since}`);
+    const chatSince = (since: string) =>
+      ctx.jsonReq('GET', `/api/trades/${acceptedTrade.tradeId}/chat?since=${since}`, undefined, sessionOf(buyerId));
     expect((await chatSince(String(sentAt))).data.messages).toHaveLength(1);
     expect((await chatSince(String(sentAt + 1))).data.messages).toHaveLength(0);
     expect((await chatSince('abc')).status).toBe(400);
@@ -574,7 +576,7 @@ describe('CampfireService & HTTP API end-to-end lifecycle', () => {
     const afterWeek = await postLate('One more thing');
     expect(afterWeek.status).toBe(400);
     expect(afterWeek.data.error).toMatch(/chat closed seven days after the trade ended/);
-    const history = await ctx.jsonReq('GET', `/api/trades/${acceptedTrade.tradeId}/chat`);
+    const history = await ctx.jsonReq('GET', `/api/trades/${acceptedTrade.tradeId}/chat`, undefined, sessionOf(buyerId));
     expect(history.data.messages).toHaveLength(2);
 
     // 8. Check reputation counters for both seller and buyer.
@@ -752,8 +754,13 @@ describe('CampfireService & HTTP API end-to-end lifecycle', () => {
     // The arbiter views and verdicts are closed to anyone without the admin token.
     const anonChat = await ctx.jsonReq('GET', `/api/trades/${acc1.trade.tradeId}/chat?arbiter=true`);
     expect(anonChat.status).toBe(403);
+    // Asking for the arbiter view without the token gets the public view: no chat key, no reason, no one's name.
     const anonView = await ctx.jsonReq('GET', `/api/trades/${acc1.trade.tradeId}?arbiter=true`);
-    expect(anonView.status).toBe(403);
+    expect(anonView.status).toBe(200);
+    expect(anonView.data.trade.public).toBe(true);
+    expect(anonView.data.trade.sharedTradeKeyHex).toBeUndefined();
+    expect(anonView.data.trade.disputeReason).toBeUndefined();
+    expect(anonView.data.trade.buyerIdentity).toBeUndefined();
     const anonVerdict = await ctx.jsonReq(
       'POST',
       `/api/trades/${acc1.trade.tradeId}/verdict`,
@@ -1034,71 +1041,140 @@ describe('Identity registration', () => {
   });
 });
 
+// Publishes a floating BCH offer, takes 0.01 BCH of it and accepts, so the terms carry the fees.
+async function acceptedFloatingTrade(ctx: ReturnType<typeof setupTestContext>) {
+  const sellerId = (await registerSignedIn(ctx.jsonReq, seller)).data.identity;
+  const buyerId = (await registerSignedIn(ctx.jsonReq, buyer)).data.identity;
+  const cfg = await ctx.jsonReq('GET', '/api/config');
+  const offerDoc: OfferDocument = {
+    v: 1,
+    side: 'sell',
+    asset: BCH_ASSET,
+    assetDecimals: BCH_DECIMALS,
+    fiat: 'ARS',
+    price: { type: 'floating', pair: 'BCH/ARS', marginBps: 0 },
+    min: '100000',
+    max: '5000000',
+    paymentMethods: ['bank-transfer'],
+    paymentWindowSec: 3600,
+    terms: 'Bank transfer',
+    expiresAt: ctx.getNow() + 86_400,
+    arbiter: cfg.data.arbiterPk,
+    oracle: cfg.data.oraclePk,
+  };
+  const addrMap = deriveWalletAddressMap({ receiveXpub: seller.receiveXpub, count: 5 });
+  const sign = (utxos: Awaited<ReturnType<typeof ctx.provider.getUtxos>>) =>
+    tagWalletUtxos(utxos, addrMap).map((u) => ({ ...u, signer: new SignatureTemplate(seller.receivePriv(u.keyIndex)) }));
+  ctx.provider.addUtxo(seller.receiveAddr(0), randomUtxo({ satoshis: 3_000_000n }));
+  const pubTx = buildPublishOfferTransaction({
+    provider: ctx.provider,
+    document: offerDoc,
+    utxos: sign(await ctx.provider.getUtxos(seller.receiveAddr(0))),
+    markerAddress: seller.receiveAddr(1),
+    changeAddress: seller.receiveAddr(0),
+  });
+  const offerTxid = (
+    await ctx.jsonReq('POST', '/api/offers', { sellerIdentity: sellerId, offerJson: pubTx.offerJson, offerTxHex: pubTx.hex, markerReceiveIndex: 1 })
+  ).data.offer.offerTxid;
+
+  const buyerSession = generateSessionKeyPair();
+  const take = await ctx.jsonReq<{ trade: StoredTrade }>('POST', '/api/trades', {
+    offerTxid,
+    buyerIdentity: buyerId,
+    amount: '1000000',
+    buyerPk: buyer.defiPkHex(0),
+    buyerDefiIndex: 0,
+    buyerPayoutPkh: buyer.receivePkhHex(0),
+    buyerReceiveIndex: 0,
+    buyerSessionPk: buyerSession.publicKey,
+  });
+  const sellerSession = generateSessionKeyPair();
+  const accept = await ctx.jsonReq<{ trade: StoredTrade }>('POST', `/api/trades/${take.data.trade.id}/accept`, {
+    sellerIdentity: sellerId,
+    sellerPk: seller.defiPkHex(0),
+    sellerDefiIndex: 0,
+    sellerPayoutPkh: seller.receivePkhHex(0),
+    sellerReceiveIndex: 0,
+    sellerSessionPk: sellerSession.publicKey,
+    encryptedPaymentDetails: await encryptPaymentDetails(sellerSession.privateKey, buyerSession.publicKey, 'alias: campfire'),
+  });
+  expect(accept.status).toBe(200);
+  const trade = accept.data.trade;
+  const contract = createEscrowContract(trade.terms!, trade.tradeId!, ctx.provider);
+  const coins = sign(await ctx.provider.getUtxos(seller.receiveAddr(0)));
+  return { take: take.data.trade, trade, contract, coins, cfg: cfg.data, sellerId, buyerId };
+}
+
+describe('Who reads a trade (protocol section 6)', () => {
+  it('shows the whole record to the parties and the admin, and the public view to everyone else', async () => {
+    const ctx = setupTestContext();
+    const { trade, contract, coins, sellerId, buyerId } = await acceptedFloatingTrade(ctx);
+    const funding = buildFundEscrowTransaction({ contract, terms: trade.terms!, utxos: coins, changeAddress: seller.receiveAddr(0) });
+    const funded = await ctx.jsonReq('POST', `/api/trades/${trade.id}/funding`, { fundingTxHex: funding.hex });
+    expect(funded.status).toBe(200);
+    // The deposit can come from anyone, but without a session the answer is the public view.
+    expect(funded.data.trade.public).toBe(true);
+    const dispute = await ctx.jsonReq('POST', `/api/trades/${trade.id}/dispute`, {
+      callerIdentity: buyerId,
+      reason: 'The seller asked me to pay a different account',
+    });
+    expect(dispute.data.trade.status).toBe('Disputed');
+
+    const stranger = { 'x-campfire-session': (await registerSignedIn(ctx.jsonReq, makeWallet('service-test-stranger'))).data.session };
+    const hidden = ['buyerIdentity', 'sellerIdentity', 'buyerPayoutPkh', 'sellerPayoutPkh', 'buyerSessionPk', 'fiatAmount', 'quote', 'termsJson', 'offerTxid', 'disputedBy', 'disputeReason', 'encryptedPaymentDetails'];
+
+    // A visitor, and a signed-in stranger, read the public view: the state and what the chain shows.
+    for (const headers of [{}, stranger]) {
+      const { status, data } = await ctx.jsonReq('GET', `/api/trades/${trade.id}`, undefined, headers);
+      expect(status).toBe(200);
+      expect(data.trade).toMatchObject({ public: true, status: 'Disputed', amount: '1000000', escrowAddress: trade.escrowAddress });
+      expect(data.trade.fundingTxid).toMatch(/^[0-9a-f]{64}$/);
+      for (const field of hidden) expect(data.trade[field], field).toBeUndefined();
+      // A `viewer` parameter proves nothing.
+      expect((await ctx.jsonReq('GET', `/api/trades/${trade.id}?viewer=${buyerId}`, undefined, { 'x-campfire-session': '', ...headers })).data.trade.public).toBe(true);
+    }
+
+    // Each party reads the whole record, without the chat key handed to the arbiter.
+    for (const id of [buyerId, sellerId]) {
+      const { data } = await ctx.jsonReq('GET', `/api/trades/${trade.id}`, undefined, sessionOf(id));
+      expect(data.trade.public).toBeUndefined();
+      expect(data.trade.buyerIdentity).toBe(buyerId);
+      expect(data.trade.disputeReason).toBe('The seller asked me to pay a different account');
+      expect(data.trade.sharedTradeKeyHex).toBeUndefined();
+      expect(data.trade.disputeKeys).toBeUndefined();
+    }
+
+    // The chat, even as ciphertext, is for the parties and the admin.
+    expect((await ctx.jsonReq('GET', `/api/trades/${trade.id}/chat`, undefined, { 'x-campfire-session': '' })).status).toBe(401);
+    expect((await ctx.jsonReq('GET', `/api/trades/${trade.id}/chat`, undefined, stranger)).status).toBe(403);
+    expect((await ctx.jsonReq('GET', `/api/trades/${trade.id}/chat`, undefined, sessionOf(sellerId))).status).toBe(200);
+    expect((await ctx.jsonReq('GET', `/api/trades/${trade.id}/chat`, undefined, ADMIN)).status).toBe(200);
+
+    // A wrong admin token is refused, not taken for a visitor.
+    const wrong = { authorization: 'Bearer wrong-token' };
+    expect((await ctx.jsonReq('GET', `/api/trades/${trade.id}`, undefined, wrong)).status).toBe(403);
+    expect((await ctx.jsonReq('GET', `/api/trades/${trade.id}/chat`, undefined, wrong)).status).toBe(403);
+
+    // The public list carries public views and totals; the dispute list is the admin's.
+    const list = await ctx.jsonReq('GET', '/api/trades');
+    expect(list.data.trades).toHaveLength(1);
+    expect(list.data.trades[0].public).toBe(true);
+    expect(list.data.trades[0].disputeReason).toBeUndefined();
+    expect(list.data.stats).toEqual({ completed: 0, bchSats: '0', demo: 0 });
+    expect(list.data.nextCursor).toBeNull();
+    expect((await ctx.jsonReq('GET', '/api/trades?limit=0x10')).status).toBe(400);
+    expect((await ctx.jsonReq('GET', '/api/trades?limit=101')).status).toBe(400);
+    expect((await ctx.jsonReq('GET', '/api/admin/trades?status=Disputed')).status).toBe(403);
+    const admin = await ctx.jsonReq('GET', '/api/admin/trades?status=Disputed', undefined, ADMIN);
+    expect(admin.data.trades).toHaveLength(1);
+    expect(admin.data.trades[0].disputeReason).toBe('The seller asked me to pay a different account');
+    expect(admin.data.trades[0].sharedTradeKeyHex).toBeUndefined();
+    expect(admin.data.trades[0].disputeKeys).toBeUndefined();
+    expect((await ctx.jsonReq('GET', '/api/admin/trades?status=Released', undefined, ADMIN)).data.trades).toHaveLength(0);
+  });
+});
+
 describe('Service fees (protocol section 5.1)', () => {
-  // Publishes a floating BCH offer, takes 0.01 BCH of it and accepts, so the terms carry the fees.
-  async function acceptedFloatingTrade(ctx: ReturnType<typeof setupTestContext>) {
-    const sellerId = (await registerSignedIn(ctx.jsonReq, seller)).data.identity;
-    const buyerId = (await registerSignedIn(ctx.jsonReq, buyer)).data.identity;
-    const cfg = await ctx.jsonReq('GET', '/api/config');
-    const offerDoc: OfferDocument = {
-      v: 1,
-      side: 'sell',
-      asset: BCH_ASSET,
-      assetDecimals: BCH_DECIMALS,
-      fiat: 'ARS',
-      price: { type: 'floating', pair: 'BCH/ARS', marginBps: 0 },
-      min: '100000',
-      max: '5000000',
-      paymentMethods: ['bank-transfer'],
-      paymentWindowSec: 3600,
-      terms: 'Bank transfer',
-      expiresAt: ctx.getNow() + 86_400,
-      arbiter: cfg.data.arbiterPk,
-      oracle: cfg.data.oraclePk,
-    };
-    const addrMap = deriveWalletAddressMap({ receiveXpub: seller.receiveXpub, count: 5 });
-    const sign = (utxos: Awaited<ReturnType<typeof ctx.provider.getUtxos>>) =>
-      tagWalletUtxos(utxos, addrMap).map((u) => ({ ...u, signer: new SignatureTemplate(seller.receivePriv(u.keyIndex)) }));
-    ctx.provider.addUtxo(seller.receiveAddr(0), randomUtxo({ satoshis: 3_000_000n }));
-    const pubTx = buildPublishOfferTransaction({
-      provider: ctx.provider,
-      document: offerDoc,
-      utxos: sign(await ctx.provider.getUtxos(seller.receiveAddr(0))),
-      markerAddress: seller.receiveAddr(1),
-      changeAddress: seller.receiveAddr(0),
-    });
-    const offerTxid = (
-      await ctx.jsonReq('POST', '/api/offers', { sellerIdentity: sellerId, offerJson: pubTx.offerJson, offerTxHex: pubTx.hex, markerReceiveIndex: 1 })
-    ).data.offer.offerTxid;
-
-    const buyerSession = generateSessionKeyPair();
-    const take = await ctx.jsonReq<{ trade: StoredTrade }>('POST', '/api/trades', {
-      offerTxid,
-      buyerIdentity: buyerId,
-      amount: '1000000',
-      buyerPk: buyer.defiPkHex(0),
-      buyerDefiIndex: 0,
-      buyerPayoutPkh: buyer.receivePkhHex(0),
-      buyerReceiveIndex: 0,
-      buyerSessionPk: buyerSession.publicKey,
-    });
-    const sellerSession = generateSessionKeyPair();
-    const accept = await ctx.jsonReq<{ trade: StoredTrade }>('POST', `/api/trades/${take.data.trade.id}/accept`, {
-      sellerIdentity: sellerId,
-      sellerPk: seller.defiPkHex(0),
-      sellerDefiIndex: 0,
-      sellerPayoutPkh: seller.receivePkhHex(0),
-      sellerReceiveIndex: 0,
-      sellerSessionPk: sellerSession.publicKey,
-      encryptedPaymentDetails: await encryptPaymentDetails(sellerSession.privateKey, buyerSession.publicKey, 'alias: campfire'),
-    });
-    expect(accept.status).toBe(200);
-    const trade = accept.data.trade;
-    const contract = createEscrowContract(trade.terms!, trade.tradeId!, ctx.provider);
-    const coins = sign(await ctx.provider.getUtxos(seller.receiveAddr(0)));
-    return { take: take.data.trade, trade, contract, coins, cfg: cfg.data };
-  }
-
   it('lets only the admin change the rates and refuses rates above the cap', async () => {
     const ctx = setupTestContext();
     expect((await ctx.jsonReq('GET', '/api/fees')).data).toMatchObject({ arbiterBps: 25, oracleBps: 25, maxBps: 500, dustLimitSats: 546 });

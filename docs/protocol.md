@@ -487,9 +487,26 @@ The seller pays a fee to the arbiter and, on a floating-price trade, to the pric
 - The buyer can derive the same ECDH key as the seller, so a ciphertext alone does not show who wrote it: a buyer could encrypt an account of their own and later show it to an arbiter as the one they paid. On a buy offer the seller therefore signs the ciphertext with their session key: a Schnorr signature over `SHA-256("CMPF-PAYMENT-DETAILS-SIG-v1:" ‖ tradeId in hex ‖ ":" ‖ ciphertext)`. The session key is committed by `tradeId`, so the service, the buyer and the arbiter can each check the signature. The service stores it next to the ciphertext and accepts a replacement only with a new valid signature.
 - Every chat message is signed by its author's session key: a Schnorr signature over `SHA-256("CMPF-CHAT-SIG-v1:" ‖ tradeId in hex ‖ ":" ‖ ciphertext)`. Both parties hold the chat key, and the arbiter should not have to take the service's word for who wrote what, so without the signature one party could post a message in the other's name ("payment received") and show it to the arbiter. The service accepts a message only if the signature matches the session key of the role it claims, refuses the same signed message twice, and checks every signature again when it decrypts the chat for the arbiter, who sees which role signed each message. The chat therefore opens once the trade is accepted and both session keys are in the terms.
 - A receipt (proof of payment) is a chat message whose plaintext is `cmpf-image:v1:<mime>:<base64>`, with `mime` one of `image/jpeg`, `image/png` or `image/webp`. It is encrypted and signed exactly like text, so both parties can send one while the chat is open and the arbiter reads it in a dispute like any other message. The browser shrinks the image to at most 150 KB before sending. The service cannot tell an image from text, so its ciphertext cap is the larger of the two. Clients show only a well-formed image, never its raw text, and refuse to send typed text that starts with the prefix.
-- `GET /api/trades/:id/chat` takes an optional `since` (whole Unix seconds) and returns only messages created at or after it; the arbiter's view (`?arbiter=true`) takes the same parameter. Messages are ordered by second, so clients ask from a few seconds before the newest message they hold and drop repeats by `id`, instead of counting messages.
+- `GET /api/trades/:id/chat` answers only the two parties (by their session token) and the admin. It takes an optional `since` (whole Unix seconds) and returns only messages created at or after it; the arbiter's view (`?arbiter=true`) takes the same parameter. Messages are ordered by second, so clients ask from a few seconds before the newest message they hold and drop repeats by `id`, instead of counting messages.
 - The chat stays open for seven days after the trade ends (settled, resolved, cancelled, refunded or dropped), counted from `completedAt`, or from the last update for a dropped trade, which has none. Then the service refuses new messages and the history stays readable. Late payment questions, a missing receipt or a thank-you still have a place. After a dispute the arbiter keeps the trade key, so messages sent after the verdict are readable by the arbiter too.
 - The service relays and stores ciphertext only. It can read a chat only after a party opens a dispute.
+
+### Who reads a trade
+
+A trade record links two identities to an amount, a fiat sum, payout addresses and, in a dispute, a reason in plain text. The service sends the whole record only to:
+
+- the buyer and the seller, recognised by their session token (section 1), never by a parameter;
+- the admin, with the admin token: the arbiter console lists open disputes with `GET /api/admin/trades?status=Disputed`;
+- any visitor, on a demo trade that went to dispute, because the demo arbiter console is open to everyone (section 8).
+
+Everyone else gets the **public view** (`src/server/tradeViews.ts`), marked `public: true`. It keeps the state, the asset and amount, the arbiter key, the escrow address, the deposit and settlement transactions, and the times of each step: what the chain shows anyway. It leaves out identities, keys and payout addresses, the offer, the price and fiat amount, the payment details, who opened a dispute and why, and the verdict's reason. A field added to the record stays out of the public view until it is added there.
+
+- `GET /api/trades?identity=` lists that identity's trades, whole, and needs its session token.
+- `GET /api/trades` without `identity` returns one page of public views, newest change first (`limit` up to 100, default 20; `cursor` from the previous answer's `nextCursor`), and `stats` over every trade: how many ended with the coins going to the buyer, the BCH they moved and how many were demo trades.
+- `GET /api/trades/:id` and the answers of the trade actions follow the same rule. A request with a wrong admin token is refused rather than answered as a visitor.
+- No HTTP answer carries the chat key a party handed to the arbiter, nor the demo seller's signed deposit kept for rebroadcasts. Only the service uses them.
+
+Settling still puts the payout addresses on the chain, where anyone can follow the escrow. What the public view avoids is the service adding, on top of that, who the two people are, what they paid in fiat and why they disagreed.
 
 ## 7. Sequence diagrams
 

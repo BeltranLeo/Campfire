@@ -139,6 +139,8 @@ const en = {
   // Visitors
   visitor: 'You are viewing this trade as a visitor.',
   visitorBody: 'Payment details and chat are visible only to the buyer and the seller. Everything on-chain is public and linked below.',
+  visitorPublicBody:
+    'Who traded, the fiat amount, the payment details and the chat are visible only to the buyer, the seller and, in a dispute, the arbiter. Everything on-chain is public and linked below.',
   settlement: 'Settlement',
   // On-chain details
   forChecking: 'For checking the trade yourself: the contract address, the transactions, the price quote and the other person.',
@@ -314,6 +316,8 @@ const es: typeof en = {
   seeAllPaths: 'Ver todos los caminos del contrato',
   visitor: 'Estás viendo esta operación como visitante.',
   visitorBody: 'Los datos de pago y el chat solo los ven el comprador y el vendedor. Todo lo que está en la cadena es público y está enlazado abajo.',
+  visitorPublicBody:
+    'Quiénes operan, el monto en fíat, los datos de pago y el chat solo los ven el comprador, el vendedor y, si hay una disputa, el árbitro. Todo lo que está en la cadena es público y está enlazado abajo.',
   settlement: 'Cierre',
   forChecking: 'Para que revises la operación por tu cuenta: la dirección del contrato, las transacciones, la cotización y la otra persona.',
   escrow: 'Contrato de garantía',

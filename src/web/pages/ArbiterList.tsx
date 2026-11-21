@@ -14,7 +14,7 @@ import { useMessages } from '../lang';
 import { signedTerms } from '../trade';
 
 // Disputes waiting for a verdict (invented page: the design only has the demo console for one trade).
-// The list is public data filtered in the browser; deciding needs the admin token, which is asked for
+// The list needs the admin token, like deciding: it shows who disputed what and why. The token is asked for
 // before the list is shown and kept in memory only (arbiterToken.ts).
 
 const REFRESH_MS = 10_000;
@@ -30,7 +30,7 @@ export function ArbiterList() {
       </div>
       {token ? (
         <>
-          <Disputes />
+          <Disputes token={token} />
           <section className="cf-card" data-flush>
             <div className="cf-card__section cf-stack">
               <h2 className="cf-heading">{t.serviceFees}</h2>
@@ -56,16 +56,16 @@ export function ArbiterList() {
   );
 }
 
-function Disputes() {
+function Disputes({ token }: { token: string }) {
   const config = useConfig();
   const messages = useMessages();
   const t = messages.arbiter;
   const disputes = usePoll(
     () =>
-      apiGet<{ trades: Trade[] }>('/api/trades').then((r) =>
-        r.trades.filter((row) => row.status === 'Disputed').sort((a, b) => (a.disputedAt ?? 0) - (b.disputedAt ?? 0)),
+      apiGet<{ trades: Trade[] }>('/api/admin/trades?status=Disputed', token).then((r) =>
+        r.trades.sort((a, b) => (a.disputedAt ?? 0) - (b.disputedAt ?? 0)),
       ),
-    'disputes',
+    `disputes:${token}`,
     REFRESH_MS,
   );
 

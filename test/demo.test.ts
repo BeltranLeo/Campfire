@@ -55,7 +55,7 @@ import {
   type StoredOffer,
   type StoredTrade,
 } from '../src/server/index.js';
-import { registerSignedIn, sessionHeaders } from './signin-helper.js';
+import { registerSignedIn, sessionHeaders, sessionOf } from './signin-helper.js';
 
 function makeWallet(label: string) {
   const seed = new Uint8Array(64);
@@ -317,6 +317,8 @@ describe('Demo seller bot (protocol section 8)', () => {
     const chat = await ctx.jsonReq<{ messages: { senderIdentity: string; senderRole?: string; ciphertext: string; signature: string }[] }>(
       'GET',
       `/api/trades/${trade.id}/chat`,
+      undefined,
+      sessionOf(ctx.buyerId),
     );
     expect(chat.data.messages).toHaveLength(1);
     const [greeting] = chat.data.messages;
@@ -496,7 +498,7 @@ describe('Demo seller bot (protocol section 8)', () => {
 
     // One GET reads the trade twice (demo reconcile, then the response), so fail both attempts.
     ctx.failBroadcasts(2);
-    const first = await ctx.jsonReq<{ trade: StoredTrade }>('GET', `/api/trades/${taken.data.trade.id}`);
+    const first = await ctx.jsonReq<{ trade: StoredTrade }>('GET', `/api/trades/${taken.data.trade.id}?viewer=${ctx.buyerId}`);
     expect(first.data.trade.status).toBe('ResolvedSeller');
     expect(first.data.trade.verdictSignature).toBeDefined();
     expect(first.data.trade.settlementTxid).toBeUndefined();
@@ -512,8 +514,12 @@ describe('Demo seller bot (protocol section 8)', () => {
 
     const early = await ctx.jsonReq('POST', `/api/demo/trades/${id}/verdict`, { verdict: VERDICT_BUYER });
     expect(early.status).toBe(400);
+    // Before the dispute a visitor reads the public view only: no names, no fiat terms.
     const earlyView = await ctx.jsonReq('GET', `/api/trades/${id}?arbiter=true`);
-    expect(earlyView.status).toBe(403);
+    expect(earlyView.status).toBe(200);
+    expect(earlyView.data.trade.public).toBe(true);
+    expect(earlyView.data.trade.buyerIdentity).toBeUndefined();
+    expect(earlyView.data.trade.fiatAmount).toBeUndefined();
 
     const disputed = await ctx.jsonReq<{ trade: StoredTrade }>('POST', `/api/trades/${id}/dispute`, {
       callerIdentity: ctx.buyerId,
@@ -521,9 +527,12 @@ describe('Demo seller bot (protocol section 8)', () => {
     });
     expect(disputed.data.trade.status).toBe('Disputed');
 
-    // Any visitor can open the arbiter view of a disputed demo trade.
+    // Any visitor can open the arbiter view of a disputed demo trade: the whole record, without the chat key.
     const view = await ctx.jsonReq('GET', `/api/trades/${id}?arbiter=true`);
     expect(view.status).toBe(200);
+    expect(view.data.trade.public).toBeUndefined();
+    expect(view.data.trade.disputeReason).toBe('Testing the demo arbiter console');
+    expect(view.data.trade.sharedTradeKeyHex).toBeUndefined();
 
     const decided = await ctx.jsonReq<{ trade: StoredTrade; simulatedArbiter: boolean }>(
       'POST',

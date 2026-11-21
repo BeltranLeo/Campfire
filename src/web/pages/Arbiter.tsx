@@ -26,9 +26,9 @@ import { checkEscrow, checkForArbiter, isFinal, newerTrade, signedPayoutPkh, sig
 //  - Between two wallets: only whoever holds the admin token (arbiterToken.ts) may decide, when the offer names
 //    the service's arbiter key. The design has no screens for this one; its copy is invented and marked.
 //
-// The page reads the trade the ordinary way, not with ?arbiter=true: that view only adds the chat key, which the
-// console never shows, and the service refuses it once a verdict is out, when this page still has to load.
-// Only the decrypted chat needs the arbiter view, and only while the trade is disputed.
+// The page reads the trade with the admin token when there is one: without it the service sends only the public
+// view, except on a disputed demo trade. Only the decrypted chat needs ?arbiter=true, and only while the trade
+// is disputed.
 
 const POLL_MS = 3000;
 
@@ -39,16 +39,19 @@ export function Arbiter() {
 }
 
 function ArbiterLoader({ id }: { id: string }) {
+  // With the admin token the service sends the whole record; without it, the public view, except on a demo
+  // trade that went to dispute, whose console is open to every visitor.
+  const token = useArbiterToken();
   const [trade, setTrade] = useState<Trade>();
   const accept = useCallback((incoming: Trade) => setTrade((current) => newerTrade(current, incoming)), []);
   const final = trade !== undefined && isFinal(trade);
   const load = usePoll(
     () =>
-      apiGet<{ trade: Trade }>(`/api/trades/${id}`).then((r) => {
+      apiGet<{ trade: Trade }>(`/api/trades/${id}`, token ?? undefined).then((r) => {
         accept(r.trade);
         return r.trade;
       }),
-    id,
+    `${id}:${token ?? ''}`,
     final ? undefined : POLL_MS,
   );
 
@@ -66,7 +69,8 @@ function Console({ trade, onUpdate }: { trade: Trade; onUpdate: (t: Trade) => vo
   // What the arbiter reads is what the parties signed, not the service's copy.
   const terms = signedTerms(trade);
   const amount = formatAmount(terms.amount, asset);
-  const fiat = formatFiatAmount(terms.fiatAmount, trade.fiat);
+  // The public view has no fiat terms; the page then only asks for the token, before anything reads them.
+  const fiat = terms.fiatAmount && trade.fiat ? formatFiatAmount(terms.fiatAmount, trade.fiat) : '';
   const [chat, setChat] = useState<ArbiterChat>();
   const [chatError, setChatError] = useState<string | null>(null);
   const t = useMessages().arbiter;
@@ -87,7 +91,7 @@ function Console({ trade, onUpdate }: { trade: Trade; onUpdate: (t: Trade) => vo
       </ConsoleFrame>
     );
   }
-  if (!demo && !decided) {
+  if (!demo && (!decided || trade.public)) {
     // Invented copy from here to the end of this block.
     if (config && config.arbiterPk.toLowerCase() !== trade.arbiterPk.toLowerCase()) {
       return (
@@ -111,6 +115,8 @@ function Console({ trade, onUpdate }: { trade: Trade; onUpdate: (t: Trade) => vo
         </ConsoleFrame>
       );
     }
+    // The token was just entered: the whole record is on its way.
+    if (trade.public) return <ConsoleLoading />;
   }
 
   const real = !demo;
@@ -226,7 +232,7 @@ function DecisionCard(props: {
     } catch (err) {
       // The verdict is broadcast inside the request, so its answer can be lost after the escrow was settled.
       try {
-        const { trade: latest } = await apiGet<{ trade: Trade }>(`/api/trades/${trade.id}`);
+        const { trade: latest } = await apiGet<{ trade: Trade }>(`/api/trades/${trade.id}`, token);
         props.onUpdate(latest);
         if (latest.status !== 'Disputed') return;
       } catch {

@@ -1,5 +1,5 @@
 import { Link } from 'react-router';
-import { apiGet, type Offer, type Trade } from '../api';
+import { apiGet, type Offer, type PublicTradePage } from '../api';
 import { assetInfo } from '../assets';
 import { Button } from '../components/Button';
 import { Details } from '../components/Details';
@@ -19,7 +19,8 @@ import { isSimulatedOffer, loadQuotes, priceOf, unique } from '../offerData';
 export function Landing() {
   const config = useConfig();
   const offers = usePoll(() => apiGet<{ offers: Offer[] }>('/api/offers?onlyOpen=true').then((r) => r.offers), 'offers');
-  const trades = usePoll(() => apiGet<{ trades: Trade[] }>('/api/trades').then((r) => r.trades), 'trades');
+  // Only the totals: the list itself is the public view, and the front page shows none of it.
+  const stats = usePoll(() => apiGet<PublicTradePage>('/api/trades?limit=1').then((r) => r.stats), 'trades');
   const latest = offers.data?.slice(0, 3) ?? [];
   const pairs = unique(latest.flatMap((o) => (o.document.price.type === 'floating' ? [o.document.price.pair] : [])));
   const quotes = usePoll(() => loadQuotes(pairs), pairs.join(','), pairs.length ? 30_000 : undefined);
@@ -131,12 +132,12 @@ export function Landing() {
             <h2 className="cf-heading">{t.statsTitle}</h2>
             <ProvenanceTag kind="chain">{t.statsTag}</ProvenanceTag>
           </div>
-          <Stats trades={trades.data} openOffers={offers.data?.length} />
+          <Stats stats={stats.data} openOffers={offers.data?.length} />
           <p className="cf-small cf-subtle">
             {t.proofBefore}
             <Link to="/transparency">{t.proofLink}</Link>
             {t.proofAfter}
-            {trades.data && trades.data.some((trade) => trade.isDemo) && t.mostlyDemo}
+            {stats.data && stats.data.demo > 0 && t.mostlyDemo}
           </p>
         </div>
       </section>
@@ -160,16 +161,15 @@ function HowSteps({ steps }: { steps: { title: string; body: string }[] }) {
   );
 }
 
-function Stats({ trades, openOffers }: { trades?: Trade[]; openOffers?: number }) {
-  const completed = trades?.filter((t) => t.status === 'Released' || t.status === 'ResolvedBuyer');
-  const sats = completed?.filter((t) => t.asset === 'BCH').reduce((sum, t) => sum + BigInt(t.amount), 0n);
+function Stats({ stats, openOffers }: { stats?: PublicTradePage['stats']; openOffers?: number }) {
+  const sats = stats ? BigInt(stats.bchSats) : undefined;
   const value = (v: string | undefined) => (v === undefined ? <Skeleton width={64} height={28} /> : v);
   const t = useMessages().landing;
   return (
     <div className="s-3">
       <div className="s-stat">
-        <strong>{value(completed?.length.toString())}</strong>
-        <span className="cf-small cf-muted">{t.tradesCompleted(completed?.length ?? 0)}</span>
+        <strong>{value(stats?.completed.toString())}</strong>
+        <span className="cf-small cf-muted">{t.tradesCompleted(stats?.completed ?? 0)}</span>
       </div>
       <div className="s-stat">
         <strong>{value(sats === undefined ? undefined : `${trimZeros(fromBaseUnits(sats, 8))} BCH`)}</strong>
