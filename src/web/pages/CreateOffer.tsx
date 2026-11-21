@@ -167,8 +167,10 @@ export function CreateOffer() {
   const status = sponsorship.data ?? null;
   const maxExpirySec = buying ? status?.maxExpirySec : undefined;
   const expiries = EXPIRIES_SEC.filter((s) => maxExpirySec === undefined || s <= maxExpirySec);
-  // The demo seller's limit, known before the form is built so a demo offer it would skip is caught here.
-  const demoMaxText = coin === 'BCH' ? demo.data?.limits.maxBchSats : demo.data?.limits.maxPusdUnits;
+  // The demo seller's limit, known before the form is built so a demo offer it would skip is caught here. A service
+  // without a demo seller answers `{ enabled: false }`, with no limits.
+  const demoLimits = demo.data?.enabled ? demo.data.limits : undefined;
+  const demoMaxText = coin === 'BCH' ? demoLimits?.maxBchSats : demoLimits?.maxPusdUnits;
   const demoMaxUnits = demoMaxText !== undefined ? BigInt(demoMaxText) : undefined;
   const built = config
     ? buildOfferDocument({
