@@ -2,3 +2,12 @@
 .s-chat-time { flex: none; white-space: nowrap; }
 .s-item > .s-cell > .cf-small { overflow-wrap: anywhere; }
 .s-item > .cf-badge { flex: none; }
+
+/* Wide screens: the list on the left, the chosen conversation on the right and kept in view (Chats.tsx, data-desk). */
+.ch-split { display: grid; grid-template-columns: minmax(0, 400px) minmax(0, 1fr); gap: var(--space-6); align-items: start; }
+.ch-list { display: flex; flex-direction: column; gap: var(--space-5); min-width: 0; }
+/* 88 px: the sticky header and a gap. */
+.ch-pane { position: sticky; top: 88px; display: flex; flex-direction: column; gap: var(--space-4); min-width: 0; }
+.ch-pane .tr-chat .cf-chat { max-height: max(240px, calc(100vh - 88px - 330px)); }
+.ch-panehead { display: flex; align-items: center; justify-content: space-between; gap: var(--space-4); }
+.s-item[aria-current] { background: var(--bg); box-shadow: inset 3px 0 0 var(--action-accent); }

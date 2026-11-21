@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { Link } from 'react-router';
+import { Link, useSearchParams } from 'react-router';
 import { aliasFor } from '../alias';
 import { ApiError, apiGet, isFinalState, type Trade } from '../api';
 import { assetInfo } from '../assets';
@@ -7,8 +7,11 @@ import { chatState, createChatFeed, createChatReader, lastRead, onChatRead, type
 import { IMAGE_PREVIEW, chatRow, formatChatTime, listsChat, mapLimit, sortChatRows, type ChatEntry, type ChatRow } from '../chats';
 import { Button } from '../components/Button';
 import { EmptyState, Notice, Skeleton } from '../components/States';
+import { StatusPill } from '../components/StatusPill';
+import { TradeChat } from '../components/TradeChat';
 import { useConfig } from '../config';
-import { formatAmount } from '../format';
+import { formatAmount, formatFiatAmount } from '../format';
+import { DESK_QUERY, useMediaQuery } from '../hooks/useMediaQuery';
 import { usePoll } from '../hooks/usePoll';
 import { readSessionKey } from '../take';
 import { roleOf } from '../trade';
@@ -16,7 +19,8 @@ import { useWallet } from '../wallet';
 
 // Chats (Chats-* screens): one row per trade whose chat is open or was, with the newest message decrypted in this
 // browser, the unread count and when it was written. The list refreshes every few seconds; reading a chat on the
-// trade page clears its badge here at once.
+// trade page clears its badge here at once. On a wide screen the list sits on the left and the chosen conversation
+// on the right (/chats?trade=<id>), so reading several chats does not mean leaving the page each time.
 
 const REFRESH_MS = 10_000;
 /** Chats fetched at once, so a long history does not fire dozens of requests together. */
@@ -91,9 +95,11 @@ export function Chats() {
   const wallet = useWallet();
   const identity = wallet.status === 'connected' ? wallet.identity : null;
   const chats = useChatEntries(identity);
+  const desk = useMediaQuery(DESK_QUERY);
+  const split = desk && Boolean(chats.data && chats.data.length > 0);
 
   return (
-    <main className="s-main">
+    <main className="s-main" data-desk={split ? 'wide' : undefined}>
       <div className="s-pagehead">
         <h1 className="cf-title">Chats</h1>
         <p className="cf-small cf-muted">One conversation per trade, encrypted end to end.</p>
@@ -114,7 +120,7 @@ export function Chats() {
           </EmptyState>
         </section>
       ) : chats.data ? (
-        <ChatList entries={chats.data} />
+        <ChatList entries={chats.data} split={split} />
       ) : chats.error ? (
         <section className="cf-card">
           <div className="cf-stack">
@@ -153,7 +159,7 @@ function ListSkeleton() {
 
 type Row = ChatRow & { entry: ChatEntry };
 
-function ChatList({ entries }: { entries: ChatEntry[] }) {
+function ChatList({ entries, split }: { entries: ChatEntry[]; split: boolean }) {
   // Reading a chat on the trade page records it at once; render again so its badge goes.
   const [, setReads] = useState(0);
   useEffect(() => {
@@ -177,14 +183,17 @@ function ChatList({ entries }: { entries: ChatEntry[] }) {
   const active = sortChatRows(rows.filter((r) => r.active));
   const history = sortChatRows(rows.filter((r) => !r.active));
   const now = Date.now();
+  // Side by side, the conversation shown is the one in the address, or else the first in the list.
+  const [params] = useSearchParams();
+  const asked = params.get('trade');
+  const shown = split ? (rows.find((r) => r.id === asked) ?? active[0] ?? history[0]) : undefined;
+  const item = (row: Row) => <ChatItem key={row.id} row={row} now={now} split={split} current={row === shown} />;
 
-  return (
+  const list = (
     <>
       {active.length > 0 && (
         <section className="cf-card" data-flush>
-          {active.map((row) => (
-            <ChatItem key={row.id} row={row} now={now} />
-          ))}
+          {active.map(item)}
         </section>
       )}
       {history.length > 0 && (
@@ -193,30 +202,70 @@ function ChatList({ entries }: { entries: ChatEntry[] }) {
             {/* Invented copy: the name of the finished trades' tab on My trades. */}
             <h2 className="cf-heading">History</h2>
           </div>
-          {history.map((row) => (
-            <ChatItem key={row.id} row={row} now={now} />
-          ))}
+          {history.map(item)}
         </section>
       )}
       <Notice>Chats can only be read on the device that started the trade: the key never leaves it.</Notice>
     </>
   );
+
+  if (!shown) return list;
+  return (
+    <div className="ch-split">
+      <div className="ch-list">{list}</div>
+      <ChatPane key={shown.id} entry={shown.entry} />
+    </div>
+  );
 }
 
-function ChatItem({ row, now }: { row: Row; now: number }) {
+/** The chosen conversation beside the list: who and what the trade is, a way to the trade, and its chat. */
+function ChatPane({ entry }: { entry: ChatEntry }) {
+  const config = useConfig();
+  const { trade, role } = entry;
+  const asset = assetInfo(trade.asset, trade.assetDecimals, config);
+  return (
+    <div className="ch-pane">
+      <section className="cf-card" data-pad>
+        <div className="ch-panehead">
+          <div className="cf-stack" data-gap="1">
+            <strong className="cf-heading">{otherParty(trade, role)}</strong>
+            <span className="cf-small cf-muted">
+              {/* Invented copy */}
+              {role === 'seller' ? 'Selling' : 'Buying'} {formatAmount(trade.amount, asset)} for {formatFiatAmount(trade.fiatAmount, trade.fiat)}
+            </span>
+            <span>
+              <StatusPill state={trade.status} role={role} side={trade.side} />
+            </span>
+          </div>
+          {/* Invented copy */}
+          <Button to={`/trade/${trade.id}`}>Open trade</Button>
+        </div>
+      </section>
+      <TradeChat trade={trade} role={role} />
+    </div>
+  );
+}
+
+/** The other side of the trade as the list names them: the demo bot by what it is, anyone else by role and name. */
+function otherParty(trade: Trade, role: ChatEntry['role']): string {
+  if (trade.isDemo) return role === 'buyer' ? 'Demo seller' : 'Demo buyer'; // Invented copy
+  // Invented copy: mirrors the design's "Seller …"
+  return role === 'buyer' ? `Seller ${aliasFor(trade.sellerIdentity).name}` : `Buyer ${aliasFor(trade.buyerIdentity).name}`;
+}
+
+function ChatItem({ row, now, split, current }: { row: Row; now: number; split: boolean; current: boolean }) {
   const config = useConfig();
   const { trade, role } = row.entry;
   const asset = assetInfo(trade.asset, trade.assetDecimals, config);
-  // The demo bot is shown by what it is; anyone else by the other side's role and the same name the offer list shows.
-  const other = trade.isDemo
-    ? role === 'buyer'
-      ? 'Demo seller'
-      : 'Demo buyer' // Invented copy
-    : role === 'buyer'
-      ? `Seller ${aliasFor(trade.sellerIdentity).name}`
-      : `Buyer ${aliasFor(trade.buyerIdentity).name}`; // Invented copy: mirrors the design's "Seller …"
+  const other = otherParty(trade, role);
+  // Side by side a row opens its chat on the right; otherwise it goes to the trade page.
   return (
-    <Link className="s-item" to={row.href}>
+    <Link
+      className="s-item"
+      to={split ? `/chats?trade=${encodeURIComponent(trade.id)}` : row.href}
+      replace={split}
+      aria-current={current ? 'true' : undefined}
+    >
       <span className="s-cell">
         <strong>{other}</strong>
         <span className="cf-small cf-muted">
