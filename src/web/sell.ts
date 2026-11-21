@@ -11,6 +11,7 @@ import { applyMargin, formatBch, formatFiat, fromBaseUnits } from './format';
 import { canonicalMethod, findMethod, isSuggestedAnywhere, methodsFor } from './paymentMethods';
 import { parseAmount } from './take';
 import { TradeActionError } from './trade';
+import { text } from './messages';
 
 export type PriceType = 'market' | 'fixed';
 
@@ -136,9 +137,9 @@ export function keepMethodsFor(methods: string, fiat: string): string {
 /** What is wrong with the chosen payment methods, in words that fit chips. Null if nothing. */
 export function methodsProblem(methods: string, reserved = 0): string | null {
   const names = selectedMethods(methods);
-  if (names.length === 0 && reserved === 0) return 'Choose at least one way to pay.';
-  if (names.length > MAX_METHODS - reserved) return `Choose up to ${MAX_METHODS - reserved} ways to pay.`;
-  if (names.some((n) => n.length > MAX_METHOD_LENGTH)) return `Each name can have up to ${MAX_METHOD_LENGTH} characters.`;
+  if (names.length === 0 && reserved === 0) return text().create.chooseOne;
+  if (names.length > MAX_METHODS - reserved) return text().create.chooseUpTo(MAX_METHODS - reserved);
+  if (names.some((n) => n.length > MAX_METHOD_LENGTH)) return text().create.nameTooLong(MAX_METHOD_LENGTH);
   return null;
 }
 
@@ -156,11 +157,10 @@ export function describeYourPrice(p: {
 }): string | null {
   const coin = p.coin ?? 'BCH';
   const money = (v: number) => formatFiat(v, p.fiat).replace('.00 ', ' ');
-  if (p.priceType === 'fixed') return p.fixedPrice === null ? null : `Your price: ${money(Number(p.fixedPrice))} per ${coin}`;
+  const t = text().create;
+  if (p.priceType === 'fixed') return p.fixedPrice === null ? null : t.yourPricePrefix + t.yourFixedPrice(money(Number(p.fixedPrice)), coin);
   if (p.marginBps === null || p.marketPrice === null) return null;
-  const percent = Math.abs(p.marginBps) / 100;
-  const label = p.marginBps === 0 ? 'market price' : `market ${p.marginBps > 0 ? '+' : '−'} ${percent}%`;
-  return `Your price: ${label} (1 ${coin} ≈ ${money(applyMargin(p.marketPrice, p.marginBps))} today)`;
+  return t.yourPricePrefix + t.yourMarketPrice(p.marginBps, coin, money(applyMargin(p.marketPrice, p.marginBps)));
 }
 
 export type OfferBuild = { ok: true; document: OfferDocument; json: string } | { ok: false; errors: FormErrors };
@@ -190,33 +190,33 @@ export function buildOfferDocument(params: {
   let price: OfferDocument['price'] | undefined;
   if (form.priceType === 'market') {
     const marginBps = parseMarginBps(form.margin);
-    if (marginBps === null) errors.margin = 'Enter up to 50% below or 100% above the market price, with up to two decimals.';
+    if (marginBps === null) errors.margin = text().create.badMargin;
     else price = { type: 'floating', pair: `${coin}/${form.fiat}`, marginBps };
   } else {
     const value = parseFixedPrice(form.fixedPrice);
-    if (value === null) errors.fixedPrice = 'Enter the price with digits and a dot for decimals, for example 480000.50.';
+    if (value === null) errors.fixedPrice = text().create.badFixed;
     else price = { type: 'fixed', value };
   }
 
   const min = parseAmount(form.min, decimals);
   const max = parseAmount(form.max, decimals);
   const minUnits = coin === 'BCH' ? MIN_TRADE_SATS : MIN_TRADE_PUSD_UNITS;
-  if (min === null || min < minUnits) errors.min = `The smallest trade must be at least ${formatCoin(minUnits, coin)}.`;
-  if (max === null || max <= 0n) errors.max = `Enter the largest trade in ${coin}, for example ${DEFAULT_RANGE[coin].max}.`;
-  else if (min !== null && max < min) errors.max = 'The largest trade cannot be below the smallest.';
+  if (min === null || min < minUnits) errors.min = text().create.minTooSmall(formatCoin(minUnits, coin));
+  if (max === null || max <= 0n) errors.max = text().create.badMax(coin, DEFAULT_RANGE[coin].max);
+  else if (min !== null && max < min) errors.max = text().create.maxBelowMin;
 
   // A demo buy offer carries the simulated method the demo seller looks for; real methods are optional then.
   const demo = form.side === 'buy' && form.demo === true;
   const typed = demo && form.methods.trim() === '' ? [] : parseMethods(form.methods);
   const methods = typed && demo && !typed.includes(DEMO_METHOD) ? [...typed, DEMO_METHOD] : typed;
   if (!methods || methods.length > MAX_METHODS) {
-    errors.methods = `Name 1 to ${MAX_METHODS - (demo ? 1 : 0)} payment methods, separated by commas, up to ${MAX_METHOD_LENGTH} characters each.`;
+    errors.methods = text().create.badMethods(MAX_METHODS - (demo ? 1 : 0), MAX_METHOD_LENGTH);
   }
   if (demo && params.demoMaxUnits !== undefined && min !== null && min > params.demoMaxUnits && !errors.min) {
-    errors.min = `For a demo answer, keep the smallest trade at ${formatCoin(params.demoMaxUnits, coin)} or less.`;
+    errors.min = text().create.demoMin(formatCoin(params.demoMaxUnits, coin));
   }
   // Without the service's PUSD category there is no token to name: the form waits for the configuration.
-  if (coin === 'PUSD' && !params.pusdCategory) errors.min ??= 'Campfire is still loading the PUSD token. Try again in a moment.';
+  if (coin === 'PUSD' && !params.pusdCategory) errors.min ??= text().create.pusdLoading;
 
   if (Object.keys(errors).length > 0 || !price || min === null || max === null || !methods) return { ok: false, errors };
 
@@ -241,7 +241,7 @@ export function buildOfferDocument(params: {
     validateOfferDocument(document);
   } catch (err) {
     // The form checks everything the protocol does, so this means the service's keys are unusable.
-    return { ok: false, errors: { margin: err instanceof Error ? err.message : 'The offer is not valid.' } };
+    return { ok: false, errors: { margin: err instanceof Error ? err.message : text().create.invalidOffer } };
   }
   return { ok: true, document, json: JSON.stringify(document) };
 }
@@ -280,7 +280,7 @@ export async function buildCloseOffer(params: {
   receiveXpub: string;
 }): Promise<WalletTransactionRequest> {
   const { offer } = params;
-  if (!offer.markerAddress) throw new TradeActionError('This offer has no marker to spend.');
+  if (!offer.markerAddress) throw new TradeActionError(text().create.noMarker);
   const wanted = binToHex(cashAddressToPkh(offer.markerAddress));
   // The service records the index for offers published since buy offers exist; older offers are searched for.
   const recorded = offer.markerReceiveIndex;
@@ -288,10 +288,10 @@ export async function buildCloseOffer(params: {
   for (let i = 0; i < MARKER_SEARCH_LIMIT && index < 0; i++) {
     if (binToHex(derivePayoutPkhFromXpub(params.receiveXpub, i)) === wanted) index = i;
   }
-  if (index < 0) throw new TradeActionError("This offer's marker does not belong to the connected wallet. Connect the wallet that published it.");
+  if (index < 0) throw new TradeActionError(text().create.foreignMarker);
   const utxos = await params.provider.getUtxos(offer.markerAddress);
   const marker = utxos.find((u) => u.txid === offer.offerTxid && u.vout === (offer.markerVout ?? 1));
-  if (!marker) throw new TradeActionError('The marker of this offer is already spent. Reload the page to see its state.');
+  if (!marker) throw new TradeActionError(text().create.markerSpent);
   const markerUtxo = {
     ...marker,
     lockingBytecode: binToHex(pkhToLockingBytecode(wanted)),

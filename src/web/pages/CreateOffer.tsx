@@ -3,7 +3,7 @@ import { Link, useNavigate, useSearchParams } from 'react-router';
 import { verifyPriceQuote, computeFiatAmount } from '../../protocol/trades.js';
 import { MARKER_SATOSHIS, buildPublishOfferTransaction } from '../../protocol/offers.js';
 import { ApiError, apiGet, apiPost, type DemoInfo, type Offer, type PriceQuote, type SponsorshipStatus, type TradeSummary } from '../api';
-import { Button, WALLET_DECLINED } from '../components/Button';
+import { Button } from '../components/Button';
 import { Details } from '../components/Details';
 import { noWalletNote } from '../components/NoWalletNote';
 import { HashLink, ProvenanceTag, SimBox } from '../components/Provenance';
@@ -43,6 +43,7 @@ import {
 } from '../sell';
 import { parseAmount, payoutAddress } from '../take';
 import { WalletDeclined, useWallet } from '../wallet';
+import { useMessages } from '../lang';
 
 // Create an offer in three steps and a review (Create-Sell-* and Create-Buy-* screens): sell or buy, price and amounts,
 // ways to pay, then the one publish button. A sell offer is one wallet signature: a transaction with the offer's
@@ -69,6 +70,8 @@ const INITIAL: Omit<OfferForm, 'side'> = {
 
 export function CreateOffer() {
   const wallet = useWallet();
+  const messages = useMessages();
+  const t = messages.create;
   const config = useConfig();
   const navigate = useNavigate();
   const [params] = useSearchParams();
@@ -102,7 +105,7 @@ export function CreateOffer() {
   const set = (patch: Partial<OfferForm>) => setForm((f) => ({ ...f, ...patch }));
   const edit = (field: FormField, patch: Partial<OfferForm>) => {
     set(patch);
-    setTouched((t) => new Set(t).add(field));
+    setTouched((current) => new Set(current).add(field));
   };
   const buying = form.side === 'buy';
   const coin: OfferCoin = form.coin ?? 'BCH';
@@ -150,7 +153,6 @@ export function CreateOffer() {
   const marginBps = parseMarginBps(form.margin);
   const unitPrice = form.priceType === 'fixed' ? parseFixedPrice(form.fixedPrice) : verifiedQuote?.price ?? null;
   const effectiveMargin = form.priceType === 'market' ? marginBps ?? 0 : 0;
-  const fiatInfo = SELL_FIATS.find((f) => f.code === form.fiat) ?? SELL_FIATS[0];
   const approx = (typed: string) => {
     const amount = parseAmount(typed, decimals);
     if (!unitPrice || amount === null || amount <= 0n || (form.priceType === 'market' && marginBps === null)) return null;
@@ -215,7 +217,7 @@ export function CreateOffer() {
     );
     busyStep.setStep(null);
     const signedTxHex = await wallet.sign(tx.request, tx.inputPaths);
-    busyStep.setStep('Publishing the offer…');
+    busyStep.setStep(t.publishing);
     const { offer } = await apiPost<{ offer: Offer }>('/api/offers', {
       sellerIdentity: identity,
       offerJson: built.json,
@@ -253,7 +255,7 @@ export function CreateOffer() {
     } catch (err) {
       if (err instanceof WalletDeclined) setDeclined(true);
       else if (err instanceof ApiError && err.status === 429) setLimitHit(err.message);
-      else setFailure(err instanceof ApiError ? err.message : err instanceof Error ? err.message : 'Something went wrong. Try again.');
+      else setFailure(err instanceof ApiError ? err.message : err instanceof Error ? err.message : t.somethingWrong);
       setPublishing(false);
       busyStep.setStep(null);
       if (buying) sponsorship.reload();
@@ -298,7 +300,7 @@ export function CreateOffer() {
   });
   // While the market price is missing the line says why, in the words the hint always used.
   const priceStatus =
-    form.priceType === 'market' && !verifiedQuote ? (quote.loading ? 'Loading the market price…' : 'The market price could not be loaded or verified.') : null;
+    form.priceType === 'market' && !verifiedQuote ? (quote.loading ? t.loadingMarket : t.marketUnavailable) : null;
 
   const chooseSide = (side: 'sell' | 'buy') => {
     // The margin follows the side's default only while the person has not typed their own.
@@ -318,21 +320,21 @@ export function CreateOffer() {
   };
   const nextFromPrice = () => {
     if (priceOk) setStep(3);
-    else setTouched((t) => new Set([...t, ...priceFields]));
+    else setTouched((current) => new Set([...current, ...priceFields]));
   };
   const nextFromMethods = () => {
-    if (errors.methods) setTouched((t) => new Set(t).add('methods'));
+    if (errors.methods) setTouched((current) => new Set(current).add('methods'));
     else if (!priceOk) {
       // Something from the price step broke since (the demo switch lowers the smallest trade): show it there.
-      setTouched((t) => new Set([...t, ...priceFields]));
+      setTouched((current) => new Set([...current, ...priceFields]));
       setStep(2);
     } else setStep('review');
   };
 
-  const rangeText = `${toAmountInput(parseAmount(form.min, decimals) ?? 0n, coinAsset)} to ${toAmountInput(parseAmount(form.max, decimals) ?? 0n, coinAsset)} ${coin}`;
-  const payNames = [...chosen, ...(demoOn ? ['Simulated (demo)'] : [])];
+  const rangeText = `${toAmountInput(parseAmount(form.min, decimals) ?? 0n, coinAsset)} ${t.rangeTo} ${toAmountInput(parseAmount(form.max, decimals) ?? 0n, coinAsset)} ${coin}`;
+  const payNames = [...chosen, ...(demoOn ? [t.simulatedMethod] : [])];
   const windowMinutes = form.paymentWindowSec / 60;
-  const openFor = form.expirySec === 86_400 ? '1 day' : `${form.expirySec / 86_400} days`;
+  const openFor = t.days(form.expirySec / 86_400);
 
   const priceHint = (
     <p className="co-price" aria-live="polite">
@@ -344,32 +346,32 @@ export function CreateOffer() {
     <main className="s-main" data-narrow>
       <div className="s-pagehead">
         <Link className="s-back" to="/trades">
-          ← My trades
+          {t.backTrades}
         </Link>
-        <span className="cf-stepper">{step === 'review' ? 'Review' : `Step ${step} of 3`}</span>
+        <span className="cf-stepper">{step === 'review' ? t.review : t.stepOf(step)}</span>
         <div className="cf-progress" aria-hidden="true">
           {[1, 2, 3].map((n) => (
             <i key={n} data-state={step === 'review' || n < step ? 'done' : n === step ? 'current' : undefined} />
           ))}
         </div>
-        <h1 className="cf-title">Create an offer</h1>
+        <h1 className="cf-title">{t.title}</h1>
       </div>
 
       <section className="cf-card" data-pad>
         <div className="s-form">
           <h2 className="co-step" tabIndex={-1} ref={heading}>
-            {step === 1 ? 'What do you want to do?' : step === 2 ? 'Price and amounts' : step === 3 ? (buying ? 'How can you pay?' : 'How can buyers pay you?') : 'Review your offer'}
+            {t.stepTitle(step, buying)}
           </h2>
 
           {step === 1 && (
             <>
               {/* Invented copy: the design offers BCH only. */}
               <div className="cf-field">
-                <label id="co-coin">Which coin?</label>
+                <label id="co-coin">{t.whichCoin}</label>
                 <div className="cf-seg" role="group" aria-labelledby="co-coin">
                   {OFFER_COINS.map((c) => (
                     <button key={c} type="button" aria-pressed={coin === c} onClick={() => chooseCoin(c)}>
-                      {c === 'BCH' ? 'Bitcoin Cash' : 'PUSD (dollar token)'}
+                      {t.coinName(c)}
                     </button>
                   ))}
                 </div>
@@ -377,30 +379,30 @@ export function CreateOffer() {
               <div className="cf-stack" data-gap="3">
                 <button type="button" className="cf-choice" aria-pressed={!buying} onClick={() => chooseSide('sell')}>
                   <span>
-                    Sell {coin}
-                    <small>Buyers pay you in the currency you choose</small>
+                    {t.sell(coin)}
+                    <small>{t.sellNote}</small>
                   </span>
                 </button>
                 <button type="button" className="cf-choice" aria-pressed={buying} onClick={() => chooseSide('buy')}>
                   <span>
-                    Buy {coin}
-                    <small>Sellers send you {coin}, you pay them</small>
+                    {t.buy(coin)}
+                    <small>{t.buyNote(coin)}</small>
                   </span>
                 </button>
               </div>
               <div className="cf-field">
-                <label id="co-money">In which money?</label>
+                <label id="co-money">{t.whichMoney}</label>
                 <div className="cf-seg" role="group" aria-labelledby="co-money">
                   {SELL_FIATS.map((f) => (
                     <button key={f.code} type="button" aria-pressed={form.fiat === f.code} onClick={() => chooseFiat(f.code)}>
-                      {f.name}
+                      {t.fiatName(f.code)}
                     </button>
                   ))}
                 </div>
               </div>
               <div className="s-actions">
                 <Button variant="primary" onClick={() => setStep(2)}>
-                  Continue
+                  {t.continue}
                 </Button>
               </div>
             </>
@@ -409,13 +411,13 @@ export function CreateOffer() {
           {step === 2 && (
             <>
               <div className="cf-field">
-                <label id="co-price">Price</label>
+                <label id="co-price">{t.price}</label>
                 <div className="cf-seg" role="group" aria-labelledby="co-price">
                   <button type="button" aria-pressed={form.priceType === 'market'} onClick={() => set({ priceType: 'market' })}>
-                    Market price
+                    {t.marketPrice}
                   </button>
                   <button type="button" aria-pressed={form.priceType === 'fixed'} onClick={() => set({ priceType: 'fixed' })}>
-                    Fixed price
+                    {t.fixedPrice}
                   </button>
                 </div>
               </div>
@@ -423,14 +425,14 @@ export function CreateOffer() {
               {form.priceType === 'market' ? (
                 <div className="cf-field" data-invalid={shown('margin') ? true : undefined}>
                   <label id="co-margin" htmlFor="margin">
-                    {buying ? 'The most I pay, compared with the market price' : 'Your price, compared with the market price'}
+                    {t.marginLabel(buying)}
                   </label>
                   <div className="cf-seg" role="group" aria-labelledby="co-margin">
                     <button type="button" aria-pressed={!marginBelow} onClick={() => setMargin(false, marginSize)}>
-                      Above market
+                      {t.aboveMarket}
                     </button>
                     <button type="button" aria-pressed={marginBelow} onClick={() => setMargin(true, marginSize)}>
-                      Below market
+                      {t.belowMarket}
                     </button>
                   </div>
                   <div className="cf-inputgroup">
@@ -458,13 +460,19 @@ export function CreateOffer() {
                     {shown('margin') ??
                       [
                         verifiedQuote && marginBps !== null
-                          ? `${buying ? 'You pay' : 'Buyers pay'} ${formatFiat(applyMargin(verifiedQuote.price, marginBps), form.fiat)} per ${coin} today, ${describeVsMarket(marginBps)} the market price of ${formatFiat(Number(verifiedQuote.price), form.fiat)}.`
+                          ? t.marginHint(
+                              buying,
+                              formatFiat(applyMargin(verifiedQuote.price, marginBps), form.fiat),
+                              coin,
+                              t.vsMarket(marginBps),
+                              formatFiat(Number(verifiedQuote.price), form.fiat),
+                            )
                           : verifiedQuote
                             ? null
                             : quote.loading
-                              ? 'Loading the market price…'
-                              : 'The market price could not be loaded or verified.',
-                        range ? `${buying ? 'Similar offers pay' : 'Open offers use'} ${describeRange(range)}.` : null,
+                              ? t.loadingMarket
+                              : t.marketUnavailable,
+                        range ? t.similarOffers(buying, describeRange(range, t.rangeTo)) : null,
                       ]
                         .filter(Boolean)
                         .join(' ')}
@@ -472,7 +480,7 @@ export function CreateOffer() {
                 </div>
               ) : (
                 <div className="cf-field" data-invalid={shown('fixedPrice') ? true : undefined}>
-                  <label htmlFor="fixed">Price per {coin}</label>
+                  <label htmlFor="fixed">{t.pricePer(coin)}</label>
                   <div className="cf-inputgroup">
                     <input
                       id="fixed"
@@ -487,7 +495,7 @@ export function CreateOffer() {
                   </div>
                   <span className="cf-hint">
                     {shown('fixedPrice') ??
-                      (verifiedQuote ? `The market price is ${formatFiat(Number(verifiedQuote.price), form.fiat)} today. A fixed price does not follow it.` : 'The price stays the same until you close the offer.')}
+                      (verifiedQuote ? t.fixedVsMarket(formatFiat(Number(verifiedQuote.price), form.fiat)) : t.fixedStays)}
                   </span>
                 </div>
               )}
@@ -495,7 +503,7 @@ export function CreateOffer() {
 
               <div className="s-2">
                 <div className="cf-field" data-invalid={shown('min') ? true : undefined}>
-                  <label htmlFor="min">Smallest trade</label>
+                  <label htmlFor="min">{t.smallest}</label>
                   <div className="cf-inputgroup">
                     <input
                       id="min"
@@ -511,7 +519,7 @@ export function CreateOffer() {
                   <span className="cf-hint">{shown('min') ?? (approx(form.min) ? `≈ ${approx(form.min)}` : ' ')}</span>
                 </div>
                 <div className="cf-field" data-invalid={shown('max') ? true : undefined}>
-                  <label htmlFor="max">Largest trade</label>
+                  <label htmlFor="max">{t.largest}</label>
                   <div className="cf-inputgroup">
                     <input
                       id="max"
@@ -530,10 +538,10 @@ export function CreateOffer() {
 
               <div className="s-actions">
                 <Button variant="primary" onClick={nextFromPrice}>
-                  Continue
+                  {t.continue}
                 </Button>
                 <Button variant="ghost" onClick={() => setStep(1)}>
-                  Back
+                  {t.back}
                 </Button>
               </div>
             </>
@@ -542,7 +550,7 @@ export function CreateOffer() {
           {step === 3 && (
             <>
               <div className="cf-field" data-invalid={methodsMessage ? true : undefined}>
-                <label id="co-methods">{buying ? 'Ways you can pay' : 'Ways buyers can pay you'}</label>
+                <label id="co-methods">{t.methodsLabel(buying)}</label>
                 <div className="co-chips" role="group" aria-labelledby="co-methods">
                   {[...shownNames, ...customNames].map((name) => (
                     <button key={name} type="button" className="co-chip" aria-pressed={isChosen(name)} onClick={() => toggleChip(name)}>
@@ -552,18 +560,18 @@ export function CreateOffer() {
                   {!moreOpen && hiddenNames.some((n) => !isChosen(n)) && (
                     // Invented copy: the design shows only the most used methods.
                     <button type="button" className="co-chip" aria-expanded={false} onClick={() => setMoreOpen(true)}>
-                      More
+                      {t.more}
                     </button>
                   )}
                   <button type="button" className="co-chip" aria-pressed={otherOpen} aria-expanded={otherOpen} onClick={() => setOtherOpen((o) => !o)}>
-                    + Other
+                    {t.other}
                   </button>
                 </div>
                 {otherOpen && (
                   <div className="co-other">
                     <input
                       className="cf-input"
-                      aria-label="Other ways to pay, separated by commas"
+                      aria-label={t.otherLabel}
                       placeholder="Revolut, Payoneer"
                       value={other}
                       onChange={(e) => setOther(e.target.value)}
@@ -575,52 +583,49 @@ export function CreateOffer() {
                       }}
                     />
                     <Button onClick={addOther} disabled={!other.trim()}>
-                      Add
+                      {t.add}
                     </Button>
                   </div>
                 )}
-                <span className="cf-hint">{methodsMessage ?? 'Only the names are public. You share your account details with each buyer, encrypted, after you accept them.'}</span>
+                <span className="cf-hint">{methodsMessage ?? t.methodsHint}</span>
                 {/* Invented copy: the design has no reversible payment methods. */}
                 {reversibleNote && <Notice tone="attention">{reversibleNote}</Notice>}
               </div>
 
               <div className="s-2">
                 <div className="cf-field">
-                  <label htmlFor="window">Time to pay</label>
+                  <label htmlFor="window">{t.timeToPay}</label>
                   <select id="window" className="cf-select" value={form.paymentWindowSec} onChange={(e) => set({ paymentWindowSec: Number(e.target.value) })}>
                     {PAYMENT_WINDOWS_SEC.map((s) => (
                       <option key={s} value={s}>
-                        {s / 60} minutes
+                        {t.minutes(s / 60)}
                       </option>
                     ))}
                   </select>
                 </div>
                 <div className="cf-field">
-                  <label htmlFor="expires">Offer stays open for</label>
+                  <label htmlFor="expires">{t.staysOpen}</label>
                   <select id="expires" className="cf-select" value={form.expirySec} onChange={(e) => set({ expirySec: Number(e.target.value) })}>
                     {expiries.map((s) => (
                       <option key={s} value={s}>
-                        {s === 86_400 ? '1 day' : `${s / 86_400} days`}
+                        {t.days(s / 86_400)}
                       </option>
                     ))}
                   </select>
                   {buying && maxExpirySec !== undefined && (
-                    <span className="cf-hint">{Math.round(maxExpirySec / 86_400)} days at most for offers Campfire pays for.</span>
+                    <span className="cf-hint">{t.maxDays(Math.round(maxExpirySec / 86_400))}</span>
                   )}
                 </div>
               </div>
 
               {/* The demo is chosen, not discovered: a visible switch instead of typing a magic payment method. */}
               {buying && demoMax !== undefined && (
-                <SimBox label="Demo">
+                <SimBox label={t.demo}>
                   <label className="s-tick">
                     <input type="checkbox" checked={form.demo === true} onChange={(e) => toggleDemo(e.target.checked)} />
                     <span className="cf-stack" data-gap="1">
-                      <strong>Get a demo answer (simulated {fiatInfo.label.toLowerCase()})</strong>
-                      <span className="cf-small cf-muted">
-                        The demo seller answers right away for trades up to {formatCoin(demoMax, coin)}. The payment is simulated: no
-                        money moves, and the {coin} you get is real.
-                      </span>
+                      <strong>{t.demoAnswer(form.fiat)}</strong>
+                      <span className="cf-small cf-muted">{t.demoBody(formatCoin(demoMax, coin), coin)}</span>
                     </span>
                   </label>
                 </SimBox>
@@ -628,10 +633,10 @@ export function CreateOffer() {
 
               <div className="s-actions">
                 <Button variant="primary" onClick={nextFromMethods}>
-                  Review offer
+                  {t.reviewOffer}
                 </Button>
                 <Button variant="ghost" onClick={() => setStep(2)}>
-                  Back
+                  {t.back}
                 </Button>
               </div>
             </>
@@ -641,86 +646,84 @@ export function CreateOffer() {
             <>
               <div className="cf-card" data-pad>
                 <dl className="cf-dl">
-                  <dt>{buying ? 'You buy' : 'You sell'}</dt>
+                  <dt>{t.youTrade(buying)}</dt>
                   <dd className="co-num">
                     {rangeText} <EditLink onClick={() => setStep(2)} />
                   </dd>
-                  <dt>Price</dt>
+                  <dt>{t.price}</dt>
                   <dd className="co-num">
-                    {priceLine?.replace(/^Your price: /, '') ?? priceStatus ?? '—'} <EditLink onClick={() => setStep(2)} />
+                    {(priceLine?.startsWith(t.yourPricePrefix) ? priceLine.slice(t.yourPricePrefix.length) : priceLine) ?? priceStatus ?? '—'} <EditLink onClick={() => setStep(2)} />
                   </dd>
-                  <dt>{buying ? 'You pay by' : 'Buyers pay by'}</dt>
+                  <dt>{t.payBy(buying)}</dt>
                   <dd>
                     {payNames.join(', ') || '—'} <EditLink onClick={() => setStep(3)} />
                   </dd>
-                  <dt>Time to pay</dt>
-                  <dd className="co-num">{windowMinutes} minutes</dd>
-                  <dt>Open for</dt>
+                  <dt>{t.timeToPay}</dt>
+                  <dd className="co-num">{t.minutes(windowMinutes)}</dd>
+                  <dt>{t.openFor}</dt>
                   <dd className="co-num">{openFor}</dd>
                 </dl>
               </div>
 
               {buying ? (
                 blocked === 'daily' ? (
-                  <Notice tone="attention" title="Today’s free offers are used up">
-                    Campfire pays the network fee for {status?.dailyOffers} buy offers per day across all users. Please try again
-                    {nextSlot ? ` after ${nextSlot}.` : ' tomorrow.'}
+                  <Notice tone="attention" title={t.freeUsedUp}>
+                    {t.freeUsedUpBody(status?.dailyOffers, nextSlot)}
                   </Notice>
                 ) : blocked === 'open' ? (
                   // Invented copy: the design has a screen for the daily limit only.
-                  <Notice tone="attention" title={`You already have ${status?.openNow} open offers paid for by Campfire`}>
-                    Close one in My trades to publish another. Campfire pays for {status?.openOffersPerIdentity} open offers per wallet.
+                  <Notice tone="attention" title={t.openPaid(status?.openNow)}>
+                    {t.openPaidBody(status?.openOffersPerIdentity)}
                   </Notice>
                 ) : blocked === 'disabled' ? (
                   // Invented copy.
-                  <Notice tone="attention" title="Campfire is not paying for buy offers right now">Please try again later.</Notice>
+                  <Notice tone="attention" title={t.notPaying}>
+                    {t.tryLater}
+                  </Notice>
                 ) : limitHit ? (
-                  <Notice tone="attention" title="Campfire could not pay for this offer">
+                  <Notice tone="attention" title={t.couldNotPay}>
                     {limitHit}
                   </Notice>
                 ) : (
-                  <Notice tone="verified" title="Publishing is free for you">
-                    Campfire pays the network fee. It is still a real mainnet transaction, and you can close the offer anytime.
+                  <Notice tone="verified" title={t.freeForYou}>
+                    {t.freeForYouBody}
                   </Notice>
                 )
               ) : (
-                <Notice title="Publishing costs less than a cent">
-                  No coins are locked until someone takes your offer. You choose whether to accept each buyer.
-                </Notice>
+                <Notice title={t.lessThanCent}>{t.lessThanCentBody}</Notice>
               )}
 
               {!buying && Boolean(scan.error) && !scan.data && (
-                <Notice tone="danger" title="We could not read your wallet's coins">
-                  The network did not answer.{' '}
+                <Notice tone="danger" title={t.coinsError}>
+                  {t.networkSilent}{' '}
                   <button type="button" className="cf-copy" onClick={scan.reload}>
-                    Try again
+                    {messages.common.tryAgain}
                   </button>
                 </Notice>
               )}
               {short && scan.data && (
-                <Notice tone="attention" title="Your wallet does not have enough BCH">
-                  Publishing needs about {formatBch(needed)} for the marker and the fee. This wallet has {bch !== null && formatBch(bch)}
-                  that Campfire can see. {describeScan(scan.data)} Send some BCH to it: this page checks again every few seconds.{' '}
+                <Notice tone="attention" title={t.shortBch}>
+                  {t.shortBchBody(formatBch(needed), bch !== null ? formatBch(bch) : '', describeScan(scan.data))}{' '}
                   <button type="button" className="cf-copy" onClick={scan.reload}>
-                    Check again
+                    {t.checkAgain}
                   </button>
                 </Notice>
               )}
               {prep.data && prep.data.markerIndex === null && (
-                <Notice tone="attention" title="We could not find a fresh address in your wallet">
-                  The lookup took too long.{' '}
+                <Notice tone="attention" title={t.noFreshAddress}>
+                  {t.lookupSlow}{' '}
                   <button type="button" className="cf-copy" onClick={prep.reload}>
-                    Try again
+                    {messages.common.tryAgain}
                   </button>
                 </Notice>
               )}
               {declined && (
-                <Notice tone="attention" title="Nothing was published">
-                  {WALLET_DECLINED}
+                <Notice tone="attention" title={t.nothingPublished}>
+                  {messages.trade.walletDeclined}
                 </Notice>
               )}
               {failure && (
-                <Notice tone="danger" title="The offer was not published">
+                <Notice tone="danger" title={t.notPublished}>
                   {failure}
                 </Notice>
               )}
@@ -728,15 +731,15 @@ export function CreateOffer() {
               <div className="s-actions">
                 {wallet.status !== 'connected' ? (
                   <Button variant="primary" busy={wallet.status === 'pairing' || wallet.status === 'connecting'} onClick={wallet.connect} note={noWalletNote}>
-                    Connect wallet to publish
+                    {t.connectToPublish}
                   </Button>
                 ) : buying && (blocked === 'daily' || blocked === 'disabled') ? (
                   <Button variant="primary" to="/offers">
-                    Back to offers
+                    {t.backToOffers}
                   </Button>
                 ) : buying && blocked === 'open' ? (
                   <Button variant="primary" to="/trades?tab=offers">
-                    Go to My offers
+                    {t.goToMyOffers}
                   </Button>
                 ) : buying ? (
                   <Button
@@ -744,9 +747,9 @@ export function CreateOffer() {
                     busy={publishing}
                     disabled={!config || !prep.data || prep.data.markerIndex === null || !status}
                     onClick={publish}
-                    note="No signature needed."
+                    note={t.noSignature}
                   >
-                    Publish offer
+                    {t.publish}
                   </Button>
                 ) : (
                   <Button
@@ -757,32 +760,28 @@ export function CreateOffer() {
                     disabled={!config || !prep.data || !scan.data || prep.data.markerIndex === null || short}
                     onClick={publish}
                   >
-                    Publish offer
+                    {t.publish}
                   </Button>
                 )}
                 <Button variant="ghost" onClick={() => setStep(3)}>
-                  Back
+                  {t.back}
                 </Button>
               </div>
 
-              <Details summary="Arbiter and price source" tag={null}>
+              <Details summary={t.arbiterAndPrice} tag={null}>
                 <div className="cf-well cf-small">
-                  Campfire arbiter {config ? <HashLink value={config.arbiterPk} kind="plain" /> : <Skeleton width={90} style={{ display: 'inline-block' }} />}
+                  {t.campfireArbiter} {config ? <HashLink value={config.arbiterPk} kind="plain" /> : <Skeleton width={90} style={{ display: 'inline-block' }} />}
                   <br />
-                  <span className="cf-muted">Decides disputes by choosing buyer or seller. It can never take the coins.</span>
+                  <span className="cf-muted">{t.arbiterNote}</span>
                 </div>
                 {form.priceType === 'market' && (
                   <div className="cf-well cf-small">
-                    Campfire oracle {config ? <HashLink value={config.oraclePk} kind="plain" /> : <Skeleton width={90} style={{ display: 'inline-block' }} />}
+                    {t.campfireOracle} {config ? <HashLink value={config.oraclePk} kind="plain" /> : <Skeleton width={90} style={{ display: 'inline-block' }} />}
                     <br />
-                    <span className="cf-muted">Signs the market price each time someone takes the offer.</span>
+                    <span className="cf-muted">{t.oracleNote}</span>
                   </div>
                 )}
-                <div className="cf-well cf-small">
-                  The offer is a mainnet transaction with a {formatBch(MARKER_SATOSHIS)} marker
-                  {buying ? ' on a fresh address of yours' : ''}. It comes back to you when you close the offer
-                  {buying ? '' : ', and the network fee is the only cost'}.
-                </div>
+                <div className="cf-well cf-small">{t.markerNote(formatBch(MARKER_SATOSHIS), buying)}</div>
               </Details>
             </>
           )}
@@ -793,9 +792,10 @@ export function CreateOffer() {
 }
 
 function EditLink({ onClick }: { onClick: () => void }) {
+  const t = useMessages().create;
   return (
     <button type="button" className="co-edit" onClick={onClick}>
-      Edit
+      {t.edit}
     </button>
   );
 }
@@ -804,47 +804,41 @@ const defaultMargin = (side: 'sell' | 'buy') => (side === 'buy' ? '0.5' : INITIA
 
 /** 250 → "+2.5%", -100 → "-1%". */
 const signedPercent = (bps: number) => `${bps > 0 ? '+' : bps < 0 ? '-' : ''}${Math.abs(bps) / 100}%`;
-/** 250 → "2.5% above", -100 → "1% below", 0 → "equal to". */
-const describeVsMarket = (bps: number) => (bps === 0 ? 'equal to' : `${Math.abs(bps) / 100}% ${bps > 0 ? 'above' : 'below'}`);
 /** "+0% to +1%", or "+0.5%" when every offer uses the same margin. */
-const describeRange = (r: { low: number; high: number }) => (r.low === r.high ? signedPercent(r.low) : `${signedPercent(r.low)} to ${signedPercent(r.high)}`);
+const describeRange = (r: { low: number; high: number }, to: string) =>
+  r.low === r.high ? signedPercent(r.low) : `${signedPercent(r.low)} ${to} ${signedPercent(r.high)}`;
 
 function Published({ offer }: { offer: Offer }) {
   const buying = offer.document.side === 'buy';
+  const t = useMessages().create;
   return (
     <main className="s-main" data-narrow>
       <div className="s-pagehead">
-        <h1 className="cf-title">Your offer is published</h1>
+        <h1 className="cf-title">{t.published}</h1>
         <div className="cf-row">
-          <ProvenanceTag kind="chain">Real offer on mainnet</ProvenanceTag>
+          <ProvenanceTag kind="chain">{t.realOffer}</ProvenanceTag>
         </div>
       </div>
       <section className="cf-card" data-pad>
         <div className="cf-stack">
           {buying ? (
             // Invented copy: the design has no screen after publishing a buy offer.
-            <p className="cf-muted">
-              Sellers can answer it now. When one does, you have 10 minutes to accept their request, and you pay only after the seller locks the coins
-              for you. Open My trades to see requests.
-            </p>
+            <p className="cf-muted">{t.publishedBuy}</p>
           ) : (
-            <p className="cf-muted">
-              Buyers can take it now. When someone does, you will have 10 minutes to accept before the signed quote expires, and nothing is locked until
-              you do. Open My trades to see requests.
-            </p>
+            <p className="cf-muted">{t.publishedSell}</p>
           )}
           <dl className="cf-dl">
-            <dt>Offer</dt>
+            <dt>{t.offer}</dt>
             <dd>
               <HashLink value={offer.offerTxid} kind="transaction" />
-              {offer.sponsored && <span className="cf-small cf-subtle"> Publishing fee paid by Campfire</span>}
+              {offer.sponsored && <span className="cf-small cf-subtle">{t.feePaid}</span>}
             </dd>
           </dl>
           <div className="s-actions">
             <Button variant="primary" to="/trades">
-              Go to My trades
+              {t.goToTrades}
             </Button>
-            <Button to={`/offers/${offer.offerTxid}`}>View offer</Button>
+            <Button to={`/offers/${offer.offerTxid}`}>{t.viewOffer}</Button>
           </div>
         </div>
       </section>
