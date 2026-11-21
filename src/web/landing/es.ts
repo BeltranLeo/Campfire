@@ -38,8 +38,8 @@ export const ES_TEXT: Record<string, string> = {
   'Peer-to-peer Bitcoin Cash': 'Bitcoin Cash entre personas',
   'Trade without': 'Opera sin',
   'intermediaries.': 'intermediarios.',
-  'Buy or sell Bitcoin Cash directly with another person, for fiat money and with the payment methods you already use. While you trade, a contract on the blockchain holds the coins — not Campfire, not anyone.':
-    'Compra o vende Bitcoin Cash directamente con otra persona, por dinero fíat y con los medios de pago que ya usas. Mientras operas, las monedas las guarda un contrato en la cadena de bloques: ni Campfire ni nadie.',
+  'Buy or sell Bitcoin Cash or PUSD directly with another person, for fiat money and with the payment methods you already use. While you trade, a contract on the blockchain holds the coins — not Campfire, not anyone.':
+    'Compra o vende Bitcoin Cash o PUSD directamente con otra persona, por dinero fíat y con los medios de pago que ya usas. Mientras operas, las monedas las guarda un contrato en la cadena de bloques: ni Campfire ni nadie.',
   'See offers': 'Ver ofertas',
   'No account, no password': 'Sin cuenta ni contraseña',
   "You don't need BCH to buy": 'No necesitas BCH para comprar',
@@ -349,21 +349,19 @@ export const ES_TEXT: Record<string, string> = {
   'Only when coins move: publishing a sell offer, locking coins, releasing them, or cancelling. Buttons that open your wallet say so.':
     'Solo cuando se mueven monedas: al publicar una oferta de venta, bloquear monedas, liberarlas o cancelar. Los botones que abren tu billetera lo dicen.',
   'How much does it cost?': '¿Cuánto cuesta?',
-  'There are': 'Hoy',
-  'no trading fees today': 'no hay comisiones por operar',
-  '. Publishing an offer costs less than a cent in network fees, and sometimes Campfire pays it for you. Fees for the price oracle and the arbiter are planned for the future.':
-    '. Publicar una oferta cuesta menos de un centavo en comisiones de red, y a veces Campfire la paga por ti. Las comisiones para el oráculo de precios y el árbitro están planeadas para más adelante.',
+  'Nothing for the buyer. The seller pays the network fee and a small fee to the arbiter and, at market price, to the price oracle: 0.5% each today. The fees are shown before anything is locked, and Campfire pays the fee to publish a buy offer.':
+    'Nada para el comprador. El vendedor paga la comisión de la red y una pequeña tarifa al árbitro y, con precio de mercado, al oráculo de precios: hoy, 0,5 % cada una. Las tarifas se muestran antes de bloquear nada, y Campfire paga la comisión para publicar una oferta de compra.',
   'What does “Simulated” mean?': '¿Qué significa «Simulado»?',
-  'In demo trades the bank payment is not real. Everything marked “On-chain” is a real transaction you can check.':
-    'En las operaciones de demostración el pago bancario no es real. Todo lo marcado «En la cadena» es una transacción real que puedes comprobar.',
+  'In demo trades the other person is Campfire’s demo bot, not a real user, and the bank payment is not real. The Bitcoin Cash, the contract and everything marked “On-chain” are real transactions on mainnet you can check.':
+    'En las operaciones de demostración la otra persona es el bot de demostración de Campfire, no un usuario real, y el pago bancario no es real. Los Bitcoin Cash, el contrato y todo lo marcado «En la cadena» son transacciones reales en la red principal que puedes comprobar.',
   'Can I trade PUSD?': '¿Puedo operar con PUSD?',
-  'Not yet. PUSD is a dollar token on Bitcoin Cash (1 PUSD stays close to 1 US dollar). Offers in PUSD are coming soon.':
-    'Todavía no. PUSD es un token en dólares sobre Bitcoin Cash (1 PUSD se mantiene cerca de 1 dólar estadounidense). Pronto habrá ofertas en PUSD.',
+  'Yes. PUSD is a dollar token on Bitcoin Cash (1 PUSD stays close to 1 US dollar). Offers can sell or buy Bitcoin Cash or PUSD.':
+    'Sí. PUSD es un token en dólares sobre Bitcoin Cash (1 PUSD se mantiene cerca de 1 dólar estadounidense). Las ofertas pueden vender o comprar Bitcoin Cash o PUSD.',
 
   // Closing
   'Clear trades. Connected people.': 'Operaciones claras. Personas conectadas.',
-  'Try a whole trade with real Bitcoin Cash and a real contract. Only the bank payment is simulated.':
-    'Prueba una operación completa con Bitcoin Cash real y un contrato real. Solo el pago bancario es simulado.',
+  'Try a whole trade with real Bitcoin Cash and a real contract on mainnet. Only the other person, a demo bot, and the bank payment are simulated.':
+    'Prueba una operación completa con Bitcoin Cash real y un contrato real en la red principal. Solo son simulados la otra persona, un bot de demostración, y el pago bancario.',
 };
 
 // Texts the simulated phone builds with numbers in them.
