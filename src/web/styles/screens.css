@@ -16,6 +16,12 @@
 .s-vote { display: flex; flex-direction: column; gap: var(--space-1); min-width: 0; }
 .s-action { border: 1px solid var(--border); }
 .s-action > .cf-card__section:first-child { display: flex; flex-direction: column; gap: var(--space-4); }
+/* "Your turn" and the title read as one heading. */
+.s-action .cf-stepper { margin-bottom: calc(-1 * var(--space-2)); }
+/* A fold that closes the card ("Something wrong?", "Not received yet?") is its footer row, under a divider,
+   not a box inside the box: still easy to find, quieter than the main button. */
+.s-action > .cf-card__section > .cf-details:last-child { border: 0; border-top: 1px solid var(--border); border-radius: 0; background: transparent; margin: 0 calc(-1 * var(--space-4)) calc(-1 * var(--space-3)); }
+.s-action > .cf-card__section > .cf-details:last-child > summary { min-height: 48px; }
 .s-deadline { display: flex; align-items: baseline; gap: var(--space-3); flex-wrap: wrap; }
 .s-actions { display: flex; gap: var(--space-3); flex-wrap: wrap; align-items: center; }
 .s-actions:has(> .s-primary) { align-items: flex-start; }
@@ -130,14 +136,17 @@
   /* "main." outranks the 960 px of .s-main[data-wide] (offers.css), which loads later. */
   main.s-main[data-desk] { max-width: calc(var(--layout-site-max-width) + 2 * var(--space-6)); padding-left: var(--space-6); padding-right: var(--space-6); }
   main.s-main[data-desk="medium"] { max-width: calc(960px + 2 * var(--space-6)); }
-  /* A trade with a chat: what to do on the left, the chat on the right, kept in view while the left side scrolls.
-     The last row takes what is left, so a chat taller than the left side does not open gaps between its cards. */
-  .s-trade:has(> .tr-chat) { max-width: 1080px; display: grid; grid-template-columns: minmax(0, 1fr) minmax(360px, 400px); grid-template-rows: auto auto auto auto 1fr; column-gap: var(--space-6); align-items: start; }
+  /* A trade with a chat: what to do on the left, the chat on the right. The chat spans the action card and the
+     progress and ends level with them, its field at the bottom like any messenger; the on-chain details take the
+     full width below. contain: size keeps a long chat from stretching the left side: its messages scroll inside.
+     When the left side is taller than the window, the chat stops at the window's height and stays in view while the
+     page scrolls (88 px: the sticky header and a gap). */
+  .s-trade:has(> .tr-chat) { max-width: 1080px; display: grid; grid-template-columns: minmax(0, 1fr) minmax(360px, 400px); column-gap: var(--space-6); align-items: start; }
   .s-trade:has(> .tr-chat) > * { grid-column: 1; }
-  .s-trade:has(> .tr-chat) > .s-pagehead { grid-column: 1 / -1; }
-  /* 88 px: the sticky header and a gap. */
-  .s-trade > .tr-chat { grid-column: 2; grid-row: 2 / -1; position: sticky; top: 88px; }
-  .s-trade > .tr-chat .cf-chat { max-height: max(240px, calc(100vh - 88px - 200px)); }
+  .s-trade:has(> .tr-chat) > .s-pagehead, .s-trade:has(> .tr-chat) > .tr-chat ~ .cf-details { grid-column: 1 / -1; }
+  .s-trade > .tr-chat { grid-column: 2; grid-row: 2 / 4; align-self: stretch; contain: size; min-height: 400px; max-height: calc(100vh - 88px - var(--space-6)); position: sticky; top: 88px; display: flex; flex-direction: column; }
+  .s-trade > .tr-chat > .cf-card__section { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+  .s-trade > .tr-chat .cf-chat { flex: 1; min-height: 0; max-height: none; }
 }
 
 /* The page chrome follows the screen: under 720 px the header wraps, the banner folds and the tab bar appears. */
@@ -230,6 +239,9 @@
 .tr-progress > summary::after { content: "Show"; grid-column: 2; grid-row: 1 / span 2; font: 600 13px/18px var(--font-text); color: var(--escrow); }
 .tr-progress[open] > summary::after { content: "Hide"; }
 .tr-progress__now { grid-column: 1; }
+/* The deposit seen safe at 0-conf (TradePage.tsx): good news with nothing to do, so a line, not a box. */
+.cf-notice.tr-safe { background: transparent; padding: 0; font-size: 13px; line-height: 18px; color: var(--text-muted); }
+.cf-notice.tr-safe strong { display: inline; }
 /* The seller's view of a request: what goes out, what comes in, and the gain against the market price. */
 .s-deal__sides { margin: 0; display: grid; grid-template-columns: auto 1fr; gap: var(--space-1) var(--space-4); align-items: baseline; }
 .s-deal__sides > dd { margin: 0; text-align: right; }

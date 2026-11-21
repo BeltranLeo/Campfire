@@ -639,10 +639,14 @@ function ZeroConfNotice({ ds, isDemo }: { ds: DoubleSpendState; isDemo: boolean 
         </div>
       );
     case 'clear':
+      // Good news with nothing to do: one quiet line beside the shield line, not a green box that competes with the
+      // button. The warnings below keep the box, since they ask for attention.
       return (
-        <Notice tone="verified" title={t.safe}>
-          {t.safeBody(DSPROOF_WATCH_SEC)}
-        </Notice>
+        <div className="cf-notice tr-safe" data-tone="verified">
+          <div>
+            <strong>{t.safe}.</strong> {t.safeBody(DSPROOF_WATCH_SEC)}
+          </div>
+        </div>
       );
     case 'uncovered':
       return (
