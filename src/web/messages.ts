@@ -59,6 +59,10 @@ const en = {
     language: 'Language',
     advanced: 'Show technical details',
     advancedHint: 'Transactions, keys and addresses, open on every screen',
+    alerts: 'Alerts',
+    alertsOn: 'Sound and notifications when it is your turn: on',
+    alertsOff: 'Sound and notifications when it is your turn: off',
+    alertsAsk: 'Sound on when it is your turn. Click to get system notifications too',
   },
   wallet: {
     connect: 'Connect wallet',
@@ -305,6 +309,10 @@ const es: Messages = {
     language: 'Idioma',
     advanced: 'Mostrar detalles técnicos',
     advancedHint: 'Transacciones, claves y direcciones, abiertas en cada pantalla',
+    alerts: 'Avisos',
+    alertsOn: 'Sonido y notificaciones cuando te toca: activados',
+    alertsOff: 'Sonido y notificaciones cuando te toca: desactivados',
+    alertsAsk: 'Sonido activado cuando te toca. Haz clic para recibir también notificaciones del sistema',
   },
   wallet: {
     connect: 'Conectar billetera',

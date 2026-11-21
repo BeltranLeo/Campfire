@@ -3,6 +3,7 @@ import { Link, NavLink, Outlet } from 'react-router';
 import { BANNER_LINKS, PROTOCOL_SPEC_URL, REPO_URL, VOTING_ADDRESS } from '../links';
 import { setLang, useLang, useMessages } from '../lang';
 import type { Lang, Messages } from '../messages';
+import { alertsOn, askToNotify, canAskToNotify, setAlertsOn } from '../alerts';
 import { getThemePref, setThemePref, type ThemePref } from '../theme';
 import { useWalletCoinsSync } from '../walletCoins';
 import { useWallet } from '../wallet';
@@ -136,6 +137,7 @@ function Footer() {
         <div className="s-footsettings">
           <ThemeSwitch />
           <LangSwitch />
+          <AlertsSwitch />
           <AdvancedSwitch compact />
         </div>
       </div>
@@ -170,6 +172,36 @@ function ThemeSwitch() {
           <Icon name={option.icon} />
         </button>
       ))}
+    </div>
+  );
+}
+
+// Sound and system notifications when a trade waits for this person (alerts.ts). Turning them on is a click, so it
+// can ask for the browser's permission and play the sound once as a sample.
+function AlertsSwitch() {
+  const [on, setOn] = useState(alertsOn);
+  // Sound is on by default; the browser's permission for system notifications is asked on the first click.
+  const [askable, setAskable] = useState(canAskToNotify);
+  const t = useMessages().footer;
+  const label = !on ? t.alertsOff : askable ? t.alertsAsk : t.alertsOn;
+  return (
+    <div className="cf-seg" role="group" aria-label={t.alerts}>
+      <button
+        type="button"
+        aria-pressed={on}
+        aria-label={label}
+        title={label}
+        onClick={() => {
+          if (on && askable) {
+            void askToNotify().finally(() => setAskable(canAskToNotify()));
+            return;
+          }
+          setOn(!on);
+          void setAlertsOn(!on).finally(() => setAskable(canAskToNotify()));
+        }}
+      >
+        <Icon name={on ? 'bell' : 'bellSlash'} />
+      </button>
     </div>
   );
 }

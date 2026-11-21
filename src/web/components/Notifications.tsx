@@ -1,5 +1,6 @@
 import { createContext, useCallback, useContext, useEffect, useRef, useState, type ReactNode } from 'react';
-import { Link, useLocation } from 'react-router';
+import { Link, useLocation, useNavigate } from 'react-router';
+import { alertsOn, notifySystem, onAlertsChange, ping } from '../alerts';
 import { apiGet, type ChatMessage, type Trade } from '../api';
 import { assetInfo } from '../assets';
 import { chatState, createChatFeed, lastRead, onChatRead, type ChatFeed } from '../chat';
@@ -28,6 +29,10 @@ import { roleOf } from '../trade';
 const POLL_MS = 10_000;
 /** A hidden tab still updates the title, just less often. */
 const HIDDEN_POLL_MS = 60_000;
+/** With alerts on, a hidden tab is the one that should ping, so it reads more often. */
+const HIDDEN_ALERT_POLL_MS = 15_000;
+/** The events that ask this person to do something: these ping and raise a system notification. */
+const ALERT_KINDS = new Set<NotificationEvent['kind']>(['request', 'turn', 'disputed']);
 const TOAST_MS = 6_000;
 const CHAT_CONCURRENCY = 4;
 /** Toasts waiting their turn; older ones are dropped, the counters still show them. */
@@ -56,6 +61,12 @@ export function NotificationsProvider({ identity, children }: { identity: string
   const openTrade = openTradeId(useLocation().pathname);
   const openTradeRef = useRef(openTrade);
   openTradeRef.current = openTrade;
+  const navigate = useNavigate();
+  const navigateRef = useRef(navigate);
+  navigateRef.current = navigate;
+  const config = useConfig();
+  const configRef = useRef(config);
+  configRef.current = config;
 
   useEffect(() => {
     snapshotRef.current = null;
@@ -71,7 +82,7 @@ export function NotificationsProvider({ identity, children }: { identity: string
 
     const schedule = () => {
       clearTimeout(timer);
-      if (!stopped) timer = setTimeout(tick, document.hidden ? HIDDEN_POLL_MS : POLL_MS);
+      if (!stopped) timer = setTimeout(tick, document.hidden ? (alertsOn() ? HIDDEN_ALERT_POLL_MS : HIDDEN_POLL_MS) : POLL_MS);
     };
 
     async function tick() {
@@ -103,9 +114,22 @@ export function NotificationsProvider({ identity, children }: { identity: string
         messagesRef.current = messages;
         snapshotRef.current = next;
         setSnapshot(next);
-        // The open trade's page already shows its changes and its chat.
+        // The open trade's page already shows its changes and its chat, unless the tab is in the background.
         const shown = events.filter((e) => e.trade.id !== openTradeRef.current);
         if (shown.length > 0) setQueue((q) => enqueue(q, shown));
+        const alerts = (document.hidden ? events : shown).filter((e) => ALERT_KINDS.has(e.kind));
+        if (alerts.length > 0 && alertsOn()) {
+          ping();
+          for (const event of alerts) {
+            const toast = toastFor(event, identity!, describe(event.trade, identity!, configRef.current));
+            notifySystem({
+              tag: event.trade.id,
+              title: toast.title || toast.label,
+              body: toast.body,
+              onClick: () => navigateRef.current(toast.href),
+            });
+          }
+        }
       } catch {
         // The counters keep the last good read; the next poll tries again.
       } finally {
@@ -119,11 +143,15 @@ export function NotificationsProvider({ identity, children }: { identity: string
       if (!document.hidden) void tick();
     };
     document.addEventListener('visibilitychange', onVisibility);
+    const stopAlerts = onAlertsChange(() => {
+      if (!running) schedule();
+    });
     void tick();
     return () => {
       stopped = true;
       clearTimeout(timer);
       document.removeEventListener('visibilitychange', onVisibility);
+      stopAlerts();
     };
   }, [identity]);
 
@@ -217,6 +245,14 @@ async function forEachLimited<T>(items: T[], limit: number, run: (item: T) => Pr
 // One toast at a time, at the bottom of the screen (above the tab bar on a phone). The live region stays in the page
 // and only its content changes, so screen readers announce each toast. It waits while the pointer or focus is on it
 // and while the tab is hidden, so nobody misses one by looking away.
+/** Which trade, as My trades names it: "Selling 0.0015 BCH for 0.70 USD". */
+function describe(trade: Trade, identity: string, config: ReturnType<typeof useConfig>): string {
+  const role = roleOf(trade, identity);
+  if (role === 'visitor') return '';
+  const asset = assetInfo(trade.asset, trade.assetDecimals, config);
+  return rowTitle(trade, role, formatAmount(trade.amount, asset), formatFiatAmount(trade.fiatAmount, trade.fiat));
+}
+
 function ToastHost({ event, identity, onDismiss }: { event: NotificationEvent | undefined; identity: string; onDismiss: () => void }) {
   const config = useConfig();
   const [held, setHeld] = useState(false);
@@ -239,11 +275,7 @@ function ToastHost({ event, identity, onDismiss }: { event: NotificationEvent | 
 
   let toast = null;
   if (event) {
-    const { trade } = event;
-    const role = roleOf(trade, identity);
-    const asset = assetInfo(trade.asset, trade.assetDecimals, config);
-    const what = role === 'visitor' ? '' : rowTitle(trade, role, formatAmount(trade.amount, asset), formatFiatAmount(trade.fiatAmount, trade.fiat));
-    toast = toastFor(event, identity, what);
+    toast = toastFor(event, identity, describe(event.trade, identity, config));
   }
 
   return (
