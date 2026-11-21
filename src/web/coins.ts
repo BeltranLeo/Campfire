@@ -3,6 +3,8 @@
 
 import { binToHex, hash160 } from '@bitauth/libauth';
 import type { NetworkProvider, Utxo } from 'cashscript';
+import { MARKER_SATOSHIS } from '../protocol/offers.js';
+import type { Offer } from './api';
 import { text } from './messages';
 import {
   derivePubkeyFromXpub,
@@ -264,6 +266,21 @@ export async function loadWalletCoins(provider: NetworkProvider, keys: CoinKeys,
 export function freshReceiveAddress(scan: WalletScan | null, receiveXpub: string): string | null {
   const path = scan?.paths.find((p) => p.name === 'receive');
   return path ? entry('receive', receiveXpub, path.lastUsed + 1).address : null;
+}
+
+/**
+ * The scan without the markers of offers that are not closed yet. A marker sits on an ordinary receive address, so
+ * to coin selection it is just another 1,000-sat coin: spending it to publish a second offer or to fund an escrow
+ * would close the first offer on-chain without anyone choosing to, while the service still lists it as open. Markers are told apart by their outpoint, so whose offer it is does not matter. When the offers
+ * could not be read (`null`), any plain 1,000-sat coin at output 1 is set aside, which is what a marker looks like.
+ */
+export function withoutOfferMarkers(scan: WalletScan, offers: Pick<Offer, 'offerTxid' | 'status' | 'markerVout'>[] | null): WalletScan {
+  const reserved = offers
+    ? new Set(offers.filter((o) => o.status !== 'Closed').map((o) => `${o.offerTxid.toLowerCase()}:${o.markerVout ?? 1}`))
+    : null;
+  const isMarker = (c: WalletSpendableUtxo) =>
+    reserved ? reserved.has(`${c.txid.toLowerCase()}:${c.vout}`) : !c.token && c.vout === 1 && c.satoshis === MARKER_SATOSHIS;
+  return { ...scan, coins: scan.coins.filter((c) => !isMarker(c)) };
 }
 
 /** The plain BCH the wallet can spend (coins that carry no token), in satoshis. */

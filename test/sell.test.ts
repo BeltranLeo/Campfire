@@ -318,7 +318,7 @@ describe('closing an offer', () => {
   }
 
   it('spends the marker back to its own address with the path and index the wallet needs to sign it', async () => {
-    const tx = await buildCloseOffer({ offer: { offerTxid, markerAddress, markerVout: 1 }, provider: chain(), receiveXpub: keys.receive });
+    const tx = (await buildCloseOffer({ offer: { offerTxid, markerAddress, markerVout: 1 }, provider: chain(), receiveXpub: keys.receive }))!;
     expect(tx.inputPaths).toEqual([[0, 'receive', 7]]);
     const outputs = (tx.builder as unknown as { outputs: { to: string; amount: bigint }[] }).outputs;
     expect(outputs).toHaveLength(1);
@@ -328,13 +328,16 @@ describe('closing an offer', () => {
     expect(outputs[0].amount).toBeLessThan(1000n);
   });
 
-  it('refuses a wallet that did not publish the offer, an offer without a marker and a marker already spent', async () => {
+  it('refuses a wallet that did not publish the offer and an offer without a marker', async () => {
     const other = wallet('someone-else');
     await expect(buildCloseOffer({ offer: { offerTxid, markerAddress, markerVout: 1 }, provider: chain(), receiveXpub: other.receive })).rejects.toThrow(/does not belong/);
     await expect(buildCloseOffer({ offer: { offerTxid, markerAddress: undefined, markerVout: 1 }, provider: chain(), receiveXpub: keys.receive })).rejects.toThrow(/no marker/);
+  });
+
+  it('asks for no signature when the marker is already spent, since the offer is then closed on-chain', async () => {
     const empty = new MockNetworkProvider();
     empty.network = Network.MAINNET;
-    await expect(buildCloseOffer({ offer: { offerTxid, markerAddress, markerVout: 1 }, provider: empty, receiveXpub: keys.receive })).rejects.toThrow(/already spent/);
+    await expect(buildCloseOffer({ offer: { offerTxid, markerAddress, markerVout: 1 }, provider: empty, receiveXpub: keys.receive })).resolves.toBeNull();
   });
 });
 

@@ -183,7 +183,7 @@ describe('closing an offer whose marker is far into the wallet', () => {
       markerVout: utxo.vout,
       markerReceiveIndex: 5_000,
     };
-    const tx = await buildCloseOffer({ offer, provider, receiveXpub: receive });
+    const tx = (await buildCloseOffer({ offer, provider, receiveXpub: receive }))!;
     expect(tx.inputPaths[0]).toEqual([0, 'receive', 5_000]);
     // Without the recorded index the search stops long before it.
     await expect(buildCloseOffer({ offer: { ...offer, markerReceiveIndex: undefined }, provider, receiveXpub: receive })).rejects.toThrow(/does not belong/);

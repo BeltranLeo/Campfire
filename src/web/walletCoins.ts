@@ -4,7 +4,8 @@
 
 import { binToHex, sha256, utf8ToBin } from '@bitauth/libauth';
 import { useEffect, useSyncExternalStore } from 'react';
-import { scanWalletCoins, type CoinKeys, type ScanMemory, type ScanOptions, type ScanProgress, type WalletScan } from './coins';
+import { apiGet, type Offer } from './api';
+import { scanWalletCoins, withoutOfferMarkers, type CoinKeys, type ScanMemory, type ScanOptions, type ScanProgress, type WalletScan } from './coins';
 import { keptElectrum } from './electrum';
 import { text } from './messages';
 import { useWallet } from './wallet';
@@ -71,7 +72,17 @@ export class WalletCoinsStore {
   private timer: ReturnType<typeof setInterval> | undefined;
 
   constructor(
-    private readonly scan: Scanner = async (keys, options) => scanWalletCoins(await keptElectrum(), keys, { ...options, memory }),
+    // Open offers' markers are left out, so no action ever spends one by accident (see withoutOfferMarkers).
+    private readonly scan: Scanner = async (keys, options) => {
+      const [scan, offers] = await Promise.all([
+        scanWalletCoins(await keptElectrum(), keys, { ...options, memory }),
+        apiGet<{ offers: Offer[] }>('/api/offers').then(
+          (r) => r.offers,
+          () => null,
+        ),
+      ]);
+      return withoutOfferMarkers(scan, offers);
+    },
     private readonly intervalMs = BALANCE_REFRESH_MS,
   ) {}
 

@@ -13,6 +13,8 @@ import {
   deriveHdPrivateNodeFromSeed,
   deriveHdPublicNode,
   encodeHdPublicKey,
+  hashTransaction,
+  hexToBin,
   secp256k1,
   sha256,
   utf8ToBin,
@@ -516,6 +518,7 @@ describe('CampfireService & HTTP API end-to-end lifecycle', () => {
     );
     expect(closeRes.status).toBe(200);
     expect(closeRes.data.offer.status).toBe('Closed');
+    expect(closeRes.data.offer.closeTxid).toBe(hashTransaction(hexToBin(closeTx.hex)));
   });
 
   it('handles PUSD dispute with chat decryption for arbiter and automatic payment-window expiry', async () => {

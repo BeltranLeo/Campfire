@@ -131,7 +131,6 @@ const en = {
   invalidOffer: 'The offer is not valid.',
   noMarker: 'This offer has no marker to spend.',
   foreignMarker: "This offer's marker does not belong to the connected wallet. Connect the wallet that published it.",
-  markerSpent: 'The marker of this offer is already spent. Reload the page to see its state.',
   noMinter: 'Campfire cannot publish offers right now: the offer minter is not reachable. Try again in a moment.',
 };
 
@@ -263,7 +262,6 @@ const es: typeof en = {
   invalidOffer: 'La oferta no es válida.',
   noMarker: 'Esta oferta no tiene un marcador para gastar.',
   foreignMarker: 'El marcador de esta oferta no pertenece a la billetera conectada. Conecta la billetera que la publicó.',
-  markerSpent: 'El marcador de esta oferta ya se gastó. Recarga la página para ver su estado.',
   noMinter: 'Campfire no puede publicar ofertas ahora: no se encuentra el acuñador de ofertas. Prueba de nuevo en un momento.',
 };
 
