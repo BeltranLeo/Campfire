@@ -197,3 +197,11 @@
 .tr-progress > summary::after { content: "Show"; grid-column: 2; grid-row: 1 / span 2; font: 600 13px/18px var(--font-text); color: var(--escrow); }
 .tr-progress[open] > summary::after { content: "Hide"; }
 .tr-progress__now { grid-column: 1; }
+/* The seller's view of a request: what goes out, what comes in, and the gain against the market price. */
+.s-deal__sides { margin: 0; display: grid; grid-template-columns: auto 1fr; gap: var(--space-1) var(--space-4); align-items: baseline; }
+.s-deal__sides > dd { margin: 0; text-align: right; }
+.s-deal__terms { margin: 0; }
+.s-deal__gain { display: flex; flex-direction: column; gap: 2px; padding-top: var(--space-3); border-top: 1px solid var(--border); }
+.s-deal__gain[data-sign="positive"] > strong { color: var(--verified); }
+.s-deal__gain[data-sign="negative"] > strong { color: var(--danger); }
+@container s-main (max-width: 440px) { .s-deal__sides > dd { font-size: 21px; line-height: 28px; } }

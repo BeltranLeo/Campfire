@@ -18,7 +18,7 @@ import { READING_WALLET, useBusyStep, useFindingAddressNote } from '../hooks/use
 import { assetInfo } from '../assets';
 import { loadConfig, useConfig } from '../config';
 import { withKeptElectrum } from '../electrum';
-import { applyMargin, describeMargin, formatAmount, formatBch, formatDate, formatDateTime, formatFiat, fromBaseUnits } from '../format';
+import { applyMargin, formatAmount, formatBch, formatDate, formatDateTime, formatFiat, fromBaseUnits } from '../format';
 import { usePoll } from '../hooks/usePoll';
 import { useNow } from '../hooks/useNow';
 import { useTradeAction } from '../hooks/useTradeAction';
@@ -436,58 +436,67 @@ export function SellerAction(props: { trade: Trade; amount: string; fiat: string
 
   switch (trade.status) {
     case 'Requested':
+      // One card: what the seller gives and gets, how that compares with the market, who is asking, how to be paid.
       return (
-        <>
-          <ActionCard
-            turn="you"
-            progress={progress}
-            title="Accept this buyer"
-            deadline={
-              trade.quoteExpiresAt && (
-                <>
-                  <Countdown deadline={trade.quoteExpiresAt} windowSec={600} />
-                  <span className="cf-small cf-muted">left on the signed quote. After that the request is dropped.</span>
-                </>
-              )
-            }
-          >
-            <PaymentFieldsForm
-              fields={fields}
-              fiat={trade.fiat}
-              onChange={setFields}
-              title="How the buyer should pay you"
-              hint={<>Encrypted in your browser for this buyer only. Shown to them once {locked} {lockVerb(trade.asset)} locked. Campfire cannot read it.</>}
-            />
-            <Notice title={`This locks ${deposit} now.`}>
-              It can only go to the buyer or back to you: {breakdown}
+        <ActionCard
+          turn="you"
+          progress={progress}
+          title="Accept this buyer"
+          deadline={
+            trade.quoteExpiresAt && (
+              <>
+                <Countdown deadline={trade.quoteExpiresAt} windowSec={600} />
+                <span className="cf-small cf-muted">left to accept at this price.</span>
+              </>
+            )
+          }
+        >
+          <DealSummary trade={trade} amount={props.amount} fiat={props.fiat} symbol={symbol} />
+          <BuyerLine trade={trade} />
+          <PaymentFieldsForm
+            fields={fields}
+            fiat={trade.fiat}
+            onChange={setFields}
+            title="How the buyer should pay you"
+            hint="Encrypted for this buyer only. Campfire cannot read it."
+          />
+          {expired && (
+            <Notice tone="attention" title="This request expired">
+              The signed quote ran out. The request is dropped and nothing was locked.
             </Notice>
-            <FeeNote fees={trade.fees} />
-            {expired && (
-              <Notice tone="attention" title="This request expired">
-                The signed quote ran out. The request is dropped and nothing was locked.
-              </Notice>
-            )}
-            {walletNotices}
-            {failure}
-            <div className="s-actions">
-              <Button
-                variant="primary"
-                signs
-                busy={busy === 'accept' || busy === 'deposit'}
-                busyLabel={busyStep.label}
-                disabled={expired || !detailsReady || !prep.data || short || (busy !== null && busy !== 'accept' && busy !== 'deposit')}
-                onClick={acceptAndDeposit}
-              >
-                {`Accept and lock ${lockLabel}`}
-              </Button>
-              <Button busy={busy === 'decline'} disabled={busy !== null && busy !== 'decline'} onClick={decline}>
-                Decline
-              </Button>
+          )}
+          {walletNotices}
+          {failure}
+          <div className="s-actions">
+            <Button
+              variant="primary"
+              signs
+              busy={busy === 'accept' || busy === 'deposit'}
+              busyLabel={busyStep.label}
+              disabled={expired || !detailsReady || !prep.data || short || (busy !== null && busy !== 'accept' && busy !== 'deposit')}
+              onClick={acceptAndDeposit}
+            >
+              {`Accept and lock ${lockLabel}`}
+            </Button>
+            <Button busy={busy === 'decline'} disabled={busy !== null && busy !== 'decline'} onClick={decline}>
+              Decline
+            </Button>
+          </div>
+          {!prep.data && !prep.error && <span className="cf-small cf-subtle">{findingNote}</span>}
+          <Details summary="What accepting does" tag={null}>
+            <div className="cf-stack" data-gap="2">
+              <p className="cf-small cf-muted">
+                Accepting locks {deposit} in the escrow right away: {breakdown} It can only go to the buyer or back to you. Your payment details are
+                shown to the buyer once {locked} {lockVerb(trade.asset)} locked.
+              </p>
+              <FeeNote fees={trade.fees} />
+              {trade.quote && (
+                <p className="cf-small cf-muted">The price is signed by the oracle. The signature is checked again before you lock.</p>
+              )}
+              <RequestTechnical trade={trade} />
             </div>
-            {!prep.data && !prep.error && <span className="cf-small cf-subtle">{findingNote}</span>}
-          </ActionCard>
-          <RequestCard trade={trade} fiat={props.fiat} />
-        </>
+          </Details>
+        </ActionCard>
       );
     case 'Accepted':
       return (
@@ -631,78 +640,162 @@ function PaymentFieldsForm(props: {
   );
 }
 
-/** What was asked, for the seller deciding on a request (Sell-Accept-*). */
-function RequestCard({ trade, fiat }: { trade: Trade; fiat: string }) {
+/** BCH costs of a deposit beyond what reaches the buyer as the traded amount: the fee budget, the BCH that travels with a token, and the service fees. */
+function depositCosts(trade: Trade): bigint {
+  const funding = expectedEscrowFunding(trade).satoshis;
+  const escrowExtra = trade.asset === 'BCH' ? funding - BigInt(trade.amount) : funding;
+  return escrowExtra + (trade.fees ?? []).reduce((sum, f) => sum + BigInt(f.satoshis), 0n);
+}
+
+/** "+1,219.52 ARS", "−80.00 ARS". */
+function formatSignedFiat(value: number, fiat: string): string {
+  return `${value < 0 ? '−' : '+'}${formatFiat(Math.abs(value), fiat)}`;
+}
+
+/** "+2.5%", "−1%". */
+function formatSignedPercent(ratio: number): string {
+  const percent = Math.round(Math.abs(ratio) * 1000) / 10;
+  return `${ratio < 0 ? '−' : '+'}${percent.toLocaleString('en-US')}%`;
+}
+
+/**
+ * What the seller gives and receives, and the gain against selling at the oracle's price (Sell-Accept-*). A request
+ * from a market-price offer carries the signed quote it was priced with; a fixed-price one does not, so the current
+ * oracle price is read only to compare, and says so.
+ */
+function DealSummary({ trade, amount, fiat, symbol }: { trade: Trade; amount: string; fiat: string; symbol: string }) {
+  const pair = `${symbol}/${trade.fiat}`;
+  const bchPair = `BCH/${trade.fiat}`;
+  const live = usePoll(
+    () => (trade.quote ? Promise.resolve(null) : apiGet<{ quote: PriceQuote }>(`/api/oracle/quote?pair=${encodeURIComponent(pair)}`).then((r) => r.quote)),
+    `${pair}:${trade.quote ? 'signed' : 'live'}`,
+  );
+  // The fees are paid in BCH; a token trade reads the BCH price to show them in money too.
+  const bch = usePoll(
+    () =>
+      trade.asset === 'BCH' ? Promise.resolve(null) : apiGet<{ quote: PriceQuote }>(`/api/oracle/quote?pair=${encodeURIComponent(bchPair)}`).then((r) => r.quote),
+    `${bchPair}:${trade.asset}`,
+  );
+  const market = trade.quote ?? live.data ?? null;
+  const units = Number(trade.amount) / 10 ** trade.assetDecimals;
+  const received = Number(trade.fiatAmount);
+  const yourPrice = trade.quote ? applyMargin(trade.quote.price, trade.marginBps ?? 0) : units > 0 ? received / units : null;
+  const marketValue = market ? units * Number(market.price) : null;
+  const gain = marketValue !== null ? received - marketValue : null;
+  const bchPrice = trade.asset === 'BCH' ? (market ? Number(market.price) : null) : bch.data ? Number(bch.data.price) : null;
+  const costs = depositCosts(trade);
+  const costsFiat = bchPrice !== null ? (Number(costs) / 1e8) * bchPrice : null;
+  const net = gain !== null && costsFiat !== null ? gain - costsFiat : null;
+  const result = net ?? gain;
+
+  return (
+    <div className="cf-well cf-stack s-deal" data-gap="3">
+      <dl className="s-deal__sides">
+        <dt className="cf-label">You give</dt>
+        <dd className="tk-big">{amount}</dd>
+        <dt className="cf-label">You receive</dt>
+        <dd className="tk-big">{fiat}</dd>
+      </dl>
+      <dl className="cf-dl s-deal__terms">
+        <dt>Market price</dt>
+        <dd>
+          {market ? (
+            <>
+              <span className="cf-num">
+                {formatFiat(Number(market.price), trade.fiat)}/{symbol}
+              </span>
+              {!trade.quote && <span className="cf-small cf-subtle"> · now, for reference</span>}
+            </>
+          ) : live.loading ? (
+            <Skeleton width={140} />
+          ) : (
+            <span className="cf-small cf-muted">Not available right now</span>
+          )}
+        </dd>
+        <dt>Your price</dt>
+        <dd>
+          {yourPrice !== null && (
+            <span className="cf-num">
+              {formatFiat(yourPrice, trade.fiat)}/{symbol}
+            </span>
+          )}
+          {marketValue !== null && gain !== null && marketValue > 0 && (
+            <span className="cf-small cf-muted"> · {formatSignedPercent(gain / marketValue)} vs market</span>
+          )}
+        </dd>
+        <dt>{trade.asset === 'BCH' ? 'Fees' : 'BCH costs'}</dt>
+        <dd>
+          <span className="cf-num">{formatBch(costs)}</span>
+          {costsFiat !== null && <span className="cf-small cf-muted"> ≈ {formatFiat(costsFiat, trade.fiat)}</span>}
+        </dd>
+      </dl>
+      {result !== null && marketValue !== null && (
+        <div className="s-deal__gain" data-sign={result < 0 ? 'negative' : 'positive'}>
+          <span>{result < 0 ? 'You get less than selling at market' : 'You gain over selling at market'}</span>
+          <strong className="cf-amount">
+            {net !== null ? '≈ ' : ''}
+            {formatSignedFiat(result, trade.fiat)}
+          </strong>
+          {net !== null && gain !== null && costsFiat !== null && (
+            <span className="cf-small cf-muted">
+              {formatSignedFiat(gain, trade.fiat)} from the price, −{formatFiat(costsFiat, trade.fiat)} in fees
+            </span>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** Who asks, in one line. The count is Campfire's own, so it says so. */
+function BuyerLine({ trade }: { trade: Trade }) {
   const reputation = usePoll(() => apiGet<Reputation>(`/api/identities/${trade.buyerIdentity}/reputation`), trade.buyerIdentity);
   const rep = reputation.data;
+  return (
+    <div className="cf-stack" data-gap="1">
+      <span>
+        <span className="cf-label">Buyer</span> <strong>{aliasFor(trade.buyerIdentity).name}</strong>
+        {' · '}
+        {rep ? (
+          <span className="cf-small">
+            {rep.completedAsBuyer} completed as buyer
+            {rep.firstCompletedAt !== null && ` since ${formatDate(rep.firstCompletedAt)}`}
+          </span>
+        ) : (
+          <Skeleton width={140} />
+        )}
+      </span>
+      <span className="cf-small cf-subtle">Counted by Campfire, not verifiable on-chain.</span>
+    </div>
+  );
+}
+
+/** Where the buyer's name comes from and, with technical details on, the buyer's key and where the coins go. */
+function RequestTechnical({ trade }: { trade: Trade }) {
   const advanced = useAdvanced();
   return (
-    <section className="cf-card" data-flush>
-      <div className="cf-card__section">
-        <h2 className="cf-heading" style={{ marginBottom: 'var(--space-3)' }}>
-          Request
-        </h2>
+    <>
+      <p className="cf-small cf-muted">
+        The buyer's name comes from their key; nobody chooses it. Their trade count can be inflated with a second wallet.
+      </p>
+      {advanced && (
         <dl className="cf-dl">
-          <dt>Buyer</dt>
+          <dt>Buyer key</dt>
           <dd>
-            {aliasFor(trade.buyerIdentity).name}
-            {advanced && (
-              <>
-                {' · '}
-                <HashLink value={trade.buyerIdentity} kind="plain" />
-              </>
-            )}
-            <br />
-            {rep ? (
-              <span className="cf-small">
-                <strong>{rep.completedAsBuyer}</strong> completed as buyer
-                {rep.firstCompletedAt !== null && ` · since ${formatDate(rep.firstCompletedAt)}`}
-              </span>
-            ) : (
-              <Skeleton width={160} />
-            )}
-            <br />
-            <span className="cf-small cf-subtle">Counted by Campfire. It cannot be verified on-chain and can be inflated with a second wallet.</span>
-            <br />
-            <span className="cf-small cf-subtle">The name comes from the buyer's key; nobody chooses it.</span>
+            <HashLink value={trade.buyerIdentity} kind="plain" />
           </dd>
-          <dt>Amount</dt>
-          <dd>
-            <span className="cf-num">{formatAmount(trade.amount, BCH)}</span>
-          </dd>
-          <dt>Price</dt>
-          <dd>
-            {trade.quote ? (
-              <>
-                <span className="cf-num">
-                  {formatFiat(applyMargin(trade.quote.price, trade.marginBps ?? 0), trade.fiat)}/BCH
-                </span>
-                <br />
-                <span className="cf-small cf-muted">
-                  Oracle price {formatFiat(Number(trade.quote.price), trade.fiat)} · {describeMargin(trade.marginBps ?? 0)}. The signature is checked
-                  before you lock.
-                </span>
-              </>
-            ) : (
-              <span className="cf-small cf-muted">The fixed price from your offer.</span>
-            )}
-          </dd>
-          <dt>You receive</dt>
-          <dd>
-            <span className="cf-amount">{fiat}</span>
-          </dd>
-          {/* The buyer's payout address is checked before you lock; read it here with technical details on. */}
-          {advanced && (
+          {/* The buyer's payout address is checked before you lock. */}
+          {trade.buyerPayoutPkh && (
             <>
               <dt>Pays to</dt>
               <dd>
-                {trade.buyerPayoutPkh && <HashLink value={pkhToCashAddress(trade.buyerPayoutPkh)} kind="address" />}
+                <HashLink value={pkhToCashAddress(trade.buyerPayoutPkh)} kind="address" />
               </dd>
             </>
           )}
         </dl>
-      </div>
-    </section>
+      )}
+    </>
   );
 }
 
