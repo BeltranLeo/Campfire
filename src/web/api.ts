@@ -305,6 +305,7 @@ export interface ArbiterChat {
   }[];
 }
 
+/** GET /api/demo. Without a demo seller the service answers `{ enabled: false }` and nothing else. */
 export interface DemoInfo {
   enabled: boolean;
   identity: string;
