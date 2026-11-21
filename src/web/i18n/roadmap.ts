@@ -70,11 +70,15 @@ const en = {
       ],
     },
     {
-      title: 'Privacy',
+      title: 'Privacy and security',
       items: [
         {
           title: 'More privacy tools',
           body: 'Each trade already uses a new key and a new address of your wallet. Further tools would make trades harder to link together.',
+        },
+        {
+          title: 'Security hardening',
+          body: 'An ongoing review of the service, the contracts and the app, with fixes as issues are found. Until then, trade small amounts.',
         },
       ],
     },
@@ -154,11 +158,15 @@ const es: typeof en = {
       ],
     },
     {
-      title: 'Privacidad',
+      title: 'Privacidad y seguridad',
       items: [
         {
           title: 'Más herramientas de privacidad',
           body: 'Cada operación ya usa una clave nueva y una dirección nueva de tu billetera. Otras herramientas harían más difícil vincular las operaciones entre sí.',
+        },
+        {
+          title: 'Refuerzo de seguridad',
+          body: 'Una revisión continua del servicio, los contratos y la aplicación, con arreglos a medida que aparezcan problemas. Mientras tanto, opera con montos pequeños.',
         },
       ],
     },
