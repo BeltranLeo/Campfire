@@ -875,10 +875,15 @@ export class CampfireService {
   }
 
   // The open offer a trade is requested from, with the amount checked against its range.
-  private async offerToTake(offerTxid: string, side: 'sell' | 'buy', amount: string): Promise<OfferView> {
+  private async offerToTake(offerTxid: string, side: 'sell' | 'buy', amount: string, takerIdentity: string): Promise<OfferView> {
     const offerView = await this.getOffer(offerTxid);
     if (!offerView) {
       throw new Error('Offer not found');
+    }
+    // The page hides the button on one's own offer, but another tab or a direct request would get past it. Checked
+    // here too: a trade with oneself would count twice towards reputation without anyone else taking part.
+    if (offerView.sellerIdentity === takerIdentity) {
+      throw new Error('This is your own offer: someone else has to take it');
     }
     if (offerView.status !== 'Published') {
       throw new Error(`Offer is not open (status: ${offerView.status})`);
@@ -937,7 +942,7 @@ export class CampfireService {
     buyerReceiveIndex: number;
     buyerSessionPk: string;
   }): Promise<StoredTrade> {
-    const offerView = await this.offerToTake(params.offerTxid, 'sell', params.amount);
+    const offerView = await this.offerToTake(params.offerTxid, 'sell', params.amount, params.buyerIdentity);
     await this.verifyParty('buyer', {
       identity: params.buyerIdentity,
       pk: params.buyerPk,
@@ -992,7 +997,7 @@ export class CampfireService {
     // Only for the service's own demo seller, which derives its session key from the record id.
     recordId?: string;
   }): Promise<StoredTrade> {
-    const offerView = await this.offerToTake(params.offerTxid, 'buy', params.amount);
+    const offerView = await this.offerToTake(params.offerTxid, 'buy', params.amount, params.sellerIdentity);
     // A buyer who asked for a demo answer pays in simulated fiat: a real seller would lock real coins for nothing.
     if (onlySimulatedPayment(offerView.document.paymentMethods) && !this.isDemoTrade({ sellerIdentity: params.sellerIdentity })) {
       throw new Error('Only the demo seller answers this offer: its fiat payment is simulated');

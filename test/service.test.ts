@@ -298,6 +298,19 @@ describe('CampfireService & HTTP API end-to-end lifecycle', () => {
 
     // 3. Buyer requests a trade; service rejects wrong key index and accepts matching derived key.
     const buyerSession = generateSessionKeyPair();
+    // The seller cannot take their own offer, even with a request the page would not send.
+    const ownTake = await ctx.jsonReq('POST', '/api/trades', {
+      offerTxid,
+      buyerIdentity: sellerId,
+      amount: '200000',
+      buyerPk: seller.defiPkHex(5),
+      buyerDefiIndex: 5,
+      buyerPayoutPkh: seller.receivePkhHex(5),
+      buyerReceiveIndex: 5,
+      buyerSessionPk: buyerSession.publicKey,
+    });
+    expect(ownTake.status).toBe(400);
+    expect(ownTake.data.error).toMatch(/your own offer/);
     const badReq = await ctx.jsonReq('POST', '/api/trades', {
       offerTxid,
       buyerIdentity: buyerId,

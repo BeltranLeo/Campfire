@@ -332,6 +332,18 @@ describe('Buy offers published and paid for by the service', () => {
     expect(outOfRange.data.error).toMatch(/outside offer range/);
   });
 
+  it('does not let the publisher take their own offer, even past the page', async () => {
+    const ctx = await setup();
+    const buyerId = await ctx.register(buyer);
+    const offer = (await ctx.publish(buyerId, ctx.buyOffer())).data.offer;
+
+    // The page hides the button; a second tab with the same wallet, or a direct request, reaches the service.
+    const own = await ctx.req('POST', '/api/trades', { offerTxid: offer.offerTxid, amount: '200000', sellerIdentity: buyerId, ...sellerKeys(0) });
+    expect(own.status).toBe(400);
+    expect(own.data.error).toMatch(/your own offer/);
+    expect(await ctx.service.listTrades({ offerTxid: offer.offerTxid })).toHaveLength(0);
+  });
+
   it('lets only the buyer who published the offer decline a request', async () => {
     const ctx = await setup();
     const buyerId = await ctx.register(buyer);
