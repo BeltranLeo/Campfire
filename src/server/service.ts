@@ -1282,6 +1282,30 @@ export class CampfireService {
     return this.sanitizeTrade(trade, params.identity);
   }
 
+  // The one who asked takes the request back before it is accepted: the buyer on a sell offer, the seller on a buy
+  // offer. Nothing is on-chain yet, so the trade simply ends, as when the publisher declines.
+  async withdrawRequest(params: {
+    tradeRecordId: string;
+    identity: string;
+  }): Promise<StoredTrade> {
+    const trade = await this.options.storage.getTrade(params.tradeRecordId);
+    if (!trade) {
+      throw new Error('Trade not found');
+    }
+    const requester = trade.side === 'buy' ? trade.sellerIdentity : trade.buyerIdentity;
+    if (requester !== params.identity) {
+      throw new Error('Only the person who sent this request can withdraw it');
+    }
+    if (trade.status !== 'Requested') {
+      throw new Error(`Cannot withdraw a request for a trade in state "${trade.status}"`);
+    }
+    trade.status = 'Dropped';
+    trade.withdrawnAt = this.nowSeconds();
+    trade.updatedAt = trade.withdrawnAt;
+    await this.options.storage.saveTrade(trade);
+    return this.sanitizeTrade(trade, params.identity);
+  }
+
   // Stores the signed funding transaction before it is broadcast, so any later attempt (from this
   // or another server instance) rebroadcasts the same transaction instead of funding twice.
   async recordFundingAttempt(tradeRecordId: string, fundingTxHex: string): Promise<void> {

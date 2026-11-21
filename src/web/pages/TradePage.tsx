@@ -267,7 +267,7 @@ function BuyerAction(props: {
 }) {
   const { trade } = props;
   const wallet = useWallet();
-  const { busy, error, run } = useTradeAction<'paid' | 'dispute' | 'cancel'>(trade, wallet.identity, props.onUpdate);
+  const { busy, error, run } = useTradeAction<'paid' | 'dispute' | 'cancel' | 'withdraw'>(trade, wallet.identity, props.onUpdate);
   const progress = actionProgress(trade.status, 'buyer', trade.side);
   const coins = lockedCoins(trade.asset);
   const t = useMessages().tradePage;
@@ -306,6 +306,12 @@ function BuyerAction(props: {
         ...(sharedTradeKeyHex && { sharedTradeKeyHex }),
       }).then((r) => r.trade);
     });
+
+  // Before the seller accepts nothing is on-chain, so taking the request back needs no signature.
+  const withdraw = () =>
+    run('withdraw', t.notWithdrawn, () =>
+      apiPost<{ trade: Trade }>(`/api/trades/${trade.id}/withdraw`, { identity: wallet.identity }).then((r) => r.trade),
+    );
 
   // The wallet signs the escrow's `cancel` path; the server checks it and broadcasts.
   const cancelTrade = () =>
@@ -408,8 +414,12 @@ function BuyerAction(props: {
           }
         >
           <p className="cf-muted">{t.priceLocked}</p>
+          {failure}
           <div className="s-actions">
             <Button to="/offers">{t.backToOffers}</Button>
+            <Button busy={busy === 'withdraw'} disabled={busy !== null && busy !== 'withdraw'} onClick={withdraw}>
+              {t.cancelRequest}
+            </Button>
           </div>
         </ActionCard>
       );
@@ -854,7 +864,11 @@ function BuyerResult({ trade, amount, payout }: { trade: Trade; amount: string; 
     }
     case 'Dropped':
       notice = (
-        <Notice title={t.dropped}>{t.droppedBody}</Notice>
+        trade.withdrawnAt !== undefined ? (
+          <Notice title={t.withdrawn}>{t.withdrawnBody}</Notice>
+        ) : (
+          <Notice title={t.dropped}>{t.droppedBody}</Notice>
+        )
       );
       rows = (
         <>

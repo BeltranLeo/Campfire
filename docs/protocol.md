@@ -110,7 +110,7 @@ The service limits what it pays for. A fresh wallet is a new identity (section 1
 stateDiagram-v2
     [*] --> Requested: taker requests the offer
     Requested --> Accepted: publisher accepts
-    Requested --> Dropped: publisher declines or quote expires
+    Requested --> Dropped: publisher declines, taker withdraws or quote expires
     Accepted --> Funded: seller funds escrow
     Accepted --> Dropped: funding window ends
     Funded --> Paid: buyer marks fiat as sent
@@ -161,7 +161,7 @@ The states, the escrow contract, the `tradeId` and the windows are the same. Onl
 | Pay → `Paid` | Buyer | Buyer | No |
 | Release → `Released` | Seller | Seller | Yes |
 
-The request on a buy offer already carries the seller's keys, so a `Requested` trade has its `sellerIdentity` and its `buyerIdentity` (the publisher) from the start, and each finds it under their own identity. The trade record keeps the `side` of the offer it came from; records without one are sell trades. The publisher can decline a request (`POST /api/trades/:id/decline`); the taker cannot accept or decline it.
+The request on a buy offer already carries the seller's keys, so a `Requested` trade has its `sellerIdentity` and its `buyerIdentity` (the publisher) from the start, and each finds it under their own identity. The trade record keeps the `side` of the offer it came from; records without one are sell trades. The publisher can decline a request (`POST /api/trades/:id/decline`); the taker cannot accept or decline it, but can withdraw it while it waits (`POST /api/trades/:id/withdraw`, no signature: nothing is on-chain yet), which records `withdrawnAt`.
 
 The buyer has to accept within the 10 minutes of the quote, or the request lapses and the seller must take the offer again. This is an accepted risk for the hackathon: a notification, or a longer window, would remove it.
 

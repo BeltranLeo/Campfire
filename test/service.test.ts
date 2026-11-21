@@ -354,6 +354,27 @@ describe('CampfireService & HTTP API end-to-end lifecycle', () => {
     expect(takeRes.data.trade.fiatAmount).toBe('1020.00');
     const tradeRecordId = takeRes.data.trade.id;
 
+    // The seller cannot withdraw the buyer's request: they decline it instead.
+    const notTheirs = await ctx.jsonReq('POST', `/api/trades/${tradeRecordId}/withdraw`, { identity: sellerId });
+    expect(notTheirs.status).toBe(400);
+    expect(notTheirs.data.error).toMatch(/Only the person who sent this request/);
+
+    // A buyer who changes their mind takes the request back before the seller answers; nothing was on-chain.
+    const second = await ctx.jsonReq<{ trade: StoredTrade }>('POST', '/api/trades', {
+      offerTxid,
+      buyerIdentity: buyerId,
+      amount: '100000',
+      buyerPk: buyer.defiPkHex(1),
+      buyerDefiIndex: 1,
+      buyerPayoutPkh: buyer.receivePkhHex(1),
+      buyerReceiveIndex: 1,
+      buyerSessionPk: generateSessionKeyPair().publicKey,
+    });
+    const withdrawn = await ctx.jsonReq<{ trade: StoredTrade }>('POST', `/api/trades/${second.data.trade.id}/withdraw`, { identity: buyerId });
+    expect(withdrawn.status).toBe(200);
+    expect(withdrawn.data.trade.status).toBe('Dropped');
+    expect(withdrawn.data.trade.withdrawnAt).toBe(ctx.getNow());
+
     // 4. Seller accepts and uploads encrypted payment details.
     const sellerSession = generateSessionKeyPair();
     const encryptedDetails = await encryptPaymentDetails(

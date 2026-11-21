@@ -372,6 +372,34 @@ describe('Buy offers published and paid for by the service', () => {
     expect(late.data.error).toMatch(/state "Dropped"/);
   });
 
+  it('lets only the seller who sent the request withdraw it, and only before the buyer accepts', async () => {
+    const ctx = await setup();
+    const buyerId = await ctx.register(buyer);
+    const sellerId = await ctx.register(seller);
+    const offer = (await ctx.publish(buyerId, ctx.buyOffer())).data.offer;
+    const request = async () =>
+      (await ctx.req<{ trade: StoredTrade }>('POST', '/api/trades', { offerTxid: offer.offerTxid, amount: '200000', sellerIdentity: sellerId, ...sellerKeys(0) })).data.trade;
+
+    const first = await request();
+    // The publisher declines; the requester withdraws. Neither can do the other's part.
+    const byBuyer = await ctx.req('POST', `/api/trades/${first.id}/withdraw`, { identity: buyerId });
+    expect(byBuyer.status).toBe(400);
+    expect(byBuyer.data.error).toMatch(/Only the person who sent this request/);
+    const bySeller = await ctx.req<{ trade: StoredTrade }>('POST', `/api/trades/${first.id}/withdraw`, { identity: sellerId });
+    expect(bySeller.status).toBe(200);
+    expect(bySeller.data.trade.status).toBe('Dropped');
+    expect(bySeller.data.trade.withdrawnAt).toBeDefined();
+    // Nothing to accept any more.
+    const late = await ctx.req('POST', `/api/trades/${first.id}/accept`, { buyerIdentity: buyerId, ...buyerKeys(buyer, 0) });
+    expect(late.data.error).toMatch(/state "Dropped"/);
+
+    // Once accepted, the request is a trade: leaving it goes through the escrow, not a withdrawal.
+    const { taken } = await takeAndAccept(ctx, offer.offerTxid, buyerId, sellerId);
+    const afterAccept = await ctx.req('POST', `/api/trades/${taken.data.trade.id}/withdraw`, { identity: sellerId });
+    expect(afterAccept.status).toBe(400);
+    expect(afterAccept.data.error).toMatch(/state "Accepted"/);
+  });
+
   it('keeps client-signed publication for sell offers only', async () => {
     const ctx = await setup();
     const buyerId = await ctx.register(buyer);

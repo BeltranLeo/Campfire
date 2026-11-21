@@ -416,7 +416,7 @@ export function createApiHandler(deps: {
 
       // POST /api/trades/:id/:action
       const actionMatch = path.match(
-        /^\/api\/trades\/([0-9a-f]+)\/(accept|decline|funding|paid|dispute|verdict|settle|chat)$/i,
+        /^\/api\/trades\/([0-9a-f]+)\/(accept|decline|withdraw|funding|paid|dispute|verdict|settle|chat)$/i,
       );
       if (actionMatch) {
         const id = actionMatch[1];
@@ -504,6 +504,14 @@ export function createApiHandler(deps: {
             const identity = body.identity ?? body.sellerIdentity ?? body.buyerIdentity ?? '';
             requireSession(identity);
             const trade = await service.declineTrade({ tradeRecordId: id, identity });
+            return jsonResponse({ trade: tradeView(req, trade) });
+          }
+          if (action === 'withdraw') {
+            // The one who sent the request takes it back: the buyer of a sell offer, the seller of a buy offer.
+            const body = await readJson<{ identity?: string }>(req);
+            const identity = body.identity ?? '';
+            requireSession(identity);
+            const trade = await service.withdrawRequest({ tradeRecordId: id, identity });
             return jsonResponse({ trade: tradeView(req, trade) });
           }
           if (action === 'funding') {

@@ -264,6 +264,8 @@ export interface Trade extends TradeSummary {
   paidAt?: number;
   disputedBy?: 'buyer' | 'seller';
   disputedAt?: number;
+  /** The requester took the request back before it was accepted (status Dropped). */
+  withdrawnAt?: number;
   disputeReason?: string;
   verdict?: '01' | '02';
   verdictReason?: string;

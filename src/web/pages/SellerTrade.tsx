@@ -66,7 +66,7 @@ const BCH = { symbol: 'BCH', decimals: 8, isBch: true } as const;
 /** Stands in for localStorage when the browser blocks it: nothing is saved, nothing is found. */
 const NO_STORE = { getItem: () => null, setItem: () => undefined, removeItem: () => undefined };
 
-type Action = 'accept' | 'decline' | 'deposit' | 'release' | 'dispute';
+type Action = 'accept' | 'decline' | 'deposit' | 'release' | 'dispute' | 'withdraw';
 
 export function SellerAction(props: { trade: Trade; amount: string; fiat: string; onUpdate: (t: Trade) => void }) {
   const { trade } = props;
@@ -378,6 +378,21 @@ export function SellerAction(props: { trade: Trade; amount: string; fiat: string
       >
         <p className="cf-muted">{t.whenBuyerAccepts(deposit)}</p>
         {walletNotices}
+        {failure}
+        <div className="s-actions">
+          {/* Nothing is on-chain before the buyer accepts, so taking the request back needs no signature. */}
+          <Button
+            busy={busy === 'withdraw'}
+            disabled={busy !== null && busy !== 'withdraw'}
+            onClick={() =>
+              run('withdraw', tp.notWithdrawn, () =>
+                apiPost<{ trade: Trade }>(`/api/trades/${trade.id}/withdraw`, { identity }).then((r) => r.trade),
+              )
+            }
+          >
+            {tp.cancelRequest}
+          </Button>
+        </div>
       </ActionCard>
     );
   }
@@ -856,7 +871,12 @@ export function SellerResult({ trade, amount }: { trade: Trade; amount: string }
       );
       break;
     default:
-      notice = <Notice title={tp.dropped}>{t.droppedBody}</Notice>;
+      notice =
+        trade.withdrawnAt !== undefined ? (
+          <Notice title={tp.withdrawn}>{tp.withdrawnBody}</Notice>
+        ) : (
+          <Notice title={tp.dropped}>{t.droppedBody}</Notice>
+        );
       rows = null;
   }
   return (

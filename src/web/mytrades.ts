@@ -124,7 +124,9 @@ export function historyNote(trade: Trade, role: 'buyer' | 'seller', other?: stri
       how = t.returned;
       break;
     case 'Dropped':
-      if (trade.side === 'buy') {
+      if (trade.withdrawnAt !== undefined) {
+        how = t.requestWithdrawn;
+      } else if (trade.side === 'buy') {
         // Accepting opens the funding window, so a deadline means the buyer accepted and the deposit never came.
         how = trade.fundingDeadline !== undefined ? t.notLockedInTime : role === 'buyer' ? t.declinedOrNotAccepted : t.notAcceptedInTime;
       } else {

@@ -80,6 +80,9 @@ describe('rows', () => {
     expect(how('Refunded', 'seller')).toBe('returned after the refund time');
     expect(how('Dropped', 'buyer')).toBe('not accepted in time');
     expect(how('Dropped', 'seller')).toBe('declined or not locked in time');
+    // A request taken back by the one who sent it says so, on either side and either kind of offer.
+    expect(how('Dropped', 'buyer', { withdrawnAt: 1 })).toBe('request cancelled');
+    expect(how('Dropped', 'seller', { withdrawnAt: 1, side: 'buy' })).toBe('request cancelled');
   });
 
   it('lists finished trades most recent first', () => {

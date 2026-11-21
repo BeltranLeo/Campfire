@@ -107,6 +107,8 @@ export interface StoredTrade {
   sharedTradeKeyHex?: string;
   disputeKeys?: { buyer?: string; seller?: string };
   disputedAt?: number;
+  // When the one who sent the request took it back, before it was accepted (status Dropped).
+  withdrawnAt?: number;
   verdict?: VerdictHex;
   verdictSignature?: string;
   verdictReason?: string;

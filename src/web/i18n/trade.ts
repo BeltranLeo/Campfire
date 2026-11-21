@@ -38,6 +38,7 @@ const en = {
   youLock: (coins: string): string => `You lock ${coins}`,
   acceptAndLock: (v: Viewer, coins: string): string => (v.mine ? `You accept and lock ${coins}` : `Seller accepts and locks ${coins}`),
   dropped: 'The trade was dropped',
+  requestWithdrawn: 'The request was cancelled',
   notAcceptedAndLocked: (coins: string): string => `The seller did not accept and lock ${coins} in time`,
   // Step 3
   pays: (v: Viewer): string => (v.you ? 'You send the payment and mark it as paid' : 'Buyer sends the payment and marks it as paid'),
@@ -146,6 +147,7 @@ const es: typeof en = {
   youLock: (coins) => `Bloqueas ${coins}`,
   acceptAndLock: (v, coins) => (v.mine ? `Aceptas y bloqueas ${coins}` : `El vendedor acepta y bloquea ${coins}`),
   dropped: 'La operación quedó sin efecto',
+  requestWithdrawn: 'Se canceló la solicitud',
   notAcceptedAndLocked: (coins) => `El vendedor no aceptó ni bloqueó ${coins} a tiempo`,
   pays: (v) => (v.you ? 'Envías el pago y lo marcas como pagado' : 'El comprador envía el pago y lo marca como pagado'),
   markedPaid: (v) => (v.you ? 'Marcaste el pago como enviado' : 'El comprador marcó el pago como enviado'),

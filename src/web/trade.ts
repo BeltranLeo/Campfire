@@ -170,7 +170,7 @@ function storySteps(trade: Trade, role: Role, amount: string): Step[] {
     }
   } else if (buyOffer) {
     // Dropped before any deposit: either the buyer never accepted, or the seller did not lock the coins in time.
-    const title = acceptedAt === undefined ? t.notAccepted(v) : t.notLocked(v, coins);
+    const title = trade.withdrawnAt !== undefined ? t.requestWithdrawn : acceptedAt === undefined ? t.notAccepted(v) : t.notLocked(v, coins);
     steps.push({ state: 'failed', title, at: trade.updatedAt });
     return steps;
   } else if (mine && s === 'Accepted') {
@@ -184,7 +184,8 @@ function storySteps(trade: Trade, role: Role, amount: string): Step[] {
     });
   } else {
     // Dropped before any deposit: nothing reached the chain.
-    steps.push({ state: 'failed', title: mine ? t.dropped : t.notAcceptedAndLocked(coins), at: trade.updatedAt });
+    const title = trade.withdrawnAt !== undefined ? t.requestWithdrawn : mine ? t.dropped : t.notAcceptedAndLocked(coins);
+    steps.push({ state: 'failed', title, at: trade.updatedAt });
     return steps;
   }
 
