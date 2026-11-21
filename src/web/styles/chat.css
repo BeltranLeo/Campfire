@@ -13,3 +13,10 @@
 .tr-chat__image[data-expanded] { cursor: zoom-out; }
 .tr-chat__image[data-expanded] img { max-height: none; width: 100%; }
 .tr-chat .cf-msg:has(.tr-chat__image[data-expanded]) { max-width: 100%; }
+/* On a narrow card the message field takes its own row and the two buttons go under it, Send at the right:
+   side by side, "Attach receipt" and "Send" (longer in Spanish) left the field too narrow to type in. */
+@media (max-width: 479px) {
+  .s-chatsend[data-nowrap] { flex-wrap: wrap; }
+  .s-chatsend > .cf-input { flex-basis: 100%; }
+  .s-chatsend > .s-primary:last-child, .s-chatsend > .cf-btn:last-child { margin-left: auto; }
+}

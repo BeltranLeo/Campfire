@@ -250,7 +250,7 @@ function ChatThread({ trade, role, sessionKey, open }: { trade: Trade; role: Cha
       </div>
       {open && (
         <form className="cf-stack" data-gap="2" style={{ marginTop: 'var(--space-3)' }} onSubmit={send}>
-          <div className="cf-row" data-nowrap>
+          <div className="cf-row s-chatsend" data-nowrap>
             <input
               id="chat-input"
               className="cf-input cf-grow"

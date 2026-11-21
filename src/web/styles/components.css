@@ -40,6 +40,8 @@
 .cf-num { font-variant-numeric: tabular-nums; }
 /* A countdown is always amber: the time runs, and running out is not a danger (the coins go back on their own). */
 .cf-countdown { font-family: var(--font-data); font-size: 28px; line-height: 32px; font-weight: 500; font-variant-numeric: tabular-nums; color: var(--attention); }
+/* The last 20 % of the window (Countdown sets data-low): the colour turns from amber to red. */
+.cf-countdown[data-low] { color: var(--danger); }
 
 /* ---------- Layout helpers ---------- */
 .cf-stack { display: flex; flex-direction: column; gap: var(--space-4); }
@@ -213,9 +215,12 @@
 @media (prefers-reduced-motion: reduce) { .cf-skel, .cf-btn[aria-busy="true"]::before { animation: none; } }
 
 /* ---------- Shell: hackathon banner, header, footer ---------- */
-.cf-banner { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-1) var(--space-3); padding: var(--space-2) var(--space-4); background: var(--text); color: var(--bg); font-size: 13px; line-height: 18px; }
+.cf-banner { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-1) var(--space-3); padding: var(--space-2) var(--space-4); background: var(--noche-900); color: var(--luz-perla); font-size: 13px; line-height: 18px; }
+/* Dark in both themes: an inverted (pearl) strip glares above a night-blue page. In dark it sits a step deeper than the page. */
+[data-theme="dark"] .cf-banner { background: var(--noche-950); }
+[data-theme="dark"] .cf-banner:last-of-type { border-bottom: 1px solid var(--border); }
 .cf-banner strong { font-weight: 600; }
-.cf-banner a { color: var(--bg); }
+.cf-banner a { color: var(--luz-perla); }
 .cf-banner__links { display: flex; flex-wrap: wrap; gap: 2px var(--space-3); }
 .cf-header { display: flex; align-items: center; gap: var(--space-4); padding: var(--space-3) var(--space-4); background: var(--glass); -webkit-backdrop-filter: blur(18px); backdrop-filter: blur(18px); border-bottom: 1px solid var(--border); }
 /* On a computer the header stays on top while the page scrolls under its glass, so the wallet is always at hand.
@@ -243,6 +248,10 @@
 /* Quick actions are navigation, not the action: neutral cards, Buy and Sell alike. */
 .cf-quick { display: flex; flex-direction: column; align-items: flex-start; gap: var(--space-2); min-height: 88px; padding: var(--space-4); border-radius: var(--radius-lg); border: 1px solid var(--border); background: var(--surface); color: var(--text) !important; text-decoration: none; font: 600 15px/20px var(--font-text); position: relative; }
 .cf-quick:hover { border-color: var(--text-muted); }
+/* The front page's one primary action (Landing-* screens): "I want to buy BCH". */
+.cf-quick[data-variant="primary"] { background: var(--action); border-color: var(--action); color: var(--on-action) !important; box-shadow: var(--shadow-action); }
+.cf-quick[data-variant="primary"]:hover { background: var(--action-hover); border-color: var(--action-hover); }
+.cf-quick[data-variant="primary"] > small, .cf-quick[data-variant="primary"] > .cf-icon { color: var(--on-action); }
 .cf-quick > small { font: 400 13px/18px var(--font-text); color: var(--text-muted); }
 .cf-badge { display: inline-grid; place-items: center; min-width: 20px; height: 20px; padding: 0 var(--space-1); border-radius: var(--radius-pill); background: var(--action); color: var(--on-action); font: 700 11px/1 var(--font-text); }
 .cf-quick > .cf-badge { position: absolute; top: var(--space-3); right: var(--space-3); }

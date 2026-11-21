@@ -66,8 +66,8 @@
 /* The vote address under the banner: one more dark row, never cut, legible on a phone. */
 .s-bannervote { padding-top: 0; flex-wrap: wrap; }
 .s-bannervote__address { min-width: 0; overflow-wrap: anywhere; font-size: 12px; }
-.s-bannervote .cf-copy { padding: 2px 0; color: var(--bg); text-decoration: underline; text-underline-offset: 2px; }
-.s-bannervote .cf-copy:hover { background: none; color: var(--bg); }
+.s-bannervote .cf-copy { padding: 2px 0; color: var(--luz-perla); text-decoration: underline; text-underline-offset: 2px; }
+.s-bannervote .cf-copy:hover { background: none; color: var(--luz-perla); }
 .s-bannerfold { display: none; }
 .s-bannerfold > summary { cursor: pointer; text-decoration: underline; text-underline-offset: 2px; white-space: nowrap; list-style: none; }
 .s-bannerfold > summary::-webkit-details-marker { display: none; }
@@ -147,7 +147,11 @@
   .s-headerbar { flex-wrap: wrap; gap: var(--space-2) var(--space-3); }
   .s-headerbar > .cf-nav { order: 3; flex-basis: 100%; overflow-x: auto; margin: 0 calc(-1 * var(--space-2)); }
   .cf-banner { justify-content: space-between; flex-wrap: nowrap; align-items: flex-start; }
-  .s-bannervote { flex-wrap: wrap; justify-content: flex-start; align-items: center; gap: 0 var(--space-2); }
+  /* The address stays in full (BLAZE requires it in the banner); Copy moves up beside the label to save a line. */
+  .s-bannervote { display: grid; grid-template-columns: minmax(0, 1fr) auto; grid-template-areas: "label copy" "address address"; justify-content: stretch; align-items: center; gap: 0 var(--space-2); }
+  .s-bannervote > span:first-child { grid-area: label; }
+  .s-bannervote__address { grid-area: address; }
+  .s-bannervote > .cf-copy { grid-area: copy; }
   .s-bannerfold { display: block; text-align: right; }
   .s-bannerfold[open] > .cf-banner__links { flex-direction: column; align-items: flex-end; }
   .s-menu { width: 100%; }
@@ -203,12 +207,14 @@
 .s-footsettings { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2) var(--space-4); }
 .s-footsettings > .cf-seg > button { padding: var(--space-1) var(--space-2); --icon-size: 18px; }
 @media (max-width: 719px) {
-  /* Logo symbol, nav and wallet button in one row; the nav scrolls sideways and fades at the edge when it overflows. */
-  .s-headerbar { flex-wrap: nowrap; }
+  /* Logo symbol, nav and wallet button in one row; the nav scrolls sideways and fades at the edge when it overflows.
+     Without a wallet the nav takes a row of its own instead, so Offers, How it works and Transparency all show. */
+  .s-headerbar { flex-wrap: wrap; row-gap: 0; }
   .s-headerbar > .cf-nav { order: 0; flex: 1 1 auto; flex-basis: auto; min-width: 0; margin: 0; scrollbar-width: none; -webkit-mask: linear-gradient(to right, #000 calc(100% - 24px), transparent); mask: linear-gradient(to right, #000 calc(100% - 24px), transparent); }
   .s-headerbar > .cf-nav::-webkit-scrollbar { display: none; }
   .s-headerbar > .cf-grow { display: none; }
-  .s-headerbar > .cf-nav[data-app] + .cf-grow { display: block; }
+  .s-headerbar > .cf-nav + .cf-grow { display: block; }
+  .s-headerbar > .cf-nav:not([data-app]) { order: 3; flex-basis: 100%; margin: 0 calc(-1 * var(--space-2)); -webkit-mask: none; mask: none; }
   .cf-nav a { padding: var(--space-2); }
   .cf-header { padding-top: var(--space-2); padding-bottom: var(--space-2); }
   .cf-logo > img[data-theme-only] { display: none !important; }

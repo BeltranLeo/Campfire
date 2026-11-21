@@ -35,7 +35,7 @@ export function Landing() {
           <p className="cf-muted s-herolead">{t.lead}</p>
         </div>
         <div className="s-intents">
-          <Link className="cf-quick" to="/offers?side=buy">
+          <Link className="cf-quick" data-variant="primary" to="/offers?side=buy">
             <Icon name="buy" />
             {t.buy}
             <small>{t.buyHint}</small>
