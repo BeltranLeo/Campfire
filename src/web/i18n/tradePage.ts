@@ -59,6 +59,11 @@ const en = {
   youMarked: (amount: string) => `You marked the payment as sent. When the seller confirms it, ${amount} go to your wallet.`,
   wrongPaid: "The seller hasn't released after you paid.",
   cancelPaid: 'Signs in your wallet. If you already paid, ask the arbiter instead.',
+  confirmCancelTitle: (fiat: string) => `Cancel after marking ${fiat} as paid?`,
+  confirmCancelBody:
+    'Cancelling sends the coins back to the seller for good. If you paid and the seller has not given the money back, you lose it: ask the arbiter instead. Cancel only if you did not pay, or the seller already returned it.',
+  confirmCancel: 'Yes, cancel and return them',
+  goBack: 'Go back',
   // Disputed
   reviewing: 'The arbiter is reviewing this trade',
   disputeBy: (bySeller: boolean, at: string | null) =>
@@ -243,6 +248,11 @@ const es: typeof en = {
   youMarked: (amount) => `Marcaste el pago como enviado. Cuando el vendedor lo confirme, ${amount} van a tu billetera.`,
   wrongPaid: 'El vendedor no liberó después de que pagaste.',
   cancelPaid: 'Se firma en tu billetera. Si ya pagaste, mejor pide ayuda al árbitro.',
+  confirmCancelTitle: (fiat) => `¿Cancelar después de marcar el pago de ${fiat}?`,
+  confirmCancelBody:
+    'Cancelar devuelve las monedas al vendedor para siempre. Si pagaste y el vendedor no te devolvió el dinero, lo pierdes: mejor pide ayuda al árbitro. Cancela solo si no pagaste o si el vendedor ya te lo devolvió.',
+  confirmCancel: 'Sí, cancelar y devolver',
+  goBack: 'Volver',
   reviewing: 'El árbitro está revisando esta operación',
   disputeBy: (bySeller, at) =>
     `${bySeller ? 'El vendedor abrió una disputa' : 'Abriste una disputa'}${at ? ` a las ${at}` : ''}. El árbitro ahora puede leer el chat y decidirá a favor del comprador o del vendedor.`,

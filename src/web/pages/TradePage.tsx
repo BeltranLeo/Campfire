@@ -247,6 +247,8 @@ function BuyerAction(props: {
   const [disputing, setDisputing] = useState(false);
   // Marking the payment needs no signature and cannot be undone, so the button asks once more before it sends.
   const [confirmingPaid, setConfirmingPaid] = useState(false);
+  // After the payment is marked, cancelling would lose the money already sent, so it too asks once more.
+  const [confirmingCancel, setConfirmingCancel] = useState(false);
   // The last check before fiat leaves the buyer's account: this browser rebuilt the escrow from the terms and found the
   // deposit in it. Until then (still checking, a lookup that failed, terms that do not match, no deposit) the buyer
   // cannot mark the payment; the notice above says why.
@@ -295,8 +297,9 @@ function BuyerAction(props: {
   );
   // Cancelling signs and ends the trade, so while the buyer can still pay it sits in the fold, away from the main button.
   // The fold stays open while the dispute form is showing, so the person does not lose what they typed.
-  // The cancel note depends on the step: before the payment it is a plain exit; after it, cancelling would lose the money.
-  const somethingWrong = (arbiterLine: string, cancelNote: string) => (
+  // The cancel note depends on the step: before the payment it is a plain exit; after it, cancelling would lose the money,
+  // so with `confirm` the button first asks whether the money really did not leave (or came back).
+  const somethingWrong = (arbiterLine: string, cancelNote: string, confirm = false) => (
     <Details summary={t.somethingWrong} tag={null} open={disputing || undefined}>
       <div className="cf-stack">
         {disputeForm || (
@@ -307,19 +310,40 @@ function BuyerAction(props: {
             <p className="cf-small cf-muted">{arbiterLine}</p>
           </div>
         )}
-        <div className="cf-stack" data-gap="2">
-          <Button
-            block
-            variant="danger"
-            signs={cancelNote}
-            busy={busy === 'cancel'}
-            disabled={busy !== null && busy !== 'cancel'}
-            onClick={cancelTrade}
-          >
-            {t.cancelReturn(coins)}
-          </Button>
-          <p className="cf-small cf-muted">{t.cancelNote(isBch)}</p>
-        </div>
+        {confirm && confirmingCancel ? (
+          <div className="cf-well cf-stack" data-gap="3">
+            <strong>{t.confirmCancelTitle(props.fiat)}</strong>
+            <p className="cf-small">{t.confirmCancelBody}</p>
+            <div className="s-actions">
+              <Button
+                variant="danger"
+                signs={cancelNote}
+                busy={busy === 'cancel'}
+                disabled={busy !== null && busy !== 'cancel'}
+                onClick={() => cancelTrade().finally(() => setConfirmingCancel(false))}
+              >
+                {t.confirmCancel}
+              </Button>
+              <Button variant="ghost" disabled={busy !== null} onClick={() => setConfirmingCancel(false)}>
+                {t.goBack}
+              </Button>
+            </div>
+          </div>
+        ) : (
+          <div className="cf-stack" data-gap="2">
+            <Button
+              block
+              variant="danger"
+              signs={cancelNote}
+              busy={busy === 'cancel'}
+              disabled={busy !== null && busy !== 'cancel'}
+              onClick={confirm ? () => setConfirmingCancel(true) : cancelTrade}
+            >
+              {t.cancelReturn(coins)}
+            </Button>
+            <p className="cf-small cf-muted">{t.cancelNote(isBch)}</p>
+          </div>
+        )}
       </div>
     </Details>
   );
@@ -447,7 +471,7 @@ function BuyerAction(props: {
         >
           <p className="cf-muted">{t.youMarked(props.amount)}</p>
           {failure}
-          {somethingWrong(t.wrongPaid, t.cancelPaid)}
+          {somethingWrong(t.wrongPaid, t.cancelPaid, true)}
         </ActionCard>
       );
     case 'Disputed': {
