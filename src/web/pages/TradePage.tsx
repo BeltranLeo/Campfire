@@ -244,6 +244,8 @@ function BuyerAction(props: {
   const isBch = trade.asset === 'BCH';
   // The dispute asks for a reason first, so it opens a small form.
   const [disputing, setDisputing] = useState(false);
+  // Marking the payment needs no signature and cannot be undone, so the button asks once more before it sends.
+  const [confirmingPaid, setConfirmingPaid] = useState(false);
 
   const markPaid = () =>
     run('paid', t.notMarked, () =>
@@ -388,18 +390,37 @@ function BuyerAction(props: {
           <ZeroConfNotice ds={props.ds} isDemo={trade.isDemo === true} />
           <PaymentDetails trade={trade} fiat={props.fiat} />
           {failure}
-          <div className="s-actions">
-            <Button
-              variant="primary"
-              busy={busy === 'paid'}
-              // Also held while the deposit is still being watched: a double spend shows within those seconds.
-              disabled={props.ds.phase === 'proof' || props.ds.phase === 'watching' || (busy !== null && busy !== 'paid')}
-              onClick={markPaid}
-              note={t.noSignatureNeeded}
-            >
-              {t.sentPayment}
-            </Button>
-          </div>
+          {confirmingPaid ? (
+            <div className="cf-well cf-stack" data-gap="3">
+              <strong>{t.confirmPaidTitle(props.fiat)}</strong>
+              <p className="cf-small">{t.confirmPaidBody}</p>
+              <div className="s-actions">
+                <Button
+                  variant="primary"
+                  busy={busy === 'paid'}
+                  disabled={props.ds.phase === 'proof' || (busy !== null && busy !== 'paid')}
+                  onClick={() => markPaid().finally(() => setConfirmingPaid(false))}
+                >
+                  {t.confirmPaid}
+                </Button>
+                <Button variant="ghost" disabled={busy !== null} onClick={() => setConfirmingPaid(false)}>
+                  {t.notYet}
+                </Button>
+              </div>
+            </div>
+          ) : (
+            <div className="s-actions">
+              <Button
+                variant="primary"
+                // Also held while the deposit is still being watched: a double spend shows within those seconds.
+                disabled={props.ds.phase === 'proof' || props.ds.phase === 'watching' || busy !== null}
+                onClick={() => setConfirmingPaid(true)}
+                note={t.noSignatureNeeded}
+              >
+                {t.sentPayment}
+              </Button>
+            </div>
+          )}
           {somethingWrong(t.wrongFunded, t.cancelFunded)}
         </ActionCard>
       );
