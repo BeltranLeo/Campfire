@@ -13,6 +13,7 @@ import { chat } from './i18n/chat';
 import { create } from './i18n/create';
 import { chats } from './i18n/chats';
 import { mytrades } from './i18n/mytrades';
+import { myoffers } from './i18n/myoffers';
 import { home } from './i18n/home';
 import { about } from './i18n/about';
 import { transparency } from './i18n/transparency';
@@ -157,6 +158,7 @@ const en = {
   create: create.en,
   chats: chats.en,
   mytrades: mytrades.en,
+  myoffers: myoffers.en,
   home: home.en,
   about: about.en,
   transparency: transparency.en,
@@ -369,6 +371,7 @@ const es: Messages = {
   create: create.es,
   chats: chats.es,
   mytrades: mytrades.es,
+  myoffers: myoffers.es,
   home: home.es,
   about: about.es,
   transparency: transparency.es,

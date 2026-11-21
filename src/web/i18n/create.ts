@@ -4,7 +4,7 @@
 type Side = 'sell' | 'buy';
 
 const en = {
-  backTrades: '← My trades',
+  backOffers: '← Offers',
   review: 'Review',
   stepOf: (step: number) => `Step ${step} of 3`,
   title: 'Create an offer',
@@ -69,7 +69,7 @@ const en = {
   freeUsedUpBody: (count: number | undefined, next: string | null) =>
     `Campfire pays the network fee for ${count} buy offers per day across all users. Please try again ${next ? `after ${next}.` : 'tomorrow.'}`,
   openPaid: (count: number | undefined) => `You already have ${count} open offers paid for by Campfire`,
-  openPaidBody: (count: number | undefined) => `Close one in My trades to publish another. Campfire pays for ${count} open offers per wallet.`,
+  openPaidBody: (count: number | undefined) => `Close one in My offers to publish another. Campfire pays for ${count} open offers per wallet.`,
   notPaying: 'Campfire is not paying for buy offers right now',
   tryLater: 'Please try again later.',
   couldNotPay: 'Campfire could not pay for this offer',
@@ -135,7 +135,7 @@ const en = {
 };
 
 const es: typeof en = {
-  backTrades: '← Mis operaciones',
+  backOffers: '← Ofertas',
   review: 'Revisión',
   stepOf: (step) => `Paso ${step} de 3`,
   title: 'Crear una oferta',
@@ -202,7 +202,7 @@ const es: typeof en = {
   freeUsedUpBody: (count, next) =>
     `Campfire paga la comisión de red de ${count} ofertas de compra por día entre todos los usuarios. Vuelve a intentarlo ${next ? `después del ${next}.` : 'mañana.'}`,
   openPaid: (count) => `Ya tienes ${count} ofertas abiertas pagadas por Campfire`,
-  openPaidBody: (count) => `Cierra una en Mis operaciones para publicar otra. Campfire paga ${count} ofertas abiertas por billetera.`,
+  openPaidBody: (count) => `Cierra una en Mis ofertas para publicar otra. Campfire paga ${count} ofertas abiertas por billetera.`,
   notPaying: 'Por ahora Campfire no está pagando ofertas de compra',
   tryLater: 'Vuelve a intentarlo más tarde.',
   couldNotPay: 'Campfire no pudo pagar esta oferta',

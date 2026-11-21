@@ -8,6 +8,7 @@ import { CreateOffer } from './pages/CreateOffer';
 import { DevComponents } from './pages/DevComponents';
 import { Home } from './pages/Home';
 import { Landing } from './pages/Landing';
+import { MyOffers } from './pages/MyOffers';
 import { MyTrades } from './pages/MyTrades';
 import { NotBuilt } from './pages/NotBuilt';
 import { Offers } from './pages/Offers';
@@ -51,6 +52,7 @@ export function App() {
         <Route path="welcome" element={<Welcome />} />
         <Route path="offers" element={<Offers />} />
         <Route path="offers/new" element={<CreateOffer />} />
+        <Route path="offers/mine" element={<MyOffers />} />
         <Route path="offers/:offerTxid" element={<Take />} />
         <Route path="trade/:id" element={<TradePage />} />
         <Route path="trade/:id/arbiter" element={<Arbiter />} />

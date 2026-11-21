@@ -358,8 +358,8 @@ export function CreateOffer() {
   return (
     <main className="s-main" data-narrow>
       <div className="s-pagehead">
-        <Link className="s-back" to="/trades">
-          {t.backTrades}
+        <Link className="s-back" to="/offers">
+          {t.backOffers}
         </Link>
         <span className="cf-stepper">{step === 'review' ? t.review : t.stepOf(step)}</span>
         <div className="cf-progress" aria-hidden="true">
@@ -751,7 +751,7 @@ export function CreateOffer() {
                     {t.backToOffers}
                   </Button>
                 ) : buying && blocked === 'open' ? (
-                  <Button variant="primary" to="/trades?tab=offers">
+                  <Button variant="primary" to="/offers/mine">
                     {t.goToMyOffers}
                   </Button>
                 ) : buying ? (

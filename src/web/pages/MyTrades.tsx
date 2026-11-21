@@ -1,34 +1,27 @@
-import { useState } from 'react';
-import { Link, useSearchParams } from 'react-router';
+import { Link, Navigate, useSearchParams } from 'react-router';
 import { aliasFor } from '../alias';
-import { ApiError, apiGet, apiPost, type Offer, type Trade } from '../api';
+import { ApiError, apiGet, type Trade } from '../api';
 import { assetInfo } from '../assets';
 import { Button } from '../components/Button';
-import { useAdvanced } from '../advanced';
-import { HashLink, ProvenanceTag, explorerTxUrl } from '../components/Provenance';
 import { EmptyState, Notice, Skeleton } from '../components/States';
 import { StatusPill } from '../components/StatusPill';
 import { Countdown } from '../components/Timeline';
 import { useConfig } from '../config';
-import { withKeptElectrum } from '../electrum';
-import { formatAmount, formatBch, formatDayMonth, formatFiatAmount, formatRange } from '../format';
+import { formatAmount, formatFiatAmount } from '../format';
 import { useNow } from '../hooks/useNow';
 import { usePoll } from '../hooks/usePoll';
-import { historyNote, isActive, myOffers, nextStep, rowTitle, sortActive, sortHistory, tradesPerOffer } from '../mytrades';
-import { buildCloseOffer } from '../sell';
-import { TradeActionError, roleOf } from '../trade';
-import { WalletDeclined, useWallet } from '../wallet';
+import { historyNote, isActive, nextStep, rowTitle, sortActive, sortHistory } from '../mytrades';
+import { roleOf } from '../trade';
+import { useWallet } from '../wallet';
 import { useMessages } from '../lang';
 
-// My trades (Trades-* screens): the trades in progress with what each needs next, the finished ones, and the
-// offers published from this wallet. The lists refresh every few seconds, so a new request shows up on its own.
+// My trades (Trades-* screens): the trades in progress with what each needs next, and the finished ones. The lists
+// refresh every few seconds, so a new request shows up on its own. The offers published from this wallet live in
+// the Offers section (pages/MyOffers.tsx).
 
-const TABS = ['active', 'history', 'offers'] as const;
+const TABS = ['active', 'history'] as const;
 type Tab = (typeof TABS)[number];
 const REFRESH_MS = 10_000;
-/** After a close, the indexer behind the service may take a moment to show the marker as spent. */
-const CLOSE_RETRIES = 3;
-const CLOSE_RETRY_MS = 2000;
 
 export function MyTrades() {
   const wallet = useWallet();
@@ -46,6 +39,9 @@ export function MyTrades() {
   );
   const activeCount = trades.data ? trades.data.filter(isActive).length : 0;
 
+  // My offers used to be a tab here; links to it from before keep working.
+  if (requested === 'offers') return <Navigate to="/offers/mine" replace />;
+
   return (
     <main className="s-main" data-desk="medium">
       <div className="s-toolbar">
@@ -59,9 +55,6 @@ export function MyTrades() {
         </Link>
         <Link to="/trades?tab=history" aria-current={tab === 'history' ? 'page' : undefined}>
           {t.history}
-        </Link>
-        <Link to="/trades?tab=offers" aria-current={tab === 'offers' ? 'page' : undefined}>
-          {t.myOffers}
         </Link>
       </nav>
 
@@ -78,8 +71,6 @@ export function MyTrades() {
             {t.connectBody}
           </EmptyState>
         </section>
-      ) : tab === 'offers' ? (
-        <OffersTab identity={identity} trades={trades.data ?? []} />
       ) : trades.data ? (
         tab === 'active' ? (
           <ActiveTab trades={trades.data} identity={identity} />
@@ -213,165 +204,5 @@ function HistoryTab({ trades, identity }: { trades: Trade[]; identity: string })
         );
       })}
     </section>
-  );
-}
-
-function OffersTab({ identity, trades }: { identity: string; trades: Trade[] }) {
-  const wallet = useWallet();
-  const config = useConfig();
-  const offers = usePoll(() => apiGet<{ offers: Offer[] }>('/api/offers').then((r) => r.offers), 'all-offers', REFRESH_MS);
-  const [closing, setClosing] = useState<string | null>(null);
-  const advanced = useAdvanced();
-  const [failure, setFailure] = useState<string | null>(null);
-  const messages = useMessages();
-  const t = messages.mytrades;
-
-  async function close(offer: Offer) {
-    if (!wallet.xpubs) return;
-    setClosing(offer.offerTxid);
-    setFailure(null);
-    try {
-      const receiveXpub = wallet.xpubs.receive;
-      const tx = await withKeptElectrum((provider) => buildCloseOffer({ offer, provider, receiveXpub }));
-      // No transaction when the marker is already spent: the offer is closed on-chain and the service only checks it.
-      const closeTxHex = tx ? await wallet.sign(tx.request, tx.inputPaths) : undefined;
-      const send = (hex?: string) =>
-        apiPost(`/api/offers/${offer.offerTxid}/close`, { sellerIdentity: identity, ...(hex ? { closeTxHex: hex } : {}) });
-      try {
-        await send(closeTxHex);
-      } catch (err) {
-        // The transaction was sent, but the service looked before its indexer listed the spent marker: ask again
-        // without the transaction, which only re-checks. Any other error is real.
-        if (!(err instanceof ApiError && /still unspent/i.test(err.message))) throw err;
-        let done = false;
-        for (let i = 0; i < CLOSE_RETRIES && !done; i++) {
-          await new Promise((r) => setTimeout(r, CLOSE_RETRY_MS));
-          done = await send().then(
-            () => true,
-            () => false,
-          );
-        }
-        if (!done) throw err;
-      }
-      offers.reload();
-    } catch (err) {
-      setFailure(
-        err instanceof WalletDeclined
-          ? messages.trade.walletDeclined
-          : err instanceof TradeActionError || err instanceof ApiError
-            ? err.message
-            : t.somethingWrong,
-      );
-    } finally {
-      setClosing(null);
-    }
-  }
-
-  if (!offers.data) {
-    return offers.error ? (
-      <section className="cf-card">
-        <div className="cf-stack">
-          <Notice tone="danger" title={t.offersError}>
-            {offers.error instanceof ApiError ? offers.error.message : t.serverSilent}
-          </Notice>
-          <div className="s-actions">
-            <Button variant="primary" onClick={offers.reload}>
-              {messages.common.tryAgain}
-            </Button>
-          </div>
-        </div>
-      </section>
-    ) : (
-      <ListSkeleton />
-    );
-  }
-  const mine = myOffers(offers.data, identity);
-  const counts = tradesPerOffer(trades);
-  if (mine.length === 0) {
-    return (
-      <section className="cf-card">
-        <EmptyState
-          title={t.noOffers}
-          action={
-            <Button variant="primary" to="/offers/new">
-              {t.createOffer}
-            </Button>
-          }
-        >
-          {t.noOffersBody}
-        </EmptyState>
-      </section>
-    );
-  }
-  return (
-    <>
-      {failure && (
-        <Notice tone="danger" title={t.notClosed}>
-          {failure}
-        </Notice>
-      )}
-      <section className="cf-card" data-flush>
-        {mine.map((offer) => {
-          const doc = offer.document;
-          const asset = assetInfo(doc.asset, doc.assetDecimals, config);
-          const n = counts.get(offer.offerTxid) ?? 0;
-          const buying = doc.side === 'buy';
-          return (
-            <div key={offer.offerTxid} className="s-req">
-              <div className="s-cell">
-                <span>
-                  <strong>{t.offerTitle(buying, asset.symbol, doc.fiat)}</strong>{' '}
-                  · <span className="cf-mono">{formatRange(doc.min, doc.max, asset)}</span>
-                </span>
-                <span className="cf-small cf-muted">
-                  <span className="cf-pill" data-tone={offer.status === 'Published' ? 'escrow' : undefined}>
-                    {t.offerStatus(offer.status)}
-                  </span>{' '}
-                  {t.tradeCount(n)} · {t.expires(offer.status === 'Expired', formatDayMonth(doc.expiresAt))} ·{' '}
-                  {advanced ? (
-                    <>
-                      {t.offer} <HashLink value={offer.offerTxid} kind="transaction" />
-                      {offer.closeTxid && (
-                        <>
-                          {' '}· {t.close} <HashLink value={offer.closeTxid} kind="transaction" />
-                        </>
-                      )}
-                    </>
-                  ) : (
-                    <ProvenanceTag kind="chain" />
-                  )}
-                </span>
-                {/* The transactions that opened and closed the offer, in the explorer. A close the service only
-                    detected on-chain has no recorded transaction, so it has no link. */}
-                {!advanced && (
-                  <span className="cf-small">
-                    <a href={explorerTxUrl(offer.offerTxid)} target="_blank" rel="noreferrer">
-                      {t.publicationTx}
-                    </a>
-                    {offer.closeTxid && (
-                      <>
-                        {' '}·{' '}
-                        <a href={explorerTxUrl(offer.closeTxid)} target="_blank" rel="noreferrer">
-                          {t.closingTx}
-                        </a>
-                      </>
-                    )}
-                  </span>
-                )}
-                {offer.sponsored && <span className="cf-small cf-subtle">{t.feePaid}</span>}
-                {offer.status === 'Expired' && (
-                  <span className="cf-small cf-subtle">{t.expiredNote(buying, formatBch(1000n))}</span>
-                )}
-              </div>
-              {offer.status !== 'Closed' && (
-                <Button size="sm" signs busy={closing === offer.offerTxid} disabled={closing !== null && closing !== offer.offerTxid} onClick={() => close(offer)}>
-                  {t.closeOffer}
-                </Button>
-              )}
-            </div>
-          );
-        })}
-      </section>
-    </>
   );
 }

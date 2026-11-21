@@ -6,6 +6,7 @@ import { ApiError, apiGet, type Offer, type PriceQuote } from '../api';
 import { assetInfo, type AssetInfo } from '../assets';
 import { Button } from '../components/Button';
 import { OfferHeader, OfferRow, OfferRowSkeleton, type OfferColumns } from '../components/OfferRow';
+import { OffersTabs } from '../components/OffersTabs';
 import { EmptyState, Notice } from '../components/States';
 import { useConfig } from '../config';
 import {
@@ -22,8 +23,10 @@ import { parseAmount } from '../take';
 import { usePoll } from '../hooks/usePoll';
 import { useMessages } from '../lang';
 import type { Messages } from '../messages';
+import { myOffers } from '../mytrades';
 import { isSimulatedOffer, loadQuotes, loadReputations, priceOf, unique } from '../offerData';
 import { filterOptions, offerTakes } from '../paymentMethods';
+import { useWallet } from '../wallet';
 
 // The offer list (Offers-* screens). The visitor starts from an intention: "I want to buy" lists
 // sell offers, "I want to sell" lists buy offers. The choice lives in the URL (?side=sell) so the
@@ -43,6 +46,10 @@ export function Offers() {
 
   const offers = usePoll(() => apiGet<{ offers: Offer[] }>('/api/offers?onlyOpen=true').then((r) => r.offers), 'offers');
   const all = offers.data ?? [];
+  // With a wallet, a tab leads to the offers it published; its badge counts the open ones, already in this list.
+  const wallet = useWallet();
+  const identity = wallet.status === 'connected' ? wallet.identity : null;
+  const myOpen = identity ? myOffers(all, identity).length : 0;
 
   // One quote per floating pair, refreshed every 30 s. A pair whose quote fails shows no price.
   const pairs = unique(all.flatMap((o) => (o.document.price.type === 'floating' ? [o.document.price.pair] : [])));
@@ -169,6 +176,7 @@ export function Offers() {
           </button>
         </div>
       </div>
+      {identity && <OffersTabs current="all" openCount={myOpen} />}
       {/* What the choice means in one short sentence: who sends what, and what keeps the visitor safe on that side. */}
       <p className="s-intent cf-small cf-muted">
         {intent === 'buy' ? t.intentBuy(coin || null) : t.intentSell(coin || null)}
