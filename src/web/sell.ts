@@ -22,7 +22,7 @@ export interface OfferForm {
   coin?: OfferCoin;
   fiat: string;
   priceType: PriceType;
-  /** Percent over the market price, e.g. "2.5". */
+  /** Percent over the market price, e.g. "2.5", or under it with a minus sign, e.g. "-2". */
   margin: string;
   /** Fiat per whole coin, for a fixed price. */
   fixedPrice: string;
@@ -190,7 +190,7 @@ export function buildOfferDocument(params: {
   let price: OfferDocument['price'] | undefined;
   if (form.priceType === 'market') {
     const marginBps = parseMarginBps(form.margin);
-    if (marginBps === null) errors.margin = 'Enter a percentage between -50 and 100, with up to two decimals.';
+    if (marginBps === null) errors.margin = 'Enter up to 50% below or 100% above the market price, with up to two decimals.';
     else price = { type: 'floating', pair: `${coin}/${form.fiat}`, marginBps };
   } else {
     const value = parseFixedPrice(form.fixedPrice);

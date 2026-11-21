@@ -156,6 +156,10 @@ export function CreateOffer() {
     if (!unitPrice || amount === null || amount <= 0n || (form.priceType === 'market' && marginBps === null)) return null;
     return formatFiatAmount(computeFiatAmount({ amount, assetDecimals: decimals, unitPrice, marginBps: effectiveMargin }), form.fiat);
   };
+  // The margin is kept as one signed number ("-2"); the form shows its direction and its size apart.
+  const marginBelow = /^\s*[-−]/.test(form.margin);
+  const marginSize = form.margin.trim().replace(/^[+\-−]\s*/, '');
+  const setMargin = (below: boolean, size: string) => edit('margin', { margin: below ? `-${size}` : size });
   const range = marginRange(offers.data ?? [], form.fiat, form.side, coin === 'BCH' ? 'BCH' : (config?.pusdCategory ?? ''));
 
   const status = sponsorship.data ?? null;
@@ -418,24 +422,43 @@ export function CreateOffer() {
 
               {form.priceType === 'market' ? (
                 <div className="cf-field" data-invalid={shown('margin') ? true : undefined}>
-                  <label htmlFor="margin">{buying ? 'I pay up to this much over the market price' : 'Over the market price'}</label>
+                  <label id="co-margin" htmlFor="margin">
+                    {buying ? 'The most I pay, compared with the market price' : 'Your price, compared with the market price'}
+                  </label>
+                  <div className="cf-seg" role="group" aria-labelledby="co-margin">
+                    <button type="button" aria-pressed={!marginBelow} onClick={() => setMargin(false, marginSize)}>
+                      Above market
+                    </button>
+                    <button type="button" aria-pressed={marginBelow} onClick={() => setMargin(true, marginSize)}>
+                      Below market
+                    </button>
+                  </div>
                   <div className="cf-inputgroup">
+                    <span className="cf-addon" aria-hidden="true">
+                      {marginBelow ? '−' : '+'}
+                    </span>
                     <input
                       id="margin"
                       className="cf-input"
                       data-mono
                       inputMode="decimal"
-                      value={form.margin}
+                      value={marginSize}
+                      aria-describedby="margin-hint"
                       aria-invalid={shown('margin') ? true : undefined}
-                      onChange={(e) => edit('margin', { margin: e.target.value })}
+                      onChange={(e) => {
+                        // A typed sign moves the toggle, so "-2" still means 2% below the market.
+                        const typed = e.target.value.trim();
+                        if (/^[+\-−]/.test(typed)) setMargin(typed[0] !== '+', typed.slice(1).trim());
+                        else setMargin(marginBelow, typed);
+                      }}
                     />
                     <span className="cf-addon">%</span>
                   </div>
-                  <span className="cf-hint">
+                  <span className="cf-hint" id="margin-hint">
                     {shown('margin') ??
                       [
                         verifiedQuote && marginBps !== null
-                          ? `${buying ? 'You pay' : 'Buyers pay'} ${formatFiat(applyMargin(verifiedQuote.price, marginBps), form.fiat)} per ${coin} today.`
+                          ? `${buying ? 'You pay' : 'Buyers pay'} ${formatFiat(applyMargin(verifiedQuote.price, marginBps), form.fiat)} per ${coin} today, ${describeVsMarket(marginBps)} the market price of ${formatFiat(Number(verifiedQuote.price), form.fiat)}.`
                           : verifiedQuote
                             ? null
                             : quote.loading
@@ -781,6 +804,8 @@ const defaultMargin = (side: 'sell' | 'buy') => (side === 'buy' ? '0.5' : INITIA
 
 /** 250 → "+2.5%", -100 → "-1%". */
 const signedPercent = (bps: number) => `${bps > 0 ? '+' : bps < 0 ? '-' : ''}${Math.abs(bps) / 100}%`;
+/** 250 → "2.5% above", -100 → "1% below", 0 → "equal to". */
+const describeVsMarket = (bps: number) => (bps === 0 ? 'equal to' : `${Math.abs(bps) / 100}% ${bps > 0 ? 'above' : 'below'}`);
 /** "+0% to +1%", or "+0.5%" when every offer uses the same margin. */
 const describeRange = (r: { low: number; high: number }) => (r.low === r.high ? signedPercent(r.low) : `${signedPercent(r.low)} to ${signedPercent(r.high)}`);
 

@@ -96,6 +96,13 @@ describe('the offer form', () => {
     expect(JSON.parse(built.json)).toEqual(built.document);
   });
 
+  it('builds a sell offer below the market price', () => {
+    const built = build({ margin: '-2' });
+    if (!built.ok) throw new Error(JSON.stringify(built.errors));
+    expect(() => validateOfferDocument(built.document)).not.toThrow();
+    expect(built.document.price).toEqual({ type: 'floating', pair: 'BCH/ARS', marginBps: -200 });
+  });
+
   it('leaves the oracle out of a fixed-price offer, which the protocol requires', () => {
     const built = build({ priceType: 'fixed', fixedPrice: '480000.5', fiat: 'USD' });
     if (!built.ok) throw new Error(JSON.stringify(built.errors));
