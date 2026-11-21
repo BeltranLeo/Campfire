@@ -98,8 +98,10 @@
 .s-item { display: flex; align-items: center; justify-content: space-between; gap: var(--space-3); padding: var(--space-3) var(--space-4); border-top: 1px solid var(--border); color: var(--text) !important; text-decoration: none; }
 .s-item:first-of-type { border-top: 0; }
 .s-item > .s-cell { flex: 1; }
-.s-tabs { display: flex; gap: var(--space-1); border-bottom: 1px solid var(--border); overflow-x: auto; }
-.s-tabs > a { padding: var(--space-3) var(--space-3); color: var(--text-muted) !important; text-decoration: none; font: 600 15px/20px var(--font-text); border-bottom: 2px solid transparent; margin-bottom: -1px; display: inline-flex; gap: var(--space-2); align-items: center; white-space: nowrap; }
+/* The grey line is an inset shadow, not a border, so the current tab's line covers it without poking out of the row:
+   a row that scrolls sideways clips vertically too, and 1 px past its edge showed a vertical scrollbar. */
+.s-tabs { display: flex; gap: var(--space-1); box-shadow: inset 0 -1px 0 var(--border); overflow-x: auto; overflow-y: hidden; }
+.s-tabs > a { padding: var(--space-3) var(--space-3); color: var(--text-muted) !important; text-decoration: none; font: 600 15px/20px var(--font-text); border-bottom: 2px solid transparent; display: inline-flex; gap: var(--space-2); align-items: center; white-space: nowrap; }
 .s-tabs > a[aria-current="page"] { color: var(--text) !important; border-bottom-color: var(--action-accent); }
 .s-onboard { width: 100%; max-width: 480px; margin: 0 auto; display: flex; flex-direction: column; gap: var(--space-6); padding-top: var(--space-6); }
 .s-intent { max-width: 640px; }
