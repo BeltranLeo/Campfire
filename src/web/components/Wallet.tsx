@@ -311,7 +311,8 @@ function PairingDialog({ uri, qrUri, onClose }: { uri: string; qrUri: string; on
                   </li>
                 ))}
               </ol>
-              <PairingQr value={qrUri} label={t.qrLabel} />
+              {/* Clicking the code copies the link: people try that before they look for a button. */}
+              <PairingQr value={qrUri} label={t.qrLabel} copyValue={uri} copyLabel={t.qrCopy} copiedLabel={t.qrCopied} />
             </div>
             {/* The whole string is shown, not shortened: people check what they paste, and it wraps in the well. */}
             <div className="pr-link">
@@ -324,6 +325,10 @@ function PairingDialog({ uri, qrUri, onClose }: { uri: string; qrUri: string; on
                 <CopyButton value={uri} label={t.copyLink} />
                 <a className="cf-copy" href={uri}>
                   {t.openInWallet}
+                </a>
+                {/* Cashonize, a web wallet, takes the pairing link in its address: no app needed on a computer. */}
+                <a className="cf-copy" href={cashonizeLink(uri)} target="_blank" rel="noopener noreferrer">
+                  {t.openInCashonize}
                 </a>
               </div>
             </div>
@@ -409,8 +414,30 @@ function SignInDialog({ failed, onRetry, onCancel }: { failed: boolean; onRetry:
   );
 }
 
-function PairingQr({ value, label }: { value: string; label: string }) {
+/** Cashonize opens a pairing link passed as `?uri=`; the link has `:` and `/`, so it is encoded as one parameter. */
+export const cashonizeLink = (uri: string) => `https://cashonize.com/?uri=${encodeURIComponent(uri)}`;
+
+function PairingQr({
+  value,
+  label,
+  copyValue,
+  copyLabel,
+  copiedLabel,
+}: {
+  value: string;
+  label: string;
+  /** When given, the code is a button that copies this text. */
+  copyValue?: string;
+  copyLabel?: string;
+  copiedLabel?: string;
+}) {
   const [src, setSrc] = useState<string | null>(null);
+  const [copied, setCopied] = useState(false);
+  useEffect(() => {
+    if (!copied) return;
+    const timer = setTimeout(() => setCopied(false), 1500);
+    return () => clearTimeout(timer);
+  }, [copied]);
 
   useEffect(() => {
     let current = true;
@@ -424,10 +451,34 @@ function PairingQr({ value, label }: { value: string; label: string }) {
     };
   }, [value]);
 
+  const image = src && <img src={src} alt="" width={176} height={176} style={{ display: 'block', width: '100%', height: '100%' }} />;
+  if (copyValue === undefined) {
+    return (
+      <div className="cf-qr" role="img" aria-label={label}>
+        {image}
+      </div>
+    );
+  }
   return (
-    <div className="cf-qr" role="img" aria-label={label}>
-      {src && <img src={src} alt="" width={176} height={176} style={{ display: 'block', width: '100%', height: '100%' }} />}
-    </div>
+    <button
+      type="button"
+      className="cf-qr pr-qrcopy"
+      aria-label={copyLabel ?? label}
+      title={copyLabel}
+      onClick={() => {
+        navigator.clipboard.writeText(copyValue).then(
+          () => setCopied(true),
+          () => {},
+        );
+      }}
+    >
+      {image}
+      {copied && (
+        <span className="pr-qrcopy__done" role="status">
+          {copiedLabel}
+        </span>
+      )}
+    </button>
   );
 }
 

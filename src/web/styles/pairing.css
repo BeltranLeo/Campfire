@@ -12,6 +12,30 @@
   flex: none;
 }
 
+/* The QR code as a button that copies the pairing link. */
+.pr-qrcopy {
+  position: relative;
+  border: 0;
+  cursor: copy;
+  font: inherit;
+}
+
+.pr-qrcopy:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 2px;
+}
+
+.pr-qrcopy__done {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  border-radius: inherit;
+  background: rgb(255 255 255 / 0.9);
+  color: #1f1a15;
+  font-weight: 600;
+}
+
 .pr-steps {
   list-style: none;
   margin: 0;
