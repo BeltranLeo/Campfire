@@ -25,7 +25,11 @@
 .s-deadline { display: flex; align-items: baseline; gap: var(--space-3); flex-wrap: wrap; }
 .s-actions { display: flex; gap: var(--space-3); flex-wrap: wrap; align-items: center; }
 .s-actions:has(> .s-primary) { align-items: flex-start; }
-.s-actions > .s-primary { display: flex; flex-direction: column; gap: var(--space-1); }
+/* A button that signs, with "Signs in your wallet" under it. Beside a row's text (an offer in My offers), the note
+   is centred under the button, so the pair reads as one block. */
+.s-primary { display: flex; flex-direction: column; align-items: flex-start; gap: var(--space-2); }
+.s-req > .s-primary { flex: none; align-items: center; }
+.s-primary > [data-block] { align-self: stretch; }
 .s-cell { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
 .s-cell > .cf-label { display: none; }
 .s-asset { display: inline-flex; align-items: center; gap: var(--space-2); font: 600 15px/20px var(--font-text); }
