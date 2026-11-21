@@ -1,0 +1,1043 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Campfire Landing Sketch</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Figtree:wght@400;500;600;700&family=Geist+Mono:wght@400;500&family=Rubik:wght@500;600;700&display=swap" rel="stylesheet">
+<style>
+/* ===== Brand tokens ("Campfire - Sistema de diseño", v1.1) ===== */
+:root {
+  --marfil: #F8F7EC; --perla: #F4F3EE; --blanco: #FFFFFF; --gris-frio: #E8EAF0;
+  --noche-950: #07122A; --noche-900: #0B1733; --noche-800: #13234A; --noche-700: #1E3260; --noche-600: #33476F;
+  --niebla: #8A96B3; --pizarra: #5B6785;
+  --brasa-50: #FDEEE3; --brasa-300: #F9A86B; --brasa-500: #F07A2E; --brasa-600: #C94F14; --brasa-hover: #B5480F; --brasa-700: #A8460F;
+  --ambar-50: #FDF5DC; --ambar-500: #F5A92E; --ambar-700: #8A5A00;
+  --azul-50: #E6F0FA; --azul-300: #6BB2DE; --azul-500: #357BC3; --azul-700: #2662AF;
+  --verde-50: #E3F8F1; --verde-500: #0AC18E; --verde-700: #067A5A;
+  --violeta-50: #F0E9F8; --violeta-300: #B18AD8; --violeta-700: #593B8F;
+  --alerta-50: #FCE7EB; --alerta-500: #D6334F; --alerta-700: #B42A45;
+  --degrade: linear-gradient(90deg, #F8D234, #F5A92E, #E77937, #CB374C, #AB3B86, #593B8F, #357BC3, #42BFAE, #0AC18E);
+  --font-display: "Rubik", "Figtree", system-ui, sans-serif;
+  --font-sans: "Figtree", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-mono: "Geist Mono", ui-monospace, "SF Mono", Menlo, monospace;
+  --s1: 4px; --s2: 8px; --s3: 12px; --s4: 16px; --s5: 24px; --s6: 32px; --s7: 48px; --s8: 64px; --s9: 88px; --s10: 112px;
+  --r-sm: 8px; --r-md: 12px; --r-lg: 18px; --r-xl: 28px; --r-full: 999px;
+  --content: 1160px; --header: 76px;
+  /* Motion [PROVISIONAL] */
+  --dur-1: 140ms; --dur-2: 240ms; --dur-3: 400ms; --dur-4: 800ms;
+  --ease-out: cubic-bezier(.22, .8, .24, 1); --ease-io: cubic-bezier(.65, 0, .35, 1);
+  --shadow-light: 0 1px 2px rgba(11,23,51,.05), 0 10px 30px rgba(11,23,51,.08);
+  --shadow-night: 0 20px 60px rgba(7,18,42,.55);
+}
+* { box-sizing: border-box; }
+html { scroll-behavior: smooth; scroll-padding-top: calc(var(--header) + 8px); }
+body { margin: 0; background: var(--marfil); color: var(--noche-900); font: 400 16px/24px var(--font-sans); -webkit-font-smoothing: antialiased; overflow-x: hidden; }
+img { display: block; max-width: 100%; }
+a { color: inherit; } button { font: inherit; color: inherit; }
+:focus-visible { outline: 2px solid var(--azul-700); outline-offset: 3px; border-radius: 6px; }
+.night :focus-visible { outline-color: var(--azul-300); }
+.wrap { width: 100%; max-width: var(--content); margin: 0 auto; padding: 0 var(--s5); }
+.eyebrow { font: 600 12px/16px var(--font-sans); letter-spacing: .06em; text-transform: uppercase; color: var(--pizarra); margin: 0 0 var(--s3); }
+.night .eyebrow { color: var(--niebla); }
+h1, h2, h3, h4 { font-family: var(--font-display); margin: 0; letter-spacing: -.01em; }
+h2.big { font: 700 clamp(32px, 4.4vw, 52px)/1.08 var(--font-display); max-width: 20ch; }
+h3 { font: 600 20px/28px var(--font-display); }
+p { margin: 0; }
+.lead { font-size: 18px; line-height: 28px; color: var(--pizarra); max-width: 58ch; }
+.night .lead { color: var(--niebla); }
+.mono { font-family: var(--font-mono); font-weight: 500; }
+.muted { color: var(--pizarra); } .night .muted { color: var(--niebla); }
+section { position: relative; padding: var(--s10) 0; }
+.light { background: var(--marfil); } .white { background: var(--blanco); }
+.night { background: var(--noche-900); color: var(--perla); }
+.sec-head { display: grid; gap: var(--s4); margin-bottom: var(--s7); }
+.sec-num { font: 500 13px/18px var(--font-mono); color: var(--pizarra); }
+.night .sec-num { color: var(--niebla); }
+
+/* Transition bands (renders): night ↔ ivory, between sections */
+.band { aspect-ratio: 2172 / 724; background-size: 100% 100%; }
+.band.i2n { background-image: url({{BAND_I2N}}); } .band.n2i { background-image: url({{BAND_N2I}}); }
+/* The phrase on the glass banner, before the contract */
+.phrase { padding: 0; background: var(--noche-900); }
+.phrase-in { height: max(220px, 33.3vw); background-size: cover; background-position: center; display: grid; place-items: center; text-align: center; padding: 0 24%; }
+.phrase h2 { font: 700 clamp(26px, 3.4vw, 48px)/1.1 var(--font-display); color: var(--perla); letter-spacing: -.015em; }
+.phrase em { font-style: normal; display: block; background: linear-gradient(100deg, #F4F3EE, #6BB2DE 55%, #0AC18E); -webkit-background-clip: text; background-clip: text; color: transparent; }
+/* Info panel in the trade section */
+.info-panel { width: 360px; display: grid; gap: var(--s4); padding: var(--s2); }
+.info-panel .summary { grid-template-columns: 1fr; background: rgba(255,255,255,.6); margin: 0; }
+.info-panel .summary div { border-right: 0; border-bottom: 1px solid var(--gris-frio); }
+.info-panel .summary div:last-child { border-bottom: 0; }
+
+/* Icons: one sprite, line tier + emblem tier */
+.ic { width: 24px; height: 24px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; flex: none; }
+.emb { --t1: #6BB2DE; --t2: #2662AF; --sh: rgba(20,44,105,.55); --fg: #fff; position: relative; width: 56px; height: 56px; border-radius: 18px; display: grid; place-items: center; color: var(--fg); flex: none; background: linear-gradient(150deg, var(--t1), var(--t2)); box-shadow: inset 0 1px 0 rgba(255,255,255,.55), 0 10px 24px var(--sh); }
+.emb::before { content: ""; position: absolute; inset: 1px; border-radius: inherit; background: linear-gradient(160deg, rgba(255,255,255,.5), rgba(255,255,255,0) 46%); pointer-events: none; }
+.emb .ic { position: relative; width: 28px; height: 28px; stroke-width: 1.9; }
+.emb.lg { width: 76px; height: 76px; border-radius: 24px; } .emb.lg .ic { width: 38px; height: 38px; }
+.emb.sm { width: 40px; height: 40px; border-radius: 13px; } .emb.sm .ic { width: 20px; height: 20px; }
+.emb.ember { --t1: #F9A86B; --t2: #C94F14; --sh: rgba(185,107,25,.45); }
+.emb.blue { --t1: #6BB2DE; --t2: #2662AF; }
+.emb.green { --t1: #A6E8CE; --t2: #0AC18E; --sh: rgba(14,79,68,.5); --fg: var(--noche-900); }
+.emb.violet { --t1: #B18AD8; --t2: #593B8F; --sh: rgba(48,32,94,.55); }
+.emb.neutral { --t1: #8A96B3; --t2: #33476F; --sh: rgba(11,23,51,.45); }
+
+/* Buttons */
+.btn { display: inline-flex; align-items: center; justify-content: center; gap: var(--s2); min-height: 48px; padding: 0 22px; border-radius: var(--r-md); font: 600 15px/20px var(--font-sans); text-decoration: none; cursor: pointer; border: 1px solid transparent; transition: background var(--dur-1), transform var(--dur-1), box-shadow var(--dur-2); white-space: nowrap; }
+.btn:active { transform: translateY(1px) scale(.99); }
+.btn-primary { background: var(--brasa-600); color: #fff; box-shadow: 0 6px 18px rgba(201,79,20,.28); }
+.btn-primary:hover { background: var(--brasa-hover); }
+.btn-ghost { background: transparent; border-color: #c9cedb; color: var(--noche-900); }
+.btn-ghost:hover { background: rgba(11,23,51,.05); }
+.night .btn-ghost { border-color: rgba(244,243,238,.4); color: var(--perla); }
+.night .btn-ghost:hover { background: rgba(244,243,238,.08); }
+.arrow { transition: transform var(--dur-2) var(--ease-out); } .btn:hover .arrow { transform: translateX(3px); }
+
+/* Pills */
+.pill { display: inline-flex; align-items: center; gap: 6px; padding: 4px 10px; border-radius: var(--r-full); font: 600 13px/18px var(--font-sans); white-space: nowrap; }
+.pill::before { content: ""; width: 7px; height: 7px; border-radius: 50%; background: currentColor; }
+.pill.act { background: var(--brasa-50); color: var(--brasa-700); }
+.pill.time { background: var(--ambar-50); color: var(--ambar-700); }
+.pill.wait { background: var(--azul-50); color: var(--azul-700); }
+.pill.chain { background: var(--verde-50); color: var(--verde-700); }
+.pill.arb { background: var(--violeta-50); color: var(--violeta-700); }
+.pill.sim, .pill.neutral { background: rgba(91,103,133,.1); color: var(--pizarra); }
+.night .pill.act { background: rgba(240,122,46,.14); color: var(--brasa-300); }
+.night .pill.wait { background: rgba(53,123,195,.16); color: var(--azul-300); }
+.night .pill.chain { background: rgba(10,193,142,.14); color: var(--verde-500); }
+.night .pill.arb { background: rgba(113,60,155,.2); color: var(--violeta-300); }
+
+.glass { background: rgba(255,255,255,.07); border: 1px solid rgba(255,255,255,.12); border-top-color: rgba(255,255,255,.22); -webkit-backdrop-filter: blur(20px); backdrop-filter: blur(20px); box-shadow: var(--shadow-night); border-radius: var(--r-lg); }
+
+.rv { opacity: 0; transform: translateY(16px); transition: opacity var(--dur-3) var(--ease-out), transform var(--dur-3) var(--ease-out); }
+.rv.in { opacity: 1; transform: none; }
+.rv.d1 { transition-delay: 50ms; } .rv.d2 { transition-delay: 100ms; } .rv.d3 { transition-delay: 150ms; } .rv.d4 { transition-delay: 200ms; }
+
+.tech { margin-top: var(--s5); border-radius: var(--r-md); border: 1px solid rgba(255,255,255,.12); background: rgba(255,255,255,.03); }
+.tech summary { cursor: pointer; list-style: none; padding: 12px 16px; font: 500 13px/18px var(--font-mono); color: var(--azul-300); display: flex; justify-content: space-between; }
+.tech summary::-webkit-details-marker { display: none; }
+.tech summary::after { content: "+"; } .tech[open] summary::after { content: "−"; }
+.tech ul { margin: 0; padding: 0 16px 16px 32px; display: grid; gap: 6px; font-size: 14px; line-height: 20px; color: var(--niebla); }
+.tech b { color: var(--perla); font-weight: 600; } .tech a { color: var(--azul-300); }
+
+/* ===== Header (approved): night glass from the start; progress bar right under it ===== */
+.nav { position: fixed; top: 0; left: 0; right: 0; z-index: 50; background: rgba(11,23,51,.72); -webkit-backdrop-filter: blur(20px) saturate(1.2); backdrop-filter: blur(20px) saturate(1.2); border-bottom: 1px solid rgba(255,255,255,.08); }
+.nav .wrap { display: flex; align-items: center; gap: var(--s5); height: var(--header); }
+.nav-logo img { height: 44px; width: auto; }
+.nav-links { display: flex; gap: var(--s1); margin-left: auto; }
+.nav-links a { padding: 8px 12px; text-decoration: none; font: 500 15px/20px var(--font-sans); color: rgba(244,243,238,.82); border-radius: var(--r-sm); transition: color var(--dur-1), background var(--dur-1); }
+.nav-links a:hover { color: #fff; background: rgba(244,243,238,.08); }
+.nav-links a.on { color: #fff; box-shadow: inset 0 -2px 0 var(--brasa-500); border-radius: 0; }
+.nav .btn { min-height: 40px; padding: 0 16px; font-size: 14px; }
+.nav .nav-cta { background: transparent; border-color: rgba(244,243,238,.45); color: var(--perla); box-shadow: none; }
+.nav.scrolled .nav-cta { background: var(--brasa-600); border-color: transparent; color: #fff; }
+.nav.scrolled.calm .nav-cta { background: transparent; border-color: rgba(244,243,238,.45); color: var(--perla); }
+.nav-menu { display: none; margin-left: auto; background: none; border: 1px solid rgba(244,243,238,.35); color: var(--perla); border-radius: var(--r-sm); height: 40px; padding: 0 12px; cursor: pointer; }
+.progress { position: fixed; top: var(--header); left: 0; height: 3px; width: 100%; z-index: 49; background: rgba(11,23,51,.12); }
+.progress::after { content: ""; position: absolute; inset: 0; transform-origin: 0 50%; transform: scaleX(var(--p, 0)); background: var(--degrade); box-shadow: 0 0 12px rgba(240,122,46,.45); }
+.rail { position: fixed; right: 18px; top: 50%; transform: translateY(-50%); z-index: 40; display: grid; gap: 4px; padding: 10px 8px; border-radius: var(--r-full); background: rgba(255,255,255,.72); -webkit-backdrop-filter: blur(14px); backdrop-filter: blur(14px); border: 1px solid rgba(232,234,240,.9); box-shadow: 0 6px 20px rgba(11,23,51,.12); opacity: 0; transition: opacity var(--dur-2); pointer-events: none; }
+.rail.show { opacity: 1; pointer-events: auto; }
+.rail a { position: relative; display: grid; place-items: center; width: 18px; height: 18px; text-decoration: none; }
+.rail a::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: #b8bfcf; transition: all var(--dur-2) var(--ease-out); }
+.rail a.on::before { width: 8px; height: 18px; border-radius: 4px; background: var(--brasa-500); }
+.rail a span { position: absolute; right: 26px; white-space: nowrap; font: 600 12px/16px var(--font-sans); color: var(--noche-900); background: #fff; padding: 4px 8px; border-radius: 6px; box-shadow: var(--shadow-light); opacity: 0; transform: translateX(4px); transition: all var(--dur-1); pointer-events: none; }
+.rail a:hover span { opacity: 1; transform: none; }
+
+/* ===== 1 Hero (approved) ===== */
+.hero { min-height: 100vh; min-height: 100svh; padding: calc(var(--header) + 64px) 0 120px; display: flex; align-items: center; overflow: hidden; background: radial-gradient(1000px 640px at 8% -10%, rgba(107,178,222,.20), transparent 60%), linear-gradient(180deg, var(--noche-900), #0A1637 70%, var(--noche-900)); }
+.hero .wrap { position: relative; z-index: 2; display: grid; grid-template-columns: minmax(0, 1.05fr) minmax(0, 1fr); gap: var(--s6); align-items: center; }
+.hero h1 { font: 700 clamp(44px, 6.4vw, 84px)/.98 var(--font-display); letter-spacing: -.02em; }
+.hero h1 .glow { background: linear-gradient(90deg, #F8D234, #F5A92E 30%, #E77937 60%, #CB374C); -webkit-background-clip: text; background-clip: text; color: transparent; }
+.hero .lead { margin-top: var(--s5); font-size: 19px; line-height: 30px; }
+.ctas { display: flex; flex-wrap: wrap; gap: var(--s3); margin-top: var(--s6); }
+.hero-proof { display: flex; flex-wrap: wrap; gap: var(--s2) var(--s5); margin-top: var(--s6); font: 500 14px/20px var(--font-sans); color: var(--niebla); }
+.hero-proof span::before { content: "✓"; color: var(--verde-500); margin-right: 6px; font-weight: 700; }
+.stage { position: relative; aspect-ratio: 1 / 1; perspective: 1200px; }
+.ribbon { position: absolute; inset: -12% -30% -6% -18%; transform: translate3d(calc(var(--mx, 0) * -18px), calc(var(--my, 0) * -14px + var(--sy, 0) * 60px), 0) rotateY(calc(var(--mx, 0) * 6deg)) rotateX(calc(var(--my, 0) * -5deg)); transition: transform var(--dur-2) var(--ease-out); will-change: transform; }
+.ribbon img { width: 100%; height: 100%; object-fit: cover; object-position: 72% 50%; -webkit-mask-image: radial-gradient(closest-side, #000 62%, transparent 100%); mask-image: radial-gradient(closest-side, #000 62%, transparent 100%); }
+.vault { position: absolute; left: 50%; top: 52%; width: min(300px, 74%); transform: translate(-50%, -50%) translate3d(calc(var(--mx, 0) * 14px), calc(var(--my, 0) * 10px), 0); padding: var(--s5); transition: transform var(--dur-2) var(--ease-out); }
+.vault .amount { font: 500 34px/40px var(--font-mono); margin: var(--s4) 0 var(--s1); color: #fff; }
+.vault .amount small { font-size: 18px; color: var(--niebla); }
+.vault-exits { display: grid; gap: var(--s2); margin-top: var(--s4); padding-top: var(--s4); border-top: 1px solid rgba(255,255,255,.12); font-size: 14px; }
+.vault-exits div { display: flex; align-items: center; gap: var(--s2); }
+.vault-exits .ic { width: 16px; height: 16px; color: var(--azul-300); }
+.chip-float { position: absolute; padding: 10px 14px; font: 600 13px/18px var(--font-sans); display: flex; gap: 8px; align-items: center; border-radius: var(--r-md); animation: bob 7s var(--ease-io) infinite; }
+.chip-float.a { left: -4%; top: 18%; } .chip-float.b { right: -2%; bottom: 14%; animation-delay: -3.5s; }
+.chip-float .dot { width: 8px; height: 8px; border-radius: 50%; }
+@keyframes bob { 0%, 100% { translate: 0 0; } 50% { translate: 0 -10px; } }
+.scroll-cue { position: absolute; left: 50%; bottom: 18px; transform: translateX(-50%); z-index: 3; display: grid; justify-items: center; gap: 10px; text-decoration: none; color: var(--perla); }
+.scroll-cue b { font: 600 15px/20px var(--font-sans); padding: 10px 18px; border-radius: var(--r-full); background: rgba(255,255,255,.08); border: 1px solid rgba(255,255,255,.18); -webkit-backdrop-filter: blur(12px); backdrop-filter: blur(12px); transition: background var(--dur-1); }
+.scroll-cue:hover b { background: rgba(255,255,255,.14); }
+.scroll-cue::after { content: ""; width: 2px; height: 48px; border-radius: 2px; background: linear-gradient(var(--brasa-500), transparent); animation: cue 1.8s var(--ease-io) infinite; transform-origin: top; }
+@keyframes cue { 0% { transform: scaleY(0); } 50% { transform: scaleY(1); } 100% { transform: scaleY(1); opacity: 0; } }
+
+/* ===== 2 Why Campfire? — night for now: four glass objects, one per benefit ===== */
+.why { overflow: hidden; background: radial-gradient(900px 420px at 50% 0, rgba(53,123,195,.14), transparent 70%), linear-gradient(180deg, var(--noche-900), var(--noche-950) 60%, var(--noche-900)); color: var(--perla); padding-top: var(--s9); }
+.why .wrap { position: relative; }
+.why-head { text-align: center; display: grid; justify-items: center; gap: var(--s3); margin-bottom: var(--s6); position: relative; z-index: 1; }
+.why-head .eyebrow { color: var(--niebla); letter-spacing: .16em; margin: 0; }
+.why-head h2 { font: 700 clamp(40px, 5.6vw, 72px)/1.04 var(--font-display); letter-spacing: -.02em; }
+/* The orbit: a brand-gradient light that draws itself and drifts a little with the scroll */
+.orbit-line { position: absolute; left: 50%; top: -30px; width: min(1500px, 130%); height: 560px; transform: translateX(-50%) rotate(calc(-7deg + var(--o, 0) * 6deg)); pointer-events: none; z-index: 0; overflow: visible; }
+.orbit-line ellipse { fill: none; stroke: url(#orbitGrad); stroke-width: 2; stroke-linecap: round; stroke-dasharray: 2400; stroke-dashoffset: 2400; filter: drop-shadow(0 0 6px rgba(240,122,46,.45)); transition: stroke-dashoffset 2.4s var(--ease-out); }
+.why.in-view .orbit-line ellipse { stroke-dashoffset: 620; }
+.bens { display: grid; grid-template-columns: repeat(4, 1fr); position: relative; z-index: 1; }
+.ben { padding: 0 var(--s5) var(--s3); display: grid; align-content: start; gap: var(--s3); border-left: 1px solid rgba(255,255,255,.08); }
+.ben:first-child { border-left: 0; }
+.ben-img { height: 230px; display: grid; place-items: center; margin-bottom: var(--s2); }
+.ben-img img { width: 100%; max-width: 250px; aspect-ratio: 1; object-fit: cover; mix-blend-mode: screen; -webkit-mask-image: radial-gradient(closest-side, #000 72%, transparent 100%); mask-image: radial-gradient(closest-side, #000 72%, transparent 100%); transition: transform var(--dur-3) var(--ease-out), filter var(--dur-3); }
+.ben:hover .ben-img img { transform: translateY(-8px) scale(1.04); filter: brightness(1.15); }
+.ben h3 { font: 600 23px/29px var(--font-display); color: #fff; max-width: 14ch; }
+.ben p { color: var(--niebla); font-size: 15px; line-height: 23px; }
+.ben .gain { margin-top: var(--s3); padding-top: var(--s4); border-top: 1px solid rgba(255,255,255,.1); display: grid; grid-template-columns: 10px 1fr; gap: 12px; align-items: start; font: 600 14px/20px var(--font-sans); color: var(--perla); }
+.ben .gain::before { content: ""; width: 9px; height: 9px; border-radius: 50%; margin-top: 6px; background: var(--dot); box-shadow: 0 0 10px var(--dot); }
+
+/* ===== 3 Who goes first? (v2) ===== */
+.problem-grid { display: grid; grid-template-columns: 1fr 1fr; gap: var(--s5); }
+.scene { border-radius: var(--r-xl); padding: var(--s6); display: grid; grid-template-rows: auto 1fr auto; gap: var(--s5); position: relative; overflow: hidden; }
+.scene.old { background: var(--blanco); border: 1px solid var(--gris-frio); }
+.scene.new { background: var(--noche-900); color: var(--perla); box-shadow: var(--shadow-night); }
+.scene h3 { font-size: 24px; line-height: 30px; }
+.scene p { color: var(--pizarra); } .scene.new p { color: var(--niebla); }
+.flow { position: relative; display: grid; grid-template-columns: 1fr auto 1fr; align-items: center; gap: var(--s3); min-height: 170px; }
+.who { display: grid; justify-items: center; gap: var(--s2); font: 600 14px/18px var(--font-sans); text-align: center; position: relative; }
+.middle { width: 128px; height: 128px; border-radius: var(--r-lg); display: grid; place-items: center; text-align: center; font: 600 13px/18px var(--font-sans); padding: var(--s3); position: relative; }
+.middle.box { background: var(--noche-700); color: var(--perla); border: 2px solid transparent; }
+.middle.contract { background: rgba(53,123,195,.14); border: 1px solid rgba(107,178,222,.5); border-top-color: rgba(255,255,255,.45); color: var(--azul-300); box-shadow: 0 0 0 6px rgba(107,178,222,.06), 0 18px 40px rgba(20,44,105,.6); }
+.badge { position: absolute; display: inline-flex; align-items: center; gap: 4px; padding: 3px 8px; border-radius: var(--r-full); font: 600 12px/16px var(--font-sans); opacity: 0; transform: scale(.8); }
+.badge .ic { width: 14px; height: 14px; }
+.badge.frozen { top: -12px; right: -14px; background: var(--alerta-50); color: var(--alerta-700); border: 1px solid #F3C3CD; }
+.badge.got { top: -10px; right: -6px; background: var(--verde-500); color: var(--noche-900); }
+.coin { position: absolute; width: 14px; height: 14px; border-radius: 50%; background: var(--ambar-500); box-shadow: 0 0 12px rgba(245,169,46,.6); left: 12%; top: 50%; opacity: 0; }
+.in .c-old { animation: toMiddle 4s var(--ease-io) .2s infinite; }
+.in .badge.frozen { animation: frozen 4s var(--ease-io) .2s infinite; }
+.in .middle.box { animation: frozenBox 4s var(--ease-io) .2s infinite; }
+.in .c-new { animation: toBuyer 4s var(--ease-io) .2s infinite; }
+.in .badge.got { animation: got 4s var(--ease-io) .2s infinite; }
+@keyframes toMiddle { 0% { left: 12%; opacity: 0; } 10% { opacity: 1; } 40%, 100% { left: 48%; opacity: 1; } }
+@keyframes frozen { 0%, 45% { opacity: 0; transform: scale(.8); } 52%, 92% { opacity: 1; transform: none; } 100% { opacity: 0; } }
+@keyframes frozenBox { 0%, 45% { border-color: transparent; } 52%, 92% { border-color: var(--alerta-500); } 100% { border-color: transparent; } }
+@keyframes toBuyer { 0% { left: 12%; opacity: 0; } 10% { opacity: 1; } 35%, 50% { left: 48%; } 80% { left: 84%; opacity: 1; } 100% { left: 84%; opacity: 0; } }
+@keyframes got { 0%, 78% { opacity: 0; transform: scale(.8); } 84%, 97% { opacity: 1; transform: none; } 100% { opacity: 0; } }
+.quote-line { font: 700 clamp(26px, 3.2vw, 38px)/1.15 var(--font-display); margin: var(--s7) auto 0; text-align: center; }
+.quote-line em { font-style: normal; color: var(--azul-700); }
+
+/* ===== 4 How does it work? (v2) ===== */
+.eco { display: grid; grid-template-columns: minmax(0, .9fr) minmax(0, 1.1fr); gap: var(--s8); align-items: start; }
+.eco-steps { display: grid; gap: 20vh; padding: 4vh 0 22vh; }
+.eco-step { opacity: .55; transition: opacity var(--dur-3) var(--ease-out); }
+.eco-step.on { opacity: 1; }
+.eco-step h3 { font-size: 26px; line-height: 32px; margin: var(--s3) 0; }
+.eco-step p { color: var(--niebla); max-width: 46ch; }
+.exit-list { list-style: none; margin: var(--s4) 0 0; padding: 0; display: grid; gap: var(--s2); }
+.exit-list li { display: grid; grid-template-columns: 4px 1fr; gap: var(--s3); padding: 10px 12px; border-radius: var(--r-md); background: rgba(255,255,255,.03); border: 1px solid rgba(255,255,255,.06); font-size: 14px; line-height: 20px; color: var(--niebla); transition: background var(--dur-2), border-color var(--dur-2); }
+.exit-list li::before { content: ""; border-radius: 2px; background: var(--c); }
+.exit-list li b { display: block; color: var(--perla); }
+.exit-list li.on { background: rgba(255,255,255,.08); border-color: rgba(255,255,255,.2); }
+.eco-stick { position: sticky; top: calc(var(--header) + 24px); height: calc(100vh - var(--header) - 48px); min-height: 520px; display: grid; place-items: center; }
+.eco-map { position: relative; width: 100%; max-width: 560px; aspect-ratio: 1 / 1; }
+.eco-map svg { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; }
+.eco-map .ln { fill: none; stroke-width: 2; stroke-dasharray: 6 8; opacity: 0; transition: opacity var(--dur-3) var(--ease-out); }
+.eco-map .ln.flow-line { animation: dash 1.4s linear infinite; }
+@keyframes dash { to { stroke-dashoffset: -28; } }
+.eco-map[data-step="5"] .ln { opacity: .12 !important; }
+.eco-map .xp { fill: none; stroke-width: 2; opacity: 0; stroke-dasharray: 4 6; transition: opacity var(--dur-2), stroke-width var(--dur-2); }
+.eco-map[data-step="5"] .xp { opacity: .3; }
+.eco-map[data-exit="release"] .xp[data-exit="release"], .eco-map[data-exit="refund"] .xp[data-exit="refund"], .eco-map[data-exit="arbitrate"] .xp[data-exit="arbitrate"], .eco-map[data-exit="reclaim"] .xp[data-exit="reclaim"] { opacity: 1; stroke-width: 3; stroke-dasharray: none; }
+.eco-map[data-exit="release"] .n-buyer { box-shadow: 0 0 0 2px #0AC18E, 0 0 50px rgba(10,193,142,.45); }
+.eco-map[data-exit="refund"] .n-seller { box-shadow: 0 0 0 2px #6BB2DE, 0 0 50px rgba(107,178,222,.45); }
+.eco-map[data-exit="arbitrate"] .n-arb { box-shadow: 0 0 0 2px #B18AD8, 0 0 50px rgba(177,138,216,.45); }
+.eco-map[data-exit="reclaim"] .n-seller { box-shadow: 0 0 0 2px #8A96B3, 0 0 40px rgba(138,150,179,.35); }
+.node { position: absolute; transform: translate(-50%, -50%) scale(.85); opacity: 0; transition: opacity var(--dur-3) var(--ease-out), transform var(--dur-3) var(--ease-out), box-shadow var(--dur-2); width: 150px; padding: var(--s4) var(--s3) var(--s3); text-align: center; border-radius: var(--r-lg); display: grid; justify-items: center; gap: 8px; }
+.node.show { opacity: 1; transform: translate(-50%, -50%) scale(1); }
+.node b { display: block; font: 600 15px/20px var(--font-sans); color: #fff; }
+.node small { display: block; font-size: 12px; line-height: 16px; color: var(--niebla); }
+.node.contract { width: 196px; background: rgba(53,123,195,.14); border-color: rgba(107,178,222,.5); box-shadow: 0 0 70px rgba(53,123,195,.35), var(--shadow-night); }
+.node.contract b { font-size: 18px; }
+.n-seller { transform: translate(calc(-50% - 60px), -50%); } .n-buyer { transform: translate(calc(-50% + 60px), -50%); }
+.eco-ghost { position: absolute; left: 50%; top: 50%; width: 120px; height: 120px; transform: translate(-50%, -50%); border-radius: 30px; border: 1.5px dashed rgba(107,178,222,.5); display: grid; place-items: center; color: var(--azul-300); font: 600 12px/16px var(--font-sans); transition: opacity var(--dur-3); animation: pulse 2.2s var(--ease-io) infinite; }
+@keyframes pulse { 50% { box-shadow: 0 0 0 10px rgba(107,178,222,.08); } }
+.eco-map:not([data-step="1"]) .eco-ghost { opacity: 0; }
+.map-coin { position: absolute; width: 16px; height: 16px; margin: -8px 0 0 -8px; border-radius: 50%; background: var(--ambar-500); box-shadow: 0 0 14px rgba(245,169,46,.8); left: 50%; top: 50%; opacity: 0; z-index: 3; pointer-events: none; }
+#contract, #how { overflow-x: clip; }
+
+/* ===== 5 Want to try a trade? (v2) ===== */
+.how-top { display: flex; justify-content: space-between; align-items: center; gap: var(--s5); flex-wrap: wrap; margin-bottom: var(--s5); }
+.switch { display: inline-grid; grid-template-columns: 1fr 1fr; padding: 5px; border-radius: var(--r-full); background: var(--blanco); border: 1px solid var(--gris-frio); position: relative; box-shadow: var(--shadow-light); }
+.switch button { position: relative; z-index: 1; border: 0; background: none; padding: 12px 22px; border-radius: var(--r-full); font: 600 15px/20px var(--font-sans); cursor: pointer; color: var(--pizarra); display: flex; gap: 8px; align-items: center; transition: color var(--dur-2); }
+.switch button .ic { width: 18px; height: 18px; }
+.switch button[aria-pressed="true"] { color: var(--perla); }
+.switch .knob { position: absolute; top: 5px; bottom: 5px; left: 5px; width: calc(50% - 5px); border-radius: var(--r-full); background: var(--noche-900); transition: transform var(--dur-2) var(--ease-out); }
+.switch[data-way="buy"] .knob { transform: translateX(100%); }
+.summary { display: grid; grid-template-columns: repeat(3, 1fr); border-radius: var(--r-lg); background: var(--blanco); border: 1px solid var(--gris-frio); margin: 0 0 var(--s5); }
+.summary div { padding: 14px 18px; border-right: 1px solid var(--gris-frio); }
+.summary div:last-child { border-right: 0; }
+.summary dt { font: 600 12px/16px var(--font-sans); letter-spacing: .06em; text-transform: uppercase; color: var(--pizarra); margin-bottom: 4px; }
+.summary dd { margin: 0; font-weight: 600; }
+.walk { display: grid; grid-template-columns: minmax(0, 1fr) 360px; gap: var(--s8); }
+.walk-steps { display: grid; gap: 20vh; padding: 6vh 0 26vh; }
+.wstep { display: grid; grid-template-columns: 52px 1fr; gap: var(--s4); opacity: .5; transition: opacity var(--dur-3) var(--ease-out); }
+.wstep.on { opacity: 1; }
+.wstep .n { width: 44px; height: 44px; border-radius: 50%; display: grid; place-items: center; font: 600 16px/1 var(--font-mono); background: var(--blanco); border: 1px solid var(--gris-frio); color: var(--pizarra); transition: background var(--dur-2), color var(--dur-2); }
+.wstep.on .n { background: var(--brasa-600); color: #fff; border-color: transparent; }
+.wstep h3 { font-size: 24px; line-height: 30px; margin: var(--s2) 0; }
+.wstep dl { display: grid; gap: 6px; margin: var(--s3) 0 0; font-size: 15px; }
+.wstep dl div { display: grid; grid-template-columns: 120px 1fr; gap: var(--s2); }
+.wstep dt { font: 600 12px/22px var(--font-sans); letter-spacing: .06em; text-transform: uppercase; color: var(--pizarra); }
+.wstep dd { margin: 0; }
+.walk-stick { position: sticky; top: calc(var(--header) + 16px); height: calc(100vh - var(--header) - 24px); min-height: 680px; display: grid; place-items: center; align-content: center; gap: var(--s3); }
+/* The brand ribbon (render) wraps the phone, as in the design sketch */
+/* The C of the render (16:9) is scaled to the box height and shifted so its opening sits around the phone. */
+.sim-ribbon { --sz: 900px; position: absolute; left: 50%; top: 50%; width: var(--sz); height: var(--sz); transform: translate(-50%, -50%); pointer-events: none; z-index: 0; background-size: auto 100%; background-repeat: no-repeat; background-position: calc(var(--sz) * -.78) 0; -webkit-mask-image: radial-gradient(farthest-side, #000 72%, transparent 100%); mask-image: radial-gradient(farthest-side, #000 72%, transparent 100%); }
+.walk-stick > *:not(.sim-ribbon) { position: relative; z-index: 1; }
+.sim-tag { font: 600 11px/16px var(--font-sans); letter-spacing: .06em; text-transform: uppercase; color: var(--pizarra); background: var(--perla); border: 1px solid #d6dae4; padding: 4px 10px; border-radius: var(--r-full); }
+.sim-phone { width: 340px; border-radius: 42px; padding: 10px; background: var(--noche-900); box-shadow: 0 2px 0 1px #2a3a63 inset, 0 40px 80px rgba(11,23,51,.26), 0 10px 20px rgba(11,23,51,.12); position: relative; }
+.sim-screen { border-radius: 33px; background: var(--marfil); height: 600px; padding: 22px 16px 16px; display: flex; flex-direction: column; gap: 12px; font-size: 14px; line-height: 20px; overflow: hidden; position: relative; }
+.sim-screen > * { animation: scrIn var(--dur-2) var(--ease-out) both; }
+@keyframes scrIn { from { opacity: 0; transform: translateY(8px); } }
+.whatif { border: 0; background: rgba(255,255,255,.8); border-radius: var(--r-full); padding: 4px 12px; color: var(--azul-700); font: 600 14px/20px var(--font-sans); cursor: pointer; text-decoration: underline; text-underline-offset: 3px; visibility: hidden; }
+.whatif.show { visibility: visible; }
+.app-bar { display: flex; justify-content: space-between; align-items: center; font: 600 13px/18px var(--font-sans); color: var(--pizarra); }
+.app-title { font: 600 22px/28px var(--font-display); }
+.card { background: #fff; border: 1px solid var(--gris-frio); border-radius: 14px; padding: 14px; display: grid; gap: 8px; }
+.row { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+.ab { display: flex; align-items: center; justify-content: center; gap: 6px; min-height: 44px; border-radius: 12px; font: 600 15px/20px var(--font-sans); background: var(--brasa-600); color: #fff; margin-top: auto; border: 0; cursor: pointer; width: 100%; transition: background var(--dur-1), transform var(--dur-1); }
+.ab:hover { background: var(--brasa-hover); } .ab:active { transform: scale(.98); }
+.ab[disabled] { opacity: .4; cursor: not-allowed; }
+.ab.ghost { background: transparent; color: var(--noche-900); border: 1px solid #c9cedb; }
+.ab.ghost:hover { background: rgba(11,23,51,.05); }
+.ab .ic { width: 18px; height: 18px; }
+.bar6 { display: grid; grid-template-columns: repeat(6, 1fr); gap: 4px; }
+.bar6 i { height: 4px; border-radius: 2px; background: var(--gris-frio); }
+.bar6 i.d { background: var(--pizarra); } .bar6 i.c { background: var(--brasa-500); }
+.big-n { font: 500 28px/34px var(--font-mono); }
+.timer { font: 500 22px/28px var(--font-mono); color: var(--ambar-700); }
+.state-box { border-radius: 14px; padding: 12px 14px; display: grid; gap: 4px; }
+.state-box.wait { background: var(--azul-50); color: var(--azul-700); }
+.state-box.chain { background: var(--verde-50); color: var(--verde-700); }
+.state-box.time { background: var(--ambar-50); color: var(--ambar-700); }
+.state-box.neutral { background: rgba(91,103,133,.1); color: var(--pizarra); }
+.state-box.arb { background: var(--violeta-50); color: var(--violeta-700); }
+.state-box b { font-size: 15px; } .state-box span { color: var(--noche-900); font-size: 13px; line-height: 18px; }
+.spin { width: 16px; height: 16px; border-radius: 50%; border: 2px solid currentColor; border-right-color: transparent; animation: rot 1s linear infinite; display: inline-block; vertical-align: -3px; margin-right: 6px; }
+@keyframes rot { to { transform: rotate(360deg); } }
+.done-glow { position: relative; border-radius: 16px; padding: 22px 16px; text-align: center; background: #fff; }
+.done-glow::before { content: ""; position: absolute; inset: 0; padding: 2px; border-radius: 16px; background: var(--degrade); -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0); -webkit-mask-composite: xor; mask-composite: exclude; }
+.done-glow .emb { margin: 0 auto 10px; }
+.offer { border: 1px solid var(--gris-frio); background: #fff; border-radius: 14px; padding: 10px 12px; display: grid; gap: 2px; cursor: pointer; text-align: left; }
+.offer[aria-pressed="true"] { border-color: var(--brasa-500); box-shadow: 0 0 0 3px var(--brasa-50); }
+.field { display: grid; gap: 6px; }
+.field label, .field .lbl { font: 600 13px/18px var(--font-sans); color: var(--pizarra); }
+.field input[type="number"] { height: 42px; border-radius: 10px; border: 1px solid #c9cedb; padding: 0 12px; font: 500 16px var(--font-mono); background: #fff; width: 100%; }
+.chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.chips button { border: 1px solid #c9cedb; background: #fff; border-radius: var(--r-full); padding: 5px 11px; font: 500 13px/18px var(--font-sans); cursor: pointer; }
+.chips button[aria-pressed="true"] { background: var(--noche-900); color: var(--perla); border-color: var(--noche-900); }
+input[type="range"] { width: 100%; accent-color: var(--brasa-600); }
+.tick { display: flex; gap: 10px; align-items: flex-start; font-size: 13px; line-height: 18px; cursor: pointer; }
+.tick input { width: 18px; height: 18px; accent-color: var(--brasa-600); margin: 0; flex: none; }
+.sheet .ab { margin-top: 4px; flex: none; }
+.sheet { position: absolute; inset: auto 0 0 0; border-radius: 24px 24px 32px 32px; padding: 20px 18px 18px; display: flex; flex-direction: column; gap: 10px; animation: sheet var(--dur-3) var(--ease-out) both; z-index: 4; }
+.sheet.dark { background: var(--noche-900); color: var(--perla); }
+.sheet.light { background: #fff; box-shadow: 0 -20px 40px rgba(11,23,51,.2); }
+@keyframes sheet { from { transform: translateY(100%); } }
+.sheet .t { font: 600 18px/24px var(--font-display); }
+.sheet.dark .muted { color: var(--niebla); font-size: 13px; }
+.scrim { position: absolute; inset: 0; background: rgba(11,23,51,.35); z-index: 3; animation: scrIn var(--dur-2) both; }
+
+/* ===== 6 FAQ (v2) ===== */
+.faq-grid { display: grid; grid-template-columns: minmax(0, .8fr) minmax(0, 1.2fr); gap: var(--s8); align-items: start; }
+.faq-side { position: sticky; top: calc(var(--header) + 32px); display: grid; gap: var(--s4); }
+.tabs { display: grid; gap: 6px; margin-top: var(--s3); }
+.tabs button { text-align: left; border: 1px solid var(--gris-frio); background: #fff; border-radius: var(--r-md); padding: 12px 16px; font: 600 15px/20px var(--font-sans); cursor: pointer; display: flex; justify-content: space-between; color: var(--pizarra); transition: all var(--dur-1); }
+.tabs button span { font: 500 13px/20px var(--font-mono); }
+.tabs button[aria-selected="true"] { color: var(--noche-900); border-color: var(--noche-900); box-shadow: inset 3px 0 0 var(--brasa-500); }
+.faq { display: grid; gap: var(--s2); min-height: 420px; align-content: start; }
+.faq details { border-radius: var(--r-md); background: #fff; border: 1px solid var(--gris-frio); transition: box-shadow var(--dur-2); }
+.faq details[open] { box-shadow: var(--shadow-light); }
+.faq details[hidden] { display: none; }
+.faq summary { list-style: none; cursor: pointer; padding: 16px 20px; font: 600 17px/24px var(--font-sans); display: flex; justify-content: space-between; gap: var(--s4); align-items: center; }
+.faq summary::-webkit-details-marker { display: none; }
+.faq summary::after { content: "+"; font: 500 22px/1 var(--font-mono); color: var(--brasa-700); transition: transform var(--dur-2) var(--ease-out); flex: none; }
+.faq details[open] summary::after { transform: rotate(45deg); }
+.faq .ans { padding: 0 20px 18px; color: var(--pizarra); max-width: 62ch; animation: scrIn var(--dur-2) var(--ease-out); }
+.faq .ans b { color: var(--noche-900); font-weight: 600; }
+
+/* ===== 7 Closing (approved, unchanged) ===== */
+.closing { overflow: hidden; text-align: center; padding: var(--s10) 0 var(--s9); background: radial-gradient(900px 500px at 50% 100%, rgba(240,122,46,.16), transparent 60%), linear-gradient(180deg, var(--noche-950), var(--noche-900)); }
+.closing .symbol { width: 140px; margin: 0 auto var(--s6); filter: drop-shadow(0 20px 50px rgba(240,122,46,.35)); animation: breathe 6s var(--ease-io) infinite; }
+@keyframes breathe { 50% { transform: translateY(-8px) scale(1.02); filter: drop-shadow(0 26px 60px rgba(240,122,46,.5)); } }
+.closing h2 { font: 700 clamp(38px, 5.6vw, 72px)/1.02 var(--font-display); letter-spacing: -.02em; max-width: 14ch; margin: 0 auto; }
+.closing .lead { margin: var(--s5) auto 0; }
+.closing .ctas { justify-content: center; }
+.grad-line { height: 2px; width: min(420px, 70%); margin: var(--s7) auto 0; background: var(--degrade); border-radius: 2px; opacity: .8; }
+footer { background: var(--noche-950); color: var(--niebla); padding: var(--s7) 0 var(--s6); font-size: 14px; }
+footer .wrap { display: grid; grid-template-columns: 1.2fr repeat(3, 1fr); gap: var(--s6); }
+footer h4 { font: 600 12px/16px var(--font-sans); letter-spacing: .06em; text-transform: uppercase; color: var(--perla); margin-bottom: var(--s3); }
+footer ul { list-style: none; padding: 0; margin: 0; display: grid; gap: var(--s2); }
+footer a { color: var(--niebla); text-decoration: none; } footer a:hover { color: var(--azul-300); }
+footer .logo-f { height: 34px; width: auto; margin-bottom: var(--s3); }
+.foot-bottom { grid-column: 1 / -1; border-top: 1px solid rgba(255,255,255,.08); padding-top: var(--s4); display: flex; justify-content: space-between; flex-wrap: wrap; gap: var(--s3); font-size: 13px; }
+
+/* ===== Design notes (Spanish, internal) ===== */
+.nt { display: none; margin: var(--s5) auto 0; max-width: var(--content); padding: 0 var(--s5); }
+body.notes .nt { display: block; }
+.nt-in { border-radius: var(--r-lg); background: #FFFBEA; color: #3b3a2e; border: 1px solid #EADFA8; padding: var(--s5); font-size: 14px; line-height: 21px; display: grid; gap: var(--s3); }
+.nt-in h5 { margin: 0; font: 700 12px/16px var(--font-sans); letter-spacing: .08em; text-transform: uppercase; color: #8A5A00; }
+.nt-in dl { margin: 0; display: grid; grid-template-columns: 150px 1fr; gap: 6px 16px; }
+.nt-in dt { font-weight: 700; } .nt-in dd { margin: 0; }
+.notes-toggle { position: fixed; left: 16px; bottom: 16px; z-index: 70; display: inline-flex; gap: 10px; align-items: center; padding: 10px 14px 10px 10px; border-radius: var(--r-full); background: #FFFBEA; color: #3b3a2e; border: 1px solid #EADFA8; font: 600 13px/18px var(--font-sans); cursor: pointer; box-shadow: 0 10px 30px rgba(11,23,51,.2); }
+.notes-toggle .sw { width: 34px; height: 20px; border-radius: 10px; background: #c9cedb; position: relative; transition: background var(--dur-2); }
+.notes-toggle .sw::after { content: ""; position: absolute; top: 2px; left: 2px; width: 16px; height: 16px; border-radius: 50%; background: #fff; transition: transform var(--dur-2) var(--ease-out); }
+body.notes .notes-toggle .sw { background: #8A5A00; } body.notes .notes-toggle .sw::after { transform: translateX(14px); }
+
+/* Glass panels (renders) as 9-slice frames: they stretch to any size without distorting the corners */
+.gpanel.gpanel { border: 40px solid transparent; border-image-slice: 110 fill; border-image-width: 40px; border-image-repeat: stretch; background: none !important; box-shadow: none !important; }
+.gpanel.gpanel.lightp { border-image-source: url({{PANEL_LIGHT}}); }
+.gpanel.gpanel.bluep { border-image-source: url({{PANEL_BLUE}}); }
+
+/* The blue panel has a light interior, so the Campfire scene switches to dark text */
+.scene.new.gpanel { color: var(--noche-900); }
+.scene.new.gpanel p { color: var(--pizarra); }
+.scene.new.gpanel .eyebrow { color: var(--azul-700) !important; }
+.scene.new.gpanel .middle.contract { color: var(--azul-700); background: rgba(255,255,255,.55); box-shadow: 0 0 0 6px rgba(53,123,195,.08), 0 18px 40px rgba(30,57,142,.18); }
+/* ===== Responsive ===== */
+@media (max-width: 1240px) { .rail { display: none; } }
+@media (max-width: 1080px) { .bens { grid-template-columns: 1fr 1fr; row-gap: var(--s7); } .ben:nth-child(3) { border-left: 0; } .walk { grid-template-columns: minmax(0, 1fr) 340px; gap: var(--s6); } }
+@media (max-width: 900px) {
+  :root { --header: 68px; }
+  section { padding: var(--s9) 0; }
+  .nav-logo img { height: 38px; }
+  .nav-links { display: none; }
+  .nav-links.open { display: grid; position: absolute; top: var(--header); left: 12px; right: 12px; padding: var(--s3); border-radius: var(--r-lg); background: rgba(11,23,51,.96); }
+  .nav-menu { display: inline-flex; align-items: center; }
+  .nav .nav-cta { display: none; }
+  .hero { flex-direction: column; } .hero .wrap { grid-template-columns: 1fr; }
+  .stage { max-width: 520px; width: 100%; margin: 0 auto; }
+  .chip-float.a { left: 2%; } .chip-float.b { right: 2%; }
+  .problem-grid { grid-template-columns: 1fr; }
+  .faq-grid { grid-template-columns: minmax(0, 1fr); }
+  .eco { grid-template-columns: 1fr; gap: var(--s6); }
+  .eco-stick { position: relative; top: 0; height: auto; min-height: 0; order: -1; }
+  .eco-steps { gap: var(--s6); padding: 0; } .eco-step { opacity: 1; }
+  .walk { grid-template-columns: 1fr; }
+  .walk-stick { position: relative; top: 0; height: auto; min-height: 0; order: -1; }
+  .sim-ribbon { --sz: 620px; }
+  .walk-steps { gap: var(--s3); padding: 0; }
+  .wstep dl { display: none; } .wstep.on dl { display: grid; }
+  .summary { grid-template-columns: 1fr; } .summary div { border-right: 0; border-bottom: 1px solid var(--gris-frio); } .summary div:last-child { border-bottom: 0; }
+  .faq-side { position: static; } .tabs { grid-auto-flow: column; overflow-x: auto; }
+  .tabs button { white-space: nowrap; }
+  footer .wrap { grid-template-columns: 1fr 1fr; }
+  .nt-in dl { grid-template-columns: 1fr; }
+}
+@media (max-width: 560px) {
+  .wrap { padding: 0 var(--s4); }
+  .bens { grid-template-columns: 1fr; } .ben { border-left: 0; padding: 0; } .ben-img { height: 200px; }
+  .hero .lead { font-size: 17px; line-height: 26px; }
+  .ctas .btn { width: 100%; }
+  .scene { padding: var(--s5); } .middle { width: 100px; height: 100px; font-size: 12px; }
+  .node { width: 96px; padding: 10px 6px 8px; gap: 4px; } .node b { font-size: 13px; line-height: 18px; } .node small { display: none; }
+  .node .emb { width: 36px; height: 36px; border-radius: 12px; } .node .emb .ic { width: 18px; height: 18px; }
+  .node.contract { width: 116px; } .node.contract b { font-size: 15px; }
+  .n-seller { left: 14% !important; } .n-buyer { left: 86% !important; }
+  .eco-ghost { width: 84px; height: 84px; }
+  .phrase-in { padding: 0 14%; }
+  .info-panel { width: 100%; }
+  .gpanel.gpanel { border-width: 28px; border-image-width: 28px; }
+  .sim-phone { width: 100%; max-width: 340px; }
+  .sim-ribbon { --sz: 520px; }
+  .switch button { padding: 10px 14px; font-size: 14px; }
+  .wstep { grid-template-columns: 40px 1fr; } .wstep .n { width: 34px; height: 34px; font-size: 14px; }
+  .wstep h3 { font-size: 19px; line-height: 25px; } .wstep dl div { grid-template-columns: 1fr; gap: 0; }
+  footer .wrap { grid-template-columns: 1fr; }
+}
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation: none !important; transition-duration: 1ms !important; scroll-behavior: auto !important; }
+  .rv { opacity: 1; transform: none; }
+  .ribbon, .vault { transform: none !important; }
+  .coin, .map-coin { display: none; }
+  .badge { opacity: 1; transform: none; }
+}
+</style>
+</head>
+<body class="notes">
+{{SPRITE}}
+<button class="notes-toggle" id="notesToggle" type="button" aria-pressed="true"><span class="sw" aria-hidden="true"></span><span>Notas de diseño</span></button>
+
+<header class="nav" id="nav">
+  <div class="wrap">
+    <a class="nav-logo" href="#top" aria-label="Campfire home"><img src="{{LOGO_DARK}}" alt="Campfire"></a>
+    <nav class="nav-links" id="navLinks" aria-label="Main">
+      <a href="#why">Why Campfire</a>
+      <a href="#contract">How it works</a>
+      <a href="#how">Try a trade</a>
+      <a href="#faq">FAQ</a>
+    </nav>
+    <a class="btn nav-cta" href="#closing">Try the demo trade</a>
+    <button class="nav-menu" id="navMenu" type="button" aria-expanded="false" aria-controls="navLinks">Menu</button>
+  </div>
+</header>
+<div class="progress" id="progress" aria-hidden="true"></div>
+
+<nav class="rail" id="rail" aria-label="Page sections">
+  <a href="#top"><span>Start</span></a>
+  <a href="#why"><span>Why Campfire?</span></a>
+  <a href="#problem"><span>Who goes first?</span></a>
+  <a href="#contract"><span>How does it work?</span></a>
+  <a href="#how"><span>Try a trade</span></a>
+  <a href="#faq"><span>Questions?</span></a>
+  <a href="#closing"><span>Get started</span></a>
+</nav>
+
+<main id="top">
+
+<!-- ============ 1 HERO (approved) ============ -->
+<section class="hero night" id="hero" aria-labelledby="h-hero">
+  <div class="wrap">
+    <div>
+      <p class="eyebrow rv">Peer-to-peer Bitcoin Cash</p>
+      <h1 id="h-hero" class="rv d1">Trade without <span class="glow">intermediaries.</span></h1>
+      <p class="lead rv d2">Buy or sell Bitcoin Cash directly with another person, for fiat money and with the payment methods you already use. While you trade, a contract on the blockchain holds the coins — not Campfire, not anyone.</p>
+      <div class="ctas rv d3">
+        <a class="btn btn-primary" href="#closing">Try the demo trade <span class="arrow" aria-hidden="true">→</span></a>
+        <a class="btn btn-ghost" href="#closing">See offers</a>
+      </div>
+      <div class="hero-proof rv d4"><span>No account, no password</span><span>You don't need BCH to buy</span><span>Every step checkable on-chain</span></div>
+    </div>
+    <div class="stage" aria-hidden="true">
+      <div class="ribbon"><img src="{{TEXTURE}}" alt=""></div>
+      <div class="vault glass">
+        <span class="pill wait">Locked in the contract</span>
+        <div class="amount">0.25 <small>BCH</small></div>
+        <p class="muted" style="font-size:13px">Example trade</p>
+        <div class="vault-exits">
+          <div><svg class="ic"><use href="#i-out"/></svg>To the buyer, when the seller releases</div>
+          <div><svg class="ic"><use href="#i-refund"/></svg>Back to the seller, if it doesn't complete</div>
+        </div>
+      </div>
+      <div class="chip-float a glass"><span class="dot" style="background:var(--verde-500)"></span>Safe at 0-conf</div>
+      <div class="chip-float b glass"><span class="dot" style="background:var(--brasa-500)"></span>Your turn: mark as paid</div>
+    </div>
+  </div>
+  <a class="scroll-cue" href="#why"><b>Explore Campfire ↓</b></a>
+</section>
+
+<!-- ============ 2 WHY CAMPFIRE? (night for now) ============ -->
+<section class="why" id="why" aria-labelledby="h-why">
+  <div class="wrap">
+    <svg class="orbit-line" viewBox="0 0 1500 560" preserveAspectRatio="none" aria-hidden="true">
+      <defs><linearGradient id="orbitGrad" x1="0" x2="1"><stop offset="0" stop-color="#F07A2E"/><stop offset=".35" stop-color="#AB3B86" stop-opacity=".7"/><stop offset=".7" stop-color="#357BC3" stop-opacity=".8"/><stop offset="1" stop-color="#42BFAE"/></linearGradient></defs>
+      <ellipse cx="750" cy="215" rx="690" ry="165"/>
+    </svg>
+    <div class="why-head">
+      <p class="eyebrow rv">Non-custodial · Verifiable · Peer-to-peer</p>
+      <h2 id="h-why" class="rv d1">Why Campfire?</h2>
+    </div>
+    <div class="bens">
+      <article class="ben rv" style="--dot: var(--azul-500)">
+        <div class="ben-img"><img src="{{BEN1}}" alt=""></div>
+        <h3>Nobody can keep your coins.</h3>
+        <p>The contract has a short list of exits, and none of them leads to Campfire or the arbiter.</p>
+        <p class="gain">You never hand your coins to a company.</p>
+      </article>
+      <article class="ben rv d1" style="--dot: var(--brasa-500)">
+        <div class="ben-img"><img src="{{BEN2}}" alt=""></div>
+        <h3>Your wallet is your login.</h3>
+        <p>No account, password or e-mail. Each trade uses a new address of your wallet, so trades aren't linked on-chain.</p>
+        <p class="gain">Start in minutes, share less about yourself.</p>
+      </article>
+      <article class="ben rv d2" style="--dot: var(--verde-500)">
+        <div class="ben-img"><img src="{{BEN3}}" alt=""></div>
+        <h3>Check it yourself.</h3>
+        <p>Your browser verifies the deposit on its own. Every contract exit is listed on the Transparency page.</p>
+        <p class="gain">Trust you can verify, not trust you're asked for.</p>
+      </article>
+      <article class="ben rv d3" style="--dot: var(--brasa-500)">
+        <div class="ben-img"><img src="{{BEN4}}" alt=""></div>
+        <h3>Buy with zero BCH.</h3>
+        <p>To buy you only need a wallet to receive. Pay the seller in fiat money, with the payment methods you already use.</p>
+        <p class="gain">Your first BCH doesn't need someone else's BCH.</p>
+      </article>
+    </div>
+  </div>
+</section>
+<div class="nt"><div class="nt-in">
+  <h5>Restauración de la versión 2 — notas</h5>
+  <dl>
+    <dt>Base</dt><dd>Es la versión 2 restaurada. Encima tiene solo lo aprobado: header de vidrio desde el inicio, barra de progreso debajo, «Explore Campfire ↓» en una pastilla, títulos como preguntas, textos internacionales y ejemplos en USD.</dd>
+    <dt>Why Campfire?</dt><dd>Por ahora en noche, según tu referencia: cuatro columnas con tus objetos de vidrio, títulos, texto y «lo que ganás» con un punto de color por significado (azul contrato · naranja billetera · verde verificado · naranja comprar). Los renders tienen fondo negro: se integran con un modo de fusión que hace desaparecer el negro. La órbita es un trazo con el degradé de marca que se dibuja al llegar y gira apenas con el scroll. <span class="tag p">PENDIENTE</span> volver a fondo claro cuando haya tiempo.</dd>
+    <dt>Tus renders</dt><dd>«Transición marfil a noche» va antes del contrato y antes del cierre; «Transición de noche a marfil» va después del contrato. La «Cinta del simulador» rodea el teléfono. Los paneles de vidrio y el banner de vidrio todavía no están aplicados (ver preguntas).</dd>
+  </dl>
+</div></div>
+
+<!-- ============ 3 WHO GOES FIRST? (v2) ============ -->
+<section class="light" id="problem" aria-labelledby="h-problem">
+  <div class="wrap">
+    <div class="sec-head">
+      <h2 id="h-problem" class="big rv">Who goes first?</h2>
+      <p class="lead rv d1">Trading with a stranger, someone has to go first. Either you send the money and hope, or you hand your coins to a platform and trust it. Campfire changes who goes first.</p>
+    </div>
+    <div class="problem-grid">
+      <article class="scene old gpanel lightp rv">
+        <div><span class="eyebrow">The usual way</span><h3>A middleman holds your coins.</h3></div>
+        <div class="flow">
+          <div class="who"><span class="emb neutral"><svg class="ic"><use href="#i-seller"/></svg></span>You</div>
+          <div class="middle box">A platform's wallet<span class="badge frozen"><svg class="ic"><use href="#i-alert"/></svg>Frozen</span></div>
+          <div class="who"><span class="emb neutral"><svg class="ic"><use href="#i-buyer"/></svg></span>The other person</div>
+          <span class="coin c-old"></span>
+        </div>
+        <p>You can't see what happens to the coins. If the platform freezes, fails or disappears, you wait — or you lose them.</p>
+      </article>
+      <article class="scene new gpanel bluep rv d1">
+        <div><span class="eyebrow" style="color:var(--azul-300)">With Campfire</span><h3>A contract goes first.</h3></div>
+        <div class="flow">
+          <div class="who"><span class="emb ember"><svg class="ic"><use href="#i-seller"/></svg></span>Seller</div>
+          <div class="middle contract"><span><svg class="ic" style="display:block;margin:0 auto 6px"><use href="#i-contract"/></svg>Contract on the blockchain</span></div>
+          <div class="who"><span class="emb ember"><svg class="ic"><use href="#i-buyer"/></svg></span>Buyer<span class="badge got">✓ Received</span></div>
+          <span class="coin c-new"></span>
+        </div>
+        <p>The seller locks the coins in a contract anyone can inspect. It can only pay the buyer or give them back to the seller. Nobody else — not even Campfire — can take them.</p>
+      </article>
+    </div>
+  </div>
+</section>
+
+<div class="band i2n" aria-hidden="true"></div>
+
+<section class="phrase" aria-label="Locked like a vault. Clear as glass.">
+  <div class="phrase-in" style="background-image:url({{BANNER_GLASS}})"><h2 class="rv">Locked like a vault. <em>Clear as glass.</em></h2></div>
+</section>
+
+<!-- ============ 4 HOW DOES IT WORK? (v2) ============ -->
+<section class="night" id="contract" aria-labelledby="h-eco">
+  <div class="wrap">
+    <div class="sec-head">
+      <p class="eyebrow rv">Inside the contract</p>
+      <h2 id="h-eco" class="big rv d1">How does it work?</h2>
+    </div>
+    <div class="eco">
+      <div class="eco-steps">
+        <div class="eco-step" data-eco="1">
+          <span class="pill act">You</span>
+          <h3>A seller and a buyer.</h3>
+          <p>One has Bitcoin Cash, the other has fiat money. Each signs in with a compatible Bitcoin Cash wallet. Between them, a space for something they can both trust.</p>
+        </div>
+        <div class="eco-step" data-eco="2">
+          <span class="pill wait">The contract</span>
+          <h3>The coins go into a contract.</h3>
+          <p>Each trade creates its own contract on the Bitcoin Cash network. The seller locks the coins there, and from then on only the contract's rules can move them.</p>
+        </div>
+        <div class="eco-step" data-eco="3">
+          <span class="pill chain">The network</span>
+          <h3>The network verifies every move.</h3>
+          <p>Your browser rebuilds the contract and checks the deposit on its own, without trusting Campfire. Every move is a real transaction anyone can look up.</p>
+        </div>
+        <div class="eco-step" data-eco="4">
+          <span class="pill arb">The arbiter</span>
+          <h3>If something goes wrong, someone mediates.</h3>
+          <p>Either person can open a dispute. An arbiter named in the offer decides who gets the coins: the buyer or the seller. The arbiter can never keep them.</p>
+        </div>
+        <div class="eco-step" data-eco="5">
+          <span class="pill wait">Four ways out</span>
+          <h3>Every possible ending is written in the code.</h3>
+          <ul class="exit-list" id="exitList">
+            <li data-exit="release" style="--c:var(--verde-500)"><div><b>Release → buyer</b>The seller signs. The normal ending.</div></li>
+            <li data-exit="refund" style="--c:var(--azul-300)"><div><b>Refund → seller</b>The buyer signs. For when they won't pay.</div></li>
+            <li data-exit="arbitrate" style="--c:var(--violeta-300)"><div><b>Arbitrate</b>The arbiter's verdict pays the buyer or the seller. Nobody else.</div></li>
+            <li data-exit="reclaim" style="--c:var(--niebla)"><div><b>Reclaim after 14 days</b>If everyone else disappears, the seller takes the coins back alone.</div></li>
+          </ul>
+          <details class="tech">
+            <summary>Technical details</summary>
+            <ul>
+              <li><b>CashScript contract</b>, one per trade, with exactly these four spending paths. <a href="https://github.com/BeltranLeo/Campfire">Source on GitHub</a>.</li>
+              <li><b>0-conf with DSProofs:</b> after 5 quiet seconds without a double-spend proof, the deposit is safe to act on.</li>
+              <li><b>New keys per trade:</b> each trade uses a fresh address of your wallet, so trades aren't linked on-chain.</li>
+              <li><b>Encrypted payment details:</b> revealed in the browser only to the other person in the trade.</li>
+              <li><b>Transparency page:</b> every contract exit, with its transaction.</li>
+            </ul>
+          </details>
+        </div>
+      </div>
+      <div class="eco-stick">
+        <div class="eco-map" id="ecoMap" data-step="1">
+          <svg viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true">
+            <path class="ln flow-line" data-s="1" d="M20 50 L80 50" stroke="#6BB2DE" vector-effect="non-scaling-stroke"/>
+            <path class="ln" data-s="3" d="M50 50 L50 84" stroke="#0AC18E" vector-effect="non-scaling-stroke"/>
+            <path class="ln" data-s="4" d="M50 50 L50 16" stroke="#B18AD8" vector-effect="non-scaling-stroke"/>
+            <path class="xp" data-exit="release" d="M50 50 L85 50" stroke="#0AC18E" vector-effect="non-scaling-stroke"/>
+            <path class="xp" data-exit="refund" d="M50 50 L15 50" stroke="#6BB2DE" vector-effect="non-scaling-stroke"/>
+            <path class="xp" data-exit="arbitrate" d="M50 50 L50 14" stroke="#B18AD8" vector-effect="non-scaling-stroke"/>
+            <path class="xp" data-exit="reclaim" d="M50 50 C46 76 24 76 15 56" stroke="#8A96B3" vector-effect="non-scaling-stroke"/>
+          </svg>
+          <div class="eco-ghost" aria-hidden="true">?</div>
+          <div class="node glass n-seller" data-s="1" style="left:15%;top:50%"><span class="emb ember"><svg class="ic"><use href="#i-seller"/></svg></span><b>Seller</b><small>Has BCH</small></div>
+          <div class="node glass n-buyer" data-s="1" style="left:85%;top:50%"><span class="emb ember"><svg class="ic"><use href="#i-buyer"/></svg></span><b>Buyer</b><small>Has fiat money</small></div>
+          <div class="node glass contract" data-s="2" style="left:50%;top:50%"><span class="emb lg blue"><svg class="ic"><use href="#i-contract"/></svg></span><b>Contract</b><small style="color:var(--azul-300)">Holds the coins</small></div>
+          <div class="node glass" data-s="3" style="left:50%;top:86%"><span class="emb green"><svg class="ic"><use href="#i-network"/></svg></span><b>BCH network</b><small style="color:var(--verde-500)">Verifies every move</small></div>
+          <div class="node glass n-arb" data-s="4" style="left:50%;top:14%"><span class="emb violet"><svg class="ic"><use href="#i-arbiter"/></svg></span><b>Arbiter</b><small style="color:var(--violeta-300)">Only in a dispute</small></div>
+          <span class="map-coin" id="mapCoin"></span>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<div class="band n2i" aria-hidden="true"></div>
+
+<!-- ============ 5 WANT TO TRY A TRADE? (v2) ============ -->
+<section class="light" id="how" aria-labelledby="h-how">
+  <div class="wrap">
+    <div class="how-top">
+      <div class="sec-head" style="margin:0">
+        <h2 id="h-how" class="big rv">Want to try a trade?</h2>
+        <p class="lead rv d1">Pick a side. Scroll to follow the trade, or tap the phone to play it yourself. Nothing here touches the network.</p>
+      </div>
+      <div class="info-panel gpanel lightp rv d2">
+        <span class="eyebrow" style="margin:0">Choose a side</span>
+        <div class="switch" id="simSwitch" data-way="sell" role="group" aria-label="Choose a side">
+          <span class="knob" aria-hidden="true"></span>
+          <button type="button" data-way="sell" aria-pressed="true"><svg class="ic"><use href="#i-out"/></svg>Sell</button>
+          <button type="button" data-way="buy" aria-pressed="false"><svg class="ic"><use href="#i-in"/></svg>Buy</button>
+        </div>
+        <dl class="summary" id="summary"></dl>
+      </div>
+    </div>
+    <div class="walk">
+      <div class="walk-steps" id="walkSteps"></div>
+      <div class="walk-stick">
+        <div class="sim-ribbon" style="background-image:url({{SIM_RIBBON}})" aria-hidden="true"></div>
+        <span class="sim-tag">Simulated · example data</span>
+        <div class="sim-phone"><div class="sim-screen" id="simScreen" aria-live="polite"></div></div>
+        <button class="whatif" id="whatIf" type="button">What if the buyer doesn't pay?</button>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ============ (DISABLED) INSIDE THE APP ============ -->
+<section id="inside" hidden aria-hidden="true"><!-- Reserved: section kept for a later decision. --></section>
+
+<!-- ============ 6 QUESTIONS? (v2) ============ -->
+<section class="light" id="faq" aria-labelledby="h-faq" style="border-top:1px solid var(--gris-frio)">
+  <div class="wrap faq-grid">
+    <div class="faq-side">
+      <h2 id="h-faq" class="big rv">Questions?</h2>
+      <p class="lead rv d1">Still unsure? Start with the demo trade: real BCH, real contract, and no money of yours moves.</p>
+      <div class="tabs" role="tablist" aria-label="Question topics" id="faqTabs">
+        <button role="tab" aria-selected="true" data-cat="start">Getting started <span>3</span></button>
+        <button role="tab" aria-selected="false" data-cat="safety">Safety <span>4</span></button>
+        <button role="tab" aria-selected="false" data-cat="costs">Costs and the demo <span>3</span></button>
+      </div>
+    </div>
+    <div class="faq" id="faqList">
+      <details data-cat="start" open><summary>Do I need Bitcoin Cash to buy?</summary><div class="ans">No. To buy you only need a compatible Bitcoin Cash wallet to receive the coins. You pay the seller in fiat money.</div></details>
+      <details data-cat="start"><summary>Do I need to create an account?</summary><div class="ans">No. Connecting your wallet is the only sign-in. There are no accounts, passwords or e-mail addresses.</div></details>
+      <details data-cat="start"><summary>How do I pay or get paid?</summary><div class="ans">Each offer lists the payment methods the seller accepts — for example a bank transfer or cash in person. The payment happens outside Campfire, directly between the two of you.</div></details>
+      <details data-cat="safety"><summary>Who holds the coins during a trade?</summary><div class="ans">A contract on the Bitcoin Cash network. It can only pay the buyer or return the coins to the seller. Campfire cannot move them.</div></details>
+      <details data-cat="safety"><summary>What if the buyer doesn't pay in time?</summary><div class="ans">The seller sets the time to pay. If it runs out, the trade is cancelled and the coins go back to the seller. Either side can also open a dispute.</div></details>
+      <details data-cat="safety"><summary>What if the other person disappears?</summary><div class="ans">Either of you can open a dispute, and an arbiter named in the offer decides who gets the coins. The arbiter can never keep them. And if everyone disappears, after 14 days the seller can take the coins back alone.</div></details>
+      <details data-cat="safety"><summary>When does my wallet ask me to sign?</summary><div class="ans">Only when coins move: publishing a sell offer, locking coins, releasing them, or cancelling. Buttons that open your wallet say so.</div></details>
+      <details data-cat="costs"><summary>How much does it cost?</summary><div class="ans">There are <b>no trading fees today</b>. Publishing an offer costs less than a cent in network fees, and sometimes Campfire pays it for you. Fees for the price oracle and the arbiter are planned for the future.</div></details>
+      <details data-cat="costs"><summary>What does “Simulated” mean?</summary><div class="ans">In demo trades the bank payment is not real. Everything marked “On-chain” is a real transaction you can check.</div></details>
+      <details data-cat="costs"><summary>Can I trade PUSD?</summary><div class="ans">Not yet. PUSD is a dollar token on Bitcoin Cash (1 PUSD stays close to 1 US dollar). Offers in PUSD are coming soon.</div></details>
+    </div>
+  </div>
+</section>
+
+<div class="band i2n" aria-hidden="true"></div>
+
+<!-- ============ 7 CLOSING (approved, unchanged) ============ -->
+<section class="closing night" id="closing" aria-labelledby="h-close">
+  <div class="wrap">
+    <img class="symbol rv" src="{{SYMBOL}}" alt="">
+    <h2 id="h-close" class="rv d1">Clear trades. Connected people.</h2>
+    <p class="lead rv d2">Try a whole trade with real Bitcoin Cash and a real contract. Only the bank payment is simulated.</p>
+    <div class="ctas rv d3" style="margin-top:32px">
+      <a class="btn btn-primary" href="#">Try the demo trade <span class="arrow" aria-hidden="true">→</span></a>
+      <a class="btn btn-ghost" href="#">See offers</a>
+    </div>
+    <div class="grad-line rv d4" aria-hidden="true"></div>
+  </div>
+</section>
+</main>
+
+<footer>
+  <div class="wrap">
+    <div><img class="logo-f" src="{{LOGO_DARK}}" alt="Campfire"><p>Peer-to-peer Bitcoin Cash, held by a contract anyone can check.</p></div>
+    <div><h4>Product</h4><ul><li><a href="#">Offers</a></li><li><a href="#">Demo trade</a></li><li><a href="#">My trades</a></li></ul></div>
+    <div><h4>Learn</h4><ul><li><a href="#contract">How it works</a></li><li><a href="#">About</a></li><li><a href="#faq">FAQ</a></li></ul></div>
+    <div><h4>Verify</h4><ul><li><a href="#">Transparency</a></li><li><a href="https://github.com/BeltranLeo/Campfire">Source code</a></li></ul></div>
+    <div class="foot-bottom"><span>Built for BCH BLAZE 2026.</span><span>Campfire never holds your coins.</span></div>
+  </div>
+</footer>
+
+<script>
+(() => {
+  const reduce = matchMedia('(prefers-reduced-motion: reduce)').matches;
+  const finePointer = matchMedia('(pointer: fine)').matches;
+  const desk = matchMedia('(min-width: 901px)');
+  const $ = (s, el = document) => el.querySelector(s);
+  const $$ = (s, el = document) => [...el.querySelectorAll(s)];
+  const icon = (id) => `<svg class="ic"><use href="#i-${id}"/></svg>`;
+
+  /* Notes toggle */
+  const toggle = $('#notesToggle');
+  if (toggle) {
+    const setNotes = (on) => { document.body.classList.toggle('notes', on); toggle.setAttribute('aria-pressed', String(on)); try { localStorage.setItem('cf-notes', on ? '1' : '0'); } catch (e) {} };
+    try { const v = localStorage.getItem('cf-notes'); if (v !== null) setNotes(v === '1'); } catch (e) {}
+    toggle.addEventListener('click', () => setNotes(!document.body.classList.contains('notes')));
+  }
+
+  /* Mobile menu */
+  const menu = $('#navMenu'), links = $('#navLinks');
+  menu.addEventListener('click', () => { const o = links.classList.toggle('open'); menu.setAttribute('aria-expanded', String(o)); });
+  links.addEventListener('click', (e) => { if (e.target.tagName === 'A') { links.classList.remove('open'); menu.setAttribute('aria-expanded', 'false'); } });
+
+  /* Reveal */
+  const io = new IntersectionObserver((es) => es.forEach((e) => { if (e.isIntersecting) { e.target.classList.add('in'); io.unobserve(e.target); } }), { threshold: .05, rootMargin: '0px 0px -4% 0px' });
+  $$('.rv, .scene').forEach((el) => io.observe(el));
+
+  /* Why Campfire?: draw the orbit on arrival */
+  const why = $('#why');
+  new IntersectionObserver((es, o) => es.forEach((e) => { if (e.isIntersecting) { why.classList.add('in-view'); o.disconnect(); } }), { threshold: .2 }).observe(why);
+
+  /* Scroll-driven chrome and scenes */
+  const nav = $('#nav'), bar = $('#progress'), hero = $('#hero'), closing = $('#closing'), rail = $('#rail');
+  const railLinks = $$('a', rail).map((a) => [a, $(a.getAttribute('href'))]);
+  const navMap = $$('.nav-links a').map((a) => [a, $(a.getAttribute('href'))]);
+  const current = (pairs) => { let hit = null; pairs.forEach(([a, s]) => { if (s && s.getBoundingClientRect().top < innerHeight * .4) hit = a; }); return hit; };
+  const pick = (els, key) => { let n = +els[0].dataset[key]; els.forEach((el) => { if (el.getBoundingClientRect().top < innerHeight * .55) n = +el.dataset[key]; }); return n; };
+  const live = (el) => { const r = el.getBoundingClientRect(); return r.top < innerHeight * .6 && r.bottom > innerHeight * .4; };
+  const onScroll = () => {
+    const h = document.documentElement.scrollHeight - innerHeight;
+    bar.style.setProperty('--p', h > 0 ? (scrollY / h).toFixed(4) : 0);
+    nav.classList.toggle('scrolled', scrollY > hero.offsetHeight - 120);
+    nav.classList.toggle('calm', closing.getBoundingClientRect().top < innerHeight * .8);
+    rail.classList.toggle('show', scrollY > innerHeight * .5);
+    const r = current(railLinks); railLinks.forEach(([a]) => a.classList.toggle('on', a === r));
+    const n = current(navMap); navMap.forEach(([a]) => a.classList.toggle('on', a === n));
+    if (!reduce) { const wr = why.getBoundingClientRect(); why.style.setProperty('--o', Math.max(-1, Math.min(1, (innerHeight / 2 - wr.top - wr.height / 2) / innerHeight)).toFixed(3)); }
+    if (!reduce && finePointer) hero.style.setProperty('--sy', Math.min(scrollY / innerHeight, 1).toFixed(3));
+    if (desk.matches) { if (live(ecoMap.closest('section'))) syncEco(); if (live(stepsBox)) syncWalk(); }
+  };
+  if (!reduce && finePointer) {
+    hero.addEventListener('pointermove', (e) => { const r = hero.getBoundingClientRect(); hero.style.setProperty('--mx', ((e.clientX - r.left) / r.width - .5).toFixed(3)); hero.style.setProperty('--my', ((e.clientY - r.top) / r.height - .5).toFixed(3)); });
+    hero.addEventListener('pointerleave', () => { hero.style.setProperty('--mx', 0); hero.style.setProperty('--my', 0); });
+    $$('.ben').forEach((c) => {
+      c.addEventListener('pointermove', (e) => { const r = c.getBoundingClientRect(); const x = (e.clientX - r.left) / r.width - .5, y = (e.clientY - r.top) / r.height - .5; c.style.transform = `perspective(800px) rotateY(${x * 6}deg) rotateX(${-y * 6}deg) translateY(-4px)`; });
+      c.addEventListener('pointerleave', () => { c.style.transform = ''; });
+    });
+  }
+
+  /* ===== 4 How does it work? ===== */
+  const ecoMap = $('#ecoMap'), coin = $('#mapCoin'), ecoSteps = $$('.eco-step'), exitItems = $$('#exitList li');
+  const P = { seller: [15, 50], buyer: [85, 50], arbiter: [50, 14], center: [50, 50] };
+  const fly = (path, ms = 1500) => {
+    if (reduce || !coin.animate) return;
+    coin.animate(path.map(([x, y], i) => ({ left: x + '%', top: y + '%', opacity: i === 0 || i === path.length - 1 ? 0 : 1, offset: i / (path.length - 1) })), { duration: ms, easing: 'cubic-bezier(.65,0,.35,1)' });
+  };
+  const EXITS = { release: [P.center, P.center, P.buyer, P.buyer], refund: [P.center, P.center, P.seller, P.seller], arbitrate: [P.center, P.center, P.arbiter, P.arbiter], reclaim: [P.center, P.center, [40, 70], [24, 68], P.seller, P.seller] };
+  let exT = null, exI = 0;
+  const showExit = () => { const k = Object.keys(EXITS)[exI++ % 4]; ecoMap.dataset.exit = k; exitItems.forEach((li) => li.classList.toggle('on', li.dataset.exit === k)); fly(EXITS[k], 1600); };
+  const startExits = () => { if (exT) return; showExit(); if (!reduce) exT = setInterval(showExit, 2400); };
+  const stopExits = () => { clearInterval(exT); exT = null; delete ecoMap.dataset.exit; exitItems.forEach((li) => li.classList.remove('on')); };
+  let curEco = 0;
+  const setEco = (n) => {
+    if (n === curEco) return;
+    const prev = curEco; curEco = n; ecoMap.dataset.step = n;
+    ecoSteps.forEach((s) => s.classList.toggle('on', +s.dataset.eco === n));
+    $$('[data-s]', ecoMap).forEach((el) => { const show = +el.dataset.s <= n; if (el.classList.contains('node')) el.classList.toggle('show', show); else el.style.opacity = show ? 1 : 0; });
+    if (n === 2 && prev < 2) fly([P.seller, P.seller, P.center, P.center], 1300);
+    n === 5 ? startExits() : stopExits();
+  };
+  const syncEco = () => setEco(pick(ecoSteps, 'eco'));
+  new IntersectionObserver((es, o) => es.forEach((e) => { if (e.isIntersecting) { setEco(desk.matches ? Math.max(1, pick(ecoSteps, 'eco')) : 5); o.disconnect(); } }), { threshold: .25 }).observe(ecoMap);
+
+  /* ===== 5 Want to try a trade? ===== */
+  const scr = $('#simScreen'), stepsBox = $('#walkSteps'), sw = $('#simSwitch'), summary = $('#summary'), whatIfBtn = $('#whatIf');
+  const MARKET = 420; // Example only: a fictional USD price per BCH.
+  const fmtUsd = (n) => 'USD ' + n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  const fmtBch = (n) => (Math.round(n * 1e8) / 1e8).toString();
+  const pad = (n) => String(n).padStart(2, '0');
+  const METHODS = ['Bank transfer', 'Cash in person', 'Payment app'];
+  let way = 'sell', step = -1, timers = [], st = {};
+  const later = (fn, ms) => timers.push(setTimeout(fn, reduce ? Math.min(ms, 300) : ms));
+  const clear = () => { timers.forEach((t) => { clearTimeout(t); clearInterval(t); }); timers = []; };
+  const countdown = (el, from) => { let s = from; const t = () => { el.textContent = `${pad(Math.floor(s / 60))}:${pad(s % 60)}`; s = Math.max(0, s - 1); }; t(); timers.push(setInterval(t, 1000)); };
+
+  const FLOWS = {
+    sell: {
+      sum: [['You start with', 'Bitcoin Cash'], ['You get', 'Fiat money, in your account'], ['Your key moment', 'Release only with the money in your bank app']],
+      steps: [
+        ['act', 'Your turn', 'Set your price and publish.', 'Choose your margin over the market price, how much you sell, how buyers can pay you and how long they have to pay.', 'Nothing is locked yet: the offer is an announcement until someone takes it. Publishing costs less than a cent.'],
+        ['time', 'Time is running', 'Accept a buyer.', 'A buyer takes your offer. You have 10 minutes to accept.', 'The price is held while the clock runs. If you don\'t accept, the request is dropped.'],
+        ['wait', 'The contract holds them', 'Lock the coins in the contract.', 'Sign once in your wallet. You have about 60 minutes to lock.', 'A contract made only for this trade holds the coins. It can pay the buyer or return them to you.'],
+        ['wait', 'Someone else is working', 'Wait for the payment.', 'Nothing. The buyer pays you outside Campfire, within the time you set.', 'If the buyer doesn\'t pay in time, the trade is cancelled and the coins come back to you.'],
+        ['time', 'Check before you act', 'Check your bank app, then release.', 'Confirm the exact amount in your own bank app — not a screenshot. Then release.', 'Releasing pays the buyer from the contract. It can\'t be undone.'],
+        ['chain', 'Confirmed on-chain', 'You got paid.', 'Nothing else to do.', 'The payout is a real transaction anyone can check on-chain.'],
+      ],
+    },
+    buy: {
+      sum: [['You start with', 'Fiat money — no BCH needed'], ['You get', 'Bitcoin Cash, in your wallet'], ['Your key moment', 'Pay only after “Safe at 0-conf”']],
+      steps: [
+        ['act', 'Your turn', 'Pick an offer and take it.', 'Compare price, payment method and time to pay. Type how much BCH you want.', 'You don\'t need any BCH. Your wallet only gives an address to receive.'],
+        ['wait', 'Someone else is working', 'The seller locks the coins.', 'Wait. Don\'t pay anything yet.', 'The seller accepts and moves the BCH into this trade\'s contract.'],
+        ['chain', 'Verified on the network', 'Your browser checks the deposit.', 'Watch the check finish.', 'Your browser rebuilds the contract and watches the network for 5 quiet seconds: Safe at 0-conf.'],
+        ['time', 'Your turn, with a clock', 'Pay and mark as paid.', 'Send the money with the seller\'s method before the clock runs out, then tap Mark as paid.', 'The seller sets the time to pay. If it runs out, the trade is cancelled and the coins go back.'],
+        ['wait', 'Someone else is working', 'The seller releases.', 'Wait while the seller checks their bank app.', 'When the seller signs, the contract pays the BCH to your wallet.'],
+        ['chain', 'Confirmed on-chain', 'The BCH is yours.', 'Nothing else to do.', 'The payout is a real transaction anyone can check on-chain.'],
+      ],
+    },
+  };
+  const buildSteps = () => {
+    const f = FLOWS[way];
+    summary.innerHTML = f.sum.map(([k, v]) => `<div><dt>${k}</dt><dd>${v}</dd></div>`).join('');
+    stepsBox.innerHTML = f.steps.map(([c, lbl, h, you, sys], i) => `<div class="wstep" data-w="${i}"><span class="n">${i + 1}</span><div><span class="pill ${c}">${lbl}</span><h3>${h}</h3><dl><div><dt>What you do</dt><dd>${you}</dd></div><div><dt>What happens</dt><dd>${sys}</dd></div></dl></div></div>`).join('');
+  };
+  const wSteps = () => $$('.wstep', stepsBox);
+  const next = () => {
+    const n = step + 1, el = wSteps()[n];
+    if (desk.matches && el) { const y = el.getBoundingClientRect().top + scrollY - innerHeight * .4; scrollTo({ top: y, behavior: reduce ? 'auto' : 'smooth' }); setTimeout(() => go(n), reduce ? 0 : 450); }
+    else go(n);
+  };
+  const go = (n) => {
+    if (n === step) return;
+    step = n; clear();
+    wSteps().forEach((s) => s.classList.toggle('on', +s.dataset.w === n));
+    whatIfBtn.classList.toggle('show', n === 3);
+    whatIfBtn.textContent = way === 'buy' ? 'What if I don\'t pay in time?' : 'What if the buyer doesn\'t pay?';
+    (way === 'sell' ? SELL : BUY)[n]();
+  };
+  const syncWalk = () => { const els = wSteps(); if (els.length) go(pick(els, 'w')); };
+
+  const head = (title, label) => `<div class="app-bar"><span>${label}</span><span>Step ${step + 1} of 6</span></div><div class="bar6">${[0, 1, 2, 3, 4, 5].map((i) => `<i class="${i < step ? 'd' : i === step ? 'c' : ''}"></i>`).join('')}</div><div class="app-title">${title}</div>`;
+  const sheet = (cls, html, onOk) => {
+    const scrim = document.createElement('div'); scrim.className = 'scrim';
+    const sh = document.createElement('div'); sh.className = 'sheet ' + cls; sh.innerHTML = html;
+    scr.append(scrim, sh);
+    const close = () => { scrim.remove(); sh.remove(); };
+    const [ok, back] = $$('button', sh);
+    ok.focus();
+    ok.onclick = () => { close(); onOk && onOk(); };
+    if (back) back.onclick = close;
+    scrim.onclick = close;
+  };
+  const wallet = (what, onOk) => sheet('dark', `<span class="pill neutral" style="align-self:flex-start;background:rgba(138,150,179,.14);color:var(--niebla)">Simulated wallet</span><span class="t">Sign to ${what}</span><span class="muted">In the real app, your Bitcoin Cash wallet opens here and asks you to approve. It only asks when coins move.</span><button class="ab" type="button">Approve</button><button class="ab ghost" type="button" style="color:var(--perla);border-color:rgba(244,243,238,.35)">Back</button>`, onOk);
+  whatIfBtn.onclick = () => sheet('light', `<span class="t">Time ran out</span><div class="state-box neutral"><b>Trade cancelled</b><span>The coins go back to the seller. Nobody loses anything.</span></div><div class="state-box arb"><b>Or: open a dispute</b><span>If something else went wrong, either side can open a dispute. An arbiter decides who gets the coins.</span></div><button class="ab ghost" type="button">← Back to the trade</button>`);
+
+  const SELL = [
+    () => {
+      st = { margin: st.margin ?? 2, amount: st.amount ?? 0.5, methods: st.methods ?? ['Bank transfer'], win: st.win ?? 30 };
+      scr.innerHTML = `${head('Sell BCH', 'Create an offer')}
+        <div class="field"><span class="lbl">Price: <b id="sMargin"></b> over market</span><input id="sRange" type="range" min="-5" max="10" step="0.5" value="${st.margin}" aria-label="Margin over market price"><span class="muted" style="font-size:12px">Example: <span class="mono" id="sPrice"></span> per BCH</span></div>
+        <div class="field"><label for="sAmt">Amount to sell (BCH)</label><input id="sAmt" type="number" min="0.001" max="5" step="0.1" value="${st.amount}"></div>
+        <div class="field"><span class="lbl">How buyers can pay you</span><div class="chips" id="sMethods">${METHODS.map((m) => `<button type="button" aria-pressed="${st.methods.includes(m)}">${m}</button>`).join('')}</div></div>
+        <div class="field"><span class="lbl">Time for buyers to pay (you choose)</span><div class="chips" id="sWin">${[15, 30, 60].map((m) => `<button type="button" aria-pressed="${st.win === m}">${m} min</button>`).join('')}</div></div>
+        <button class="ab" type="button" id="sGo">Publish offer</button>`;
+      const upd = () => { $('#sMargin').textContent = (st.margin > 0 ? '+' : '') + st.margin + '%'; $('#sPrice').textContent = fmtUsd(MARKET * (1 + st.margin / 100)); $('#sGo').disabled = !(st.amount > 0) || !st.methods.length; };
+      $('#sRange').oninput = (e) => { st.margin = +e.target.value; upd(); };
+      $('#sAmt').oninput = (e) => { st.amount = +e.target.value; upd(); };
+      $$('#sMethods button').forEach((b) => b.onclick = () => { const m = b.textContent; st.methods = st.methods.includes(m) ? st.methods.filter((x) => x !== m) : [...st.methods, m]; b.setAttribute('aria-pressed', String(st.methods.includes(m))); upd(); });
+      $$('#sWin button').forEach((b) => b.onclick = () => { st.win = parseInt(b.textContent); $$('#sWin button').forEach((o) => o.setAttribute('aria-pressed', String(o === b))); });
+      $('#sGo').onclick = () => wallet('publish your offer', next);
+      upd();
+    },
+    () => {
+      scr.innerHTML = `${head('Your offer is live', 'Offer')}<div class="state-box wait" id="sWait"><b><span class="spin"></span>Waiting for buyers</b><span>No coins are locked until someone takes your offer.</span></div><div id="sReq"></div>`;
+      later(() => {
+        const fiat = MARKET * (1 + st.margin / 100) * st.amount;
+        $('#sReq').outerHTML = `<div class="card"><b>A buyer wants ${fmtBch(st.amount)} BCH</b><span class="muted">They will pay <span class="mono">${fmtUsd(fiat)}</span> by ${(st.methods[0] || 'bank transfer').toLowerCase()}.</span></div><div class="state-box time"><b>Time left to accept</b><span class="timer" id="sT"></span></div><button class="ab" type="button" id="sAcc">Accept buyer</button>`;
+        $('#sWait').remove(); countdown($('#sT'), 600); $('#sAcc').onclick = next;
+      }, 1600);
+    },
+    () => {
+      scr.innerHTML = `${head('Lock the coins', 'Trade')}<div class="card"><span class="muted" style="font-size:12px">You lock</span><span class="big-n">${fmtBch(st.amount)} <small style="font-size:14px">BCH</small></span></div><div class="state-box time"><b>Time left to lock</b><span class="timer" id="sLt"></span></div><div class="state-box wait"><b>Where do they go?</b><span>Into a contract made only for this trade. It can pay the buyer or return the coins to you.</span></div><button class="ab" type="button" id="sLock">Lock ${fmtBch(st.amount)} BCH</button>`;
+      countdown($('#sLt'), 3599);
+      $('#sLock').onclick = () => wallet(`lock ${fmtBch(st.amount)} BCH`, next);
+    },
+    () => {
+      scr.innerHTML = `${head('Waiting for payment', 'Trade')}<div class="state-box wait"><b>✓ Locked in the contract</b><span>Only the buyer or you can receive the coins now.</span></div><div class="state-box wait" id="sP"><b><span class="spin"></span>Waiting for the buyer to pay</b><span>They have up to ${st.win} minutes.</span></div>`;
+      later(() => { $('#sP').outerHTML = `<div class="state-box time"><b>The buyer marked it as paid</b><span>Check your account before you release.</span></div><button class="ab" type="button" id="sChk">Check the payment</button>`; $('#sChk').onclick = next; }, 2200);
+    },
+    () => {
+      const fiat = MARKET * (1 + st.margin / 100) * st.amount;
+      scr.innerHTML = `${head('Release the coins', 'Trade')}<div class="state-box time"><b>Only your bank app counts</b><span>Don't trust screenshots or messages. Once you release, the coins can't come back.</span></div>
+        <label class="tick"><input type="checkbox" id="c1">I opened my bank app, not a screenshot</label>
+        <label class="tick"><input type="checkbox" id="c2">I see exactly <b class="mono">&nbsp;${fmtUsd(fiat)}&nbsp;</b> from this buyer</label>
+        <button class="ab" type="button" id="sRel" disabled>Release ${fmtBch(st.amount)} BCH to the buyer</button>`;
+      const chk = () => { $('#sRel').disabled = !($('#c1').checked && $('#c2').checked); };
+      $('#c1').onchange = chk; $('#c2').onchange = chk;
+      $('#sRel').onclick = () => wallet('release the coins to the buyer', next);
+    },
+    () => done(`You sold ${fmtBch(st.amount)} BCH.`, 'buy', 'Now try buying'),
+  ];
+  const OFFERS = [{ n: 'amber-otter', m: 'Bank transfer', w: 30, p: 1.5 }, { n: 'quiet-heron', m: 'Payment app', w: 60, p: .5 }, { n: 'north-lantern', m: 'Cash in person', w: 15, p: 2.5 }];
+  const BUY = [
+    () => {
+      st = { pick: st.pick ?? 0, amount: st.amount ?? 0.5 };
+      scr.innerHTML = `${head('Buy BCH', 'Offers')}
+        <div style="display:grid;gap:8px" id="bOffers">${OFFERS.map((o, i) => `<button type="button" class="offer" aria-pressed="${st.pick === i}"><span class="row"><b>${o.n}</b><span class="mono">${fmtUsd(MARKET * (1 + o.p / 100))}</span></span><span class="row muted" style="font-size:12px"><span>${o.m}</span><span>${o.w} min to pay</span></span></button>`).join('')}</div>
+        <div class="field"><label for="bAmt">How much BCH do you want?</label><input id="bAmt" type="number" min="0.001" max="5" step="0.1" value="${st.amount}"></div>
+        <div class="card" style="padding:10px 12px"><div class="row"><span class="muted">You pay</span><b class="mono" id="bPay"></b></div></div>
+        <button class="ab" type="button" id="bGo">Take offer</button>`;
+      const upd = () => { $('#bPay').textContent = fmtUsd(MARKET * (1 + OFFERS[st.pick].p / 100) * st.amount); $('#bGo').disabled = !(st.amount > 0); };
+      $$('#bOffers .offer').forEach((b, i) => b.onclick = () => { st.pick = i; $$('#bOffers .offer').forEach((o, j) => o.setAttribute('aria-pressed', String(j === i))); upd(); });
+      $('#bAmt').oninput = (e) => { st.amount = +e.target.value; upd(); };
+      $('#bGo').onclick = next; upd();
+    },
+    () => {
+      scr.innerHTML = `${head(fmtBch(st.amount) + ' BCH', 'Trade')}<div class="state-box wait" id="bW"><b><span class="spin"></span>Waiting for the seller to accept</b><span>Don't pay anything yet.</span></div>`;
+      later(() => { $('#bW').innerHTML = '<b><span class="spin"></span>Waiting for the seller to lock the coins</b><span>Don\'t pay anything yet.</span>'; }, 1400);
+      later(() => { $('#bW').outerHTML = `<div class="state-box wait"><b>✓ The seller locked the coins</b><span>They are in this trade's contract.</span></div><button class="ab" type="button" id="bNx">Check the deposit</button>`; $('#bNx').onclick = next; }, 2800);
+    },
+    () => {
+      scr.innerHTML = `${head(fmtBch(st.amount) + ' BCH', 'Trade')}<div class="state-box wait"><b>Locked in the contract</b><span>The seller moved the coins into this trade's contract.</span></div><div class="state-box wait" id="bChk"><b><span class="spin"></span>Checking the deposit… <span class="mono" id="bS">5</span> s</b><span>Your browser is watching the network on its own.</span></div>`;
+      let s = 5; const t = setInterval(() => { s -= 1; const el = $('#bS'); if (el) el.textContent = s; if (s <= 0) { clearInterval(t); $('#bChk').outerHTML = `<div class="state-box chain"><b>✓ Safe at 0-conf</b><span>The coins are really there. You can pay now.</span></div><button class="ab" type="button" id="bNext">Continue to payment</button>`; $('#bNext').onclick = next; } }, reduce ? 120 : 1000); timers.push(t);
+    },
+    () => {
+      const o = OFFERS[st.pick];
+      scr.innerHTML = `${head('Pay the seller', 'Trade')}<div class="state-box time"><b>Time left to pay (set by the seller)</b><span class="timer" id="bT"></span></div><div class="card"><span class="muted" style="font-size:12px">Send exactly</span><span class="big-n" style="font-size:22px">${fmtUsd(MARKET * (1 + o.p / 100) * st.amount)}</span><span class="muted" style="font-size:12px">${o.m} · details shared privately</span></div><label class="tick"><input type="checkbox" id="bPaid">I sent the payment from my own account</label><button class="ab" type="button" id="bMark" disabled>Mark as paid</button>`;
+      countdown($('#bT'), o.w * 60 - 1);
+      $('#bPaid').onchange = (e) => { $('#bMark').disabled = !e.target.checked; };
+      $('#bMark').onclick = next;
+    },
+    () => {
+      scr.innerHTML = `${head(fmtBch(st.amount) + ' BCH', 'Trade')}<div class="state-box wait" id="bR"><b><span class="spin"></span>Waiting for the seller to release</b><span>The seller is checking their bank app.</span></div>`;
+      later(() => { $('#bR').outerHTML = `<div class="state-box wait"><b>✓ The seller released the coins</b><span>The contract is paying your wallet.</span></div><button class="ab" type="button" id="bFin">See the result</button>`; $('#bFin').onclick = next; }, 2400);
+    },
+    () => done(`${fmtBch(st.amount)} BCH is in your wallet.`, 'sell', 'Now try selling'),
+  ];
+  function done(msg, other, label) {
+    scr.innerHTML = `${head('Done', 'Trade')}<div class="done-glow"><span class="emb green"><svg class="ic"><use href="#i-check"/></svg></span><div class="app-title">Trade completed</div><p class="muted">${msg}</p></div><div class="state-box chain"><b>On-chain</b><span>In the real app, this links to the payout in a block explorer.</span></div><button class="ab ghost" type="button" id="xOther">${label} ${icon(other === 'buy' ? 'in' : 'out')}</button><button class="ab ghost" type="button" id="xAgain" style="margin-top:0">Start again</button>`;
+    $('#xOther').onclick = () => setWay(other, true);
+    $('#xAgain').onclick = () => setWay(way, true);
+  }
+  const setWay = (w, jump) => {
+    way = w; st = {}; step = -1; sw.dataset.way = w;
+    $$('button', sw).forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.way === w)));
+    buildSteps(); go(0);
+    if (jump) $('#how').scrollIntoView({ behavior: reduce ? 'auto' : 'smooth' });
+  };
+  $$('button', sw).forEach((b) => b.onclick = () => setWay(b.dataset.way));
+  setWay('sell');
+
+  /* ===== 6 FAQ: tabs + one answer open at a time ===== */
+  const tabs = $$('#faqTabs button'), qs = $$('#faqList details');
+  const showCat = (cat) => {
+    tabs.forEach((t) => t.setAttribute('aria-selected', String(t.dataset.cat === cat)));
+    let first = true;
+    qs.forEach((d) => { const on = d.dataset.cat === cat; d.hidden = !on; d.open = on && first; if (on) first = false; });
+  };
+  tabs.forEach((t) => t.onclick = () => showCat(t.dataset.cat));
+  qs.forEach((d) => d.addEventListener('toggle', () => { if (d.open) qs.forEach((o) => { if (o !== d) o.open = false; }); }));
+  showCat('start');
+
+  addEventListener('scroll', onScroll, { passive: true });
+  addEventListener('resize', onScroll);
+  onScroll();
+})();
+</script>
+</body>
+</html>

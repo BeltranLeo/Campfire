@@ -1,0 +1,94 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Campfire Icon System</title>
+<link href="https://fonts.googleapis.com/css2?family=Figtree:wght@400;600;700&family=Geist+Mono:wght@500&family=Rubik:wght@600;700&display=swap" rel="stylesheet">
+<style>
+:root { --marfil:#F8F7EC; --noche:#0B1733; --pizarra:#5B6785; --niebla:#8A96B3; --perla:#F4F3EE; --gris:#E8EAF0; }
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--marfil); color: var(--noche); font: 400 15px/22px "Figtree", system-ui, sans-serif; }
+.wrap { max-width: 1160px; margin: 0 auto; padding: 48px 24px 80px; }
+h1 { font: 700 40px/44px "Rubik", sans-serif; margin: 0 0 8px; }
+h2 { font: 600 22px/28px "Rubik", sans-serif; margin: 48px 0 12px; }
+p { margin: 0 0 10px; max-width: 72ch; color: var(--pizarra); }
+.ic { width: 24px; height: 24px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+.emb { --t1:#6BB2DE; --t2:#2662AF; --sh:rgba(20,44,105,.55); --fg:#fff; position: relative; width: 64px; height: 64px; border-radius: 20px; display: grid; place-items: center; color: var(--fg); background: linear-gradient(150deg, var(--t1), var(--t2)); box-shadow: inset 0 1px 0 rgba(255,255,255,.55), 0 10px 24px var(--sh); }
+.emb::before { content: ""; position: absolute; inset: 1px; border-radius: inherit; background: linear-gradient(160deg, rgba(255,255,255,.5), rgba(255,255,255,0) 46%); }
+.emb .ic { position: relative; width: 32px; height: 32px; stroke-width: 1.9; }
+.ember { --t1:#F9A86B; --t2:#C94F14; --sh:rgba(185,107,25,.45); }
+.amber { --t1:#F8D234; --t2:#F5A92E; --sh:rgba(185,107,25,.4); --fg:var(--noche); }
+.blue { --t1:#6BB2DE; --t2:#2662AF; }
+.green { --t1:#A6E8CE; --t2:#0AC18E; --sh:rgba(14,79,68,.5); --fg:var(--noche); }
+.violet { --t1:#B18AD8; --t2:#593B8F; --sh:rgba(48,32,94,.55); }
+.coral { --t1:#F07D8F; --t2:#B42A45; --sh:rgba(146,44,88,.45); }
+.neutral { --t1:#8A96B3; --t2:#33476F; --sh:rgba(11,23,51,.45); }
+.brand { background: linear-gradient(140deg, #F8D234, #E77937 30%, #AB3B86 55%, #357BC3 80%, #0AC18E); --sh: rgba(171,59,134,.4); }
+.grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(290px, 1fr)); gap: 12px; }
+.cell { background: #fff; border: 1px solid var(--gris); border-radius: 16px; padding: 16px; display: grid; grid-template-columns: 64px 1fr; gap: 14px; align-items: center; }
+.cell b { display: block; font-weight: 700; }
+.cell small { display: block; color: var(--pizarra); font-size: 13px; line-height: 18px; }
+.sizes { display: flex; gap: 10px; align-items: center; margin-top: 8px; color: var(--noche); }
+.sizes .s16 { width: 16px; height: 16px; } .sizes .s32 { width: 32px; height: 32px; }
+.sizes .dk { background: var(--noche); color: var(--perla); border-radius: 6px; padding: 4px; width: 32px; height: 32px; }
+code { font: 500 12px/16px "Geist Mono", monospace; background: var(--perla); padding: 1px 5px; border-radius: 4px; }
+.rules { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 12px; }
+.rule { background: #fff; border: 1px solid var(--gris); border-radius: 16px; padding: 16px 18px; }
+.rule h3 { font: 700 13px/18px "Figtree"; letter-spacing: .06em; text-transform: uppercase; margin: 0 0 6px; color: #8A5A00; }
+.rule p { margin: 0; }
+.fam { display: flex; gap: 14px; flex-wrap: wrap; align-items: center; background: var(--noche); padding: 24px; border-radius: 20px; }
+.fam span { color: var(--niebla); font: 500 12px/16px "Geist Mono"; display: grid; justify-items: center; gap: 8px; }
+.pending { display: inline-block; font: 700 11px/16px "Geist Mono"; background: #FDF5DC; color: #8A5A00; padding: 2px 8px; border-radius: 4px; }
+</style>
+</head>
+<body>
+{{SPRITE}}
+<div class="wrap">
+  <span class="pending">PROPUESTA · PARA APROBAR</span>
+  <h1 style="margin-top:12px">Sistema de íconos de Campfire</h1>
+  <p>Enfoque híbrido (opción C): <b>un solo dibujo</b> por concepto, en dos niveles. <b>Línea</b> para la app y los tamaños chicos; <b>emblema</b> (el mismo dibujo dentro de una ficha de vidrio teñida por su familia) para la landing y la comunicación.</p>
+
+  <h2>Reglas de construcción</h2>
+  <div class="rules">
+    <div class="rule"><h3>Grilla y trazo</h3><p>Grilla de 24 px con 2 px de margen. Trazo de 2 px (1,9 dentro del emblema), puntas y uniones redondeadas, sin rellenos. Radios de 2 a 4 px, como las esquinas apenas redondeadas de Rubik.</p></div>
+    <div class="rule"><h3>Geometría propia</h3><p>Las flechas en «C» del logo son la firma: aparecen en <code>trade</code> y <code>refund</code>. El punto central de <code>trade</code> es el punto de la «i» del logo, la llama.</p></div>
+    <div class="rule"><h3>Color</h3><p>El ícono de línea toma el color del texto o del estado (tono 700 sobre claro, 300 sobre noche). El emblema toma la familia de su significado; Ámbar y Verde llevan el ícono en Noche 900 por contraste.</p></div>
+    <div class="rule"><h3>Tamaños</h3><p>Línea: 16, 20 y 24 px. Emblema: 40, 56 y 76 px. Debajo de 40 px no se usa el emblema.</p></div>
+    <div class="rule"><h3>Vidrio</h3><p>El emblema aplica el vidrio de la interfaz (10.1): degradé que sigue la luz desde arriba a la izquierda, borde de luz de 1 px arriba y sombra cromática de su familia, nunca negra.</p></div>
+    <div class="rule"><h3>Degradé de marca</h3><p>Solo un emblema lo lleva: <code>trade</code>, como sello de marca. El resto usa una familia por significado.</p></div>
+  </div>
+
+  <h2>Los 17 íconos</h2>
+  <div class="grid" id="grid"></div>
+
+  <h2>Un emblema por familia</h2>
+  <div class="fam" id="fam"></div>
+  <p style="margin-top:12px">Coral solo para fallas y peligro real; Neutro para la reputación, lo cancelado o lo que no es una de las partes del contrato.</p>
+</div>
+<script>
+const I = [
+  ['trade', 'brand', 'Intercambio', 'Sello de marca: las flechas del logo y la llama.'],
+  ['seller', 'ember', 'Vendedor', 'Persona con flecha que sale.'],
+  ['buyer', 'ember', 'Comprador', 'Persona con flecha que entra.'],
+  ['contract', 'blue', 'Contrato', 'Bóveda: el contrato custodia.'],
+  ['lock', 'blue', 'Bloqueado', 'Monedas bloqueadas en el contrato.'],
+  ['network', 'green', 'Red BCH', 'Bloques enlazados: verificado en la cadena.'],
+  ['check', 'green', 'Verificado', 'Safe at 0-conf, Trade completed.'],
+  ['eye', 'green', 'Transparencia', 'Comprobable por cualquiera.'],
+  ['arbiter', 'violet', 'Árbitro', 'Balanza: alguien media.'],
+  ['dispute', 'violet', 'Disputa', 'Abrir una disputa.'],
+  ['clock', 'amber', 'Plazo', 'El tiempo corre.'],
+  ['wallet', 'ember', 'Billetera', 'Tu billetera, tu inicio de sesión.'],
+  ['key', 'ember', 'Firmar / ingresar', 'La billetera firma.'],
+  ['out', 'neutral', 'Sale', 'Vender: las monedas salen de tu billetera.'],
+  ['in', 'neutral', 'Entra', 'Comprar: las monedas entran a tu billetera.'],
+  ['refund', 'blue', 'Devolución', 'Las monedas vuelven al vendedor.'],
+  ['alert', 'coral', 'Alerta', 'Falla o peligro real. Siempre con texto.'],
+];
+const use = (id, cls = '') => `<svg class="ic ${cls}"><use href="#i-${id}"/></svg>`;
+document.getElementById('grid').innerHTML = I.map(([id, fam, name, desc]) => `<div class="cell"><span class="emb ${fam}">${use(id)}</span><div><b>${name}</b><small>${desc}</small><div class="sizes">${use(id, 's16')}${use(id)}${use(id, 's32')}${use(id, 'dk')}<code>${id}</code></div></div></div>`).join('');
+document.getElementById('fam').innerHTML = [['ember', 'seller', 'Brasa'], ['amber', 'clock', 'Ámbar'], ['blue', 'contract', 'Azul'], ['green', 'check', 'Verde'], ['violet', 'arbiter', 'Violeta'], ['coral', 'alert', 'Coral'], ['neutral', 'out', 'Neutro'], ['brand', 'trade', 'Marca']].map(([f, id, n]) => `<span><span class="emb ${f}">${use(id)}</span>${n}</span>`).join('');
+</script>
+</body>
+</html>
