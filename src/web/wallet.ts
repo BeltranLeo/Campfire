@@ -38,6 +38,9 @@ const DAPP_NAME = 'Campfire';
 const PAIRING_TIMEOUT_MS = 2 * 60 * 1000;
 // A closed wallet app never answers; without a limit the button would say "Waiting for wallet…" forever.
 const SIGN_TIMEOUT_MS = 2 * 60 * 1000;
+// After a reload that needs a new sign-in, how long to wait for a closed wallet app before offering to ask again or
+// cancel. Without it the header said "Connecting…" forever and nothing on the page could stop it.
+const WALLET_WAIT_MS = 20 * 1000;
 
 /** The wallet refused, failed or did not answer. Nothing was sent; the caller shows one sentence for all three. */
 export class WalletDeclined extends Error {
@@ -103,6 +106,7 @@ class WalletController {
   private manager: DappConnectionManager | null = null;
   private relay: DappRelayResult | null = null;
   private pairingTimer: ReturnType<typeof setTimeout> | undefined;
+  private waitTimer: ReturnType<typeof setTimeout> | undefined;
   /** The defi key registered with the service for the current manager, if any. */
   private registeredDefi: string | null = null;
   private registering = false;
@@ -169,9 +173,20 @@ class WalletController {
     this.set(INITIAL);
   }
 
+  /**
+   * While a restored pairing waits for the wallet to sign in, shows the sign-in dialog with its "Ask my wallet again"
+   * and "Cancel" choices. Called by the header button and by a timer, so a closed wallet app never leaves the page stuck.
+   */
+  offerSignInChoice() {
+    if (this.state.status === 'connecting' && !this.state.signing && !this.state.signInFailed) this.set({ signInFailed: true });
+  }
+
   /** Asks the wallet again for the sign-in signature after it refused or did not answer. */
   retrySignIn() {
     if (!this.manager || !this.state.signInFailed) return;
+    // A wallet that has not answered since the reload cannot sign yet: go back to waiting for it (the header says
+    // "Connecting…" again and the timer brings the choice back), and ask as soon as it answers.
+    if (!this.walletAnswered) this.set({ signInFailed: false });
     void this.register();
   }
 
@@ -273,6 +288,7 @@ class WalletController {
    */
   private close(notifyWallet = false) {
     clearTimeout(this.pairingTimer);
+    clearTimeout(this.waitTimer);
     const manager = this.manager;
     const relay = this.relay;
     // Detach at once so events from this pairing are ignored; the shutdown finishes in the background.
@@ -332,7 +348,14 @@ class WalletController {
         if (this.manager !== manager) return;
         // After a reload the relay reconnects in the background, and a sign request sent before the wallet
         // answers fails. Stay "connecting": the wallet_ready that follows runs this again and asks then.
-        if (!this.walletAnswered) return;
+        if (!this.walletAnswered) {
+          clearTimeout(this.waitTimer);
+          this.waitTimer = setTimeout(() => {
+            if (this.manager === manager) this.offerSignInChoice();
+          }, WALLET_WAIT_MS);
+          return;
+        }
+        clearTimeout(this.waitTimer);
         const proof = await this.proveOwnership(manager, xpubs);
         if (this.manager !== manager) return;
         result = await apiPost<RegisteredIdentity>('/api/identities', { ...keys, proof });
@@ -381,6 +404,7 @@ const actions = {
   connect: () => controller.connect(),
   disconnect: () => controller.disconnect(),
   retrySignIn: () => controller.retrySignIn(),
+  offerSignInChoice: () => controller.offerSignInChoice(),
   refreshActiveTrades: () => controller.refreshActiveTrades(),
   sign: (request: Record<string, unknown>, inputPaths: SigningPath[]) => controller.sign(request, inputPaths),
 };

@@ -41,7 +41,13 @@ export function WalletButton() {
     const ts = msgs.signIn;
     return (
       <>
-        <button type="button" className="cf-btn" aria-busy={!wallet.signInFailed}>
+        {/* While it only says "Connecting…", a click opens the sign-in dialog, which can ask the wallet again or cancel. */}
+        <button
+          type="button"
+          className="cf-btn"
+          aria-busy={!wallet.signInFailed}
+          onClick={wallet.status === 'connecting' ? wallet.offerSignInChoice : undefined}
+        >
           {wallet.status === 'pairing'
             ? ts.pairing
             : wallet.signing
