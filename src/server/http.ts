@@ -425,11 +425,17 @@ export function createApiHandler(deps: {
           if (action === 'funding') {
             const body = await readJson<{
               fundingTxHex?: string;
-              confirmations?: number;
               encryptedPaymentDetails?: string;
               paymentDetailsSignature?: string;
             }>(req);
-            const trade = await service.confirmFunding({ ...body, idOrTradeId: id });
+            // Fields are picked one by one, so a field the service must not take from a caller (such as a number of
+            // confirmations) cannot slip through.
+            const trade = await service.confirmFunding({
+              idOrTradeId: id,
+              fundingTxHex: body.fundingTxHex,
+              encryptedPaymentDetails: body.encryptedPaymentDetails,
+              paymentDetailsSignature: body.paymentDetailsSignature,
+            });
             return jsonResponse({ trade });
           }
           if (action === 'paid') {

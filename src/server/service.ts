@@ -4,6 +4,7 @@ import { randomBytes, timingSafeEqual } from 'node:crypto';
 import {
   binToHex,
   decodeTransactionUnsafe,
+  hashTransaction,
   hexToBin,
   hmacSha256,
   secp256k1,
@@ -1256,10 +1257,12 @@ export class CampfireService {
     await this.options.storage.saveTrade(trade);
   }
 
+  // Nothing here takes the caller's word for the chain: the deposit is looked up at the escrow address, and how many
+  // confirmations it has is not accepted from the request. A client that said "1 confirmation" turned off the buyer's
+  // double-spend watch.
   async confirmFunding(params: {
     idOrTradeId: string;
     fundingTxHex?: string;
-    confirmations?: number;
     // Buy offers: the seller sends the payment details, encrypted for the buyer and signed with the seller's
     // session key, along with the deposit.
     encryptedPaymentDetails?: string;
@@ -1275,6 +1278,21 @@ export class CampfireService {
     }
     if (!trade.terms || !trade.tradeId) {
       throw new Error('Trade terms are incomplete');
+    }
+    // The txid of the deposit sent with this request, so the escrow coin that counts is the one it created.
+    let sentTxid: string | undefined;
+    if (params.fundingTxHex) {
+      try {
+        sentTxid = hashTransaction(hexToBin(params.fundingTxHex));
+      } catch {
+        throw new Error('The funding transaction could not be read');
+      }
+    }
+    if (sentTxid && trade.status === 'Funded') {
+      // Once funded, the deposit is the one already recorded. The same one again is a retry after a lost answer;
+      // any other would only be broadcast for nothing or, worse, be taken for the deposit.
+      if (sentTxid !== trade.fundingTxid) throw new Error('The deposit for this trade is already recorded');
+      return this.sanitizeTrade(trade);
     }
 
     // The payment details of a buy offer travel with the deposit. Every check on them comes before anything
@@ -1324,10 +1342,16 @@ export class CampfireService {
         await new Promise((resolve) => setTimeout(resolve, delayMs));
       }
       const utxos = await contract.getUtxos();
-      matchingUtxo = utxos.find((u) => matchesEscrowFunding(u, trade.terms!));
+      // With a deposit in this request, only its own output counts: another coin at the address would not have paid
+      // the fees that were checked above.
+      matchingUtxo = utxos.find((u) => matchesEscrowFunding(u, trade.terms!) && (sentTxid === undefined || u.txid === sentTxid));
     }
     if (!matchingUtxo) {
-      throw new Error('No UTXO at the escrow address matches the required value and token terms');
+      throw new Error(
+        sentTxid
+          ? 'The funding transaction does not create an escrow output with the required value and token terms'
+          : 'No UTXO at the escrow address matches the required value and token terms',
+      );
     }
     if (!params.fundingTxHex && fees && fees.length > 0) {
       // A deposit made outside this request: the transaction that created the escrow output must pay the fees too.
@@ -1356,8 +1380,8 @@ export class CampfireService {
       trade.fundingVout = matchingUtxo.vout;
       trade.fundedAt = now;
       trade.paymentDeadline = now + paymentWindowSec;
+      trade.fundingConfirmations = 0;
     }
-    trade.fundingConfirmations = params.confirmations ?? trade.fundingConfirmations ?? 0;
     trade.updatedAt = now;
 
     await this.options.storage.saveTrade(trade);

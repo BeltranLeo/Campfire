@@ -57,6 +57,7 @@ import {
   tagWalletUtxos,
   tradeValueSats,
   validateTradeFees,
+  expectedEscrowFunding,
   type OfferDocument,
 } from '../src/protocol/index.js';
 import {
@@ -389,13 +390,41 @@ describe('CampfireService & HTTP API end-to-end lifecycle', () => {
       changeAddress: seller.receiveAddr(0),
     });
 
+    // A coin of the right value already sits at the escrow address, from elsewhere: it is not this deposit and did not
+    // pay the fees checked on it, so the service must record the output of the transaction it was sent.
+    ctx.provider.addUtxo(contract.address, randomUtxo({ satoshis: expectedEscrowFunding(acceptedTrade.terms!).satoshis }));
     const fundRes = await ctx.jsonReq<{ trade: StoredTrade }>(
       'POST',
       `/api/trades/${acceptedTrade.tradeId}/funding`,
+      // A caller cannot claim confirmations: that would switch off the buyer's double-spend watch.
       { fundingTxHex: fundTx.hex, confirmations: 1 },
     );
     expect(fundRes.status).toBe(200);
     expect(fundRes.data.trade.status).toBe('Funded');
+    expect(fundRes.data.trade.fundingTxid).toBe(hashTransaction(hexToBin(fundTx.hex)));
+    expect(fundRes.data.trade.fundingConfirmations).toBe(0);
+    // Sending the same deposit again (a retry after a lost answer) changes nothing; another one is refused before
+    // anything is broadcast.
+    const retry = await ctx.jsonReq<{ trade: StoredTrade }>('POST', `/api/trades/${acceptedTrade.tradeId}/funding`, { fundingTxHex: fundTx.hex });
+    expect(retry.status).toBe(200);
+    expect(retry.data.trade.fundingTxid).toBe(fundRes.data.trade.fundingTxid);
+    const other = buildFundEscrowTransaction({
+      contract,
+      terms: acceptedTrade.terms!,
+      utxos: [
+        {
+          ...ctx.provider.addUtxo(seller.receiveAddr(7), randomUtxo({ satoshis: 900_000n })),
+          pathName: 'receive' as const,
+          keyIndex: 7,
+          address: seller.receiveAddr(7),
+          signer: new SignatureTemplate(seller.receivePriv(7)),
+        },
+      ],
+      changeAddress: seller.receiveAddr(0),
+    });
+    const again = await ctx.jsonReq('POST', `/api/trades/${acceptedTrade.tradeId}/funding`, { fundingTxHex: other.hex });
+    expect(again.status).toBe(400);
+    expect(again.data.error).toMatch(/already recorded/);
     // Now payment details are revealed to the buyer!
     expect(fundRes.data.trade.encryptedPaymentDetails).toBe(encryptedDetails);
     const decryptedByBuyer = await decryptPaymentDetails(
