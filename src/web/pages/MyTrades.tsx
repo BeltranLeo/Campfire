@@ -5,7 +5,7 @@ import { ApiError, apiGet, apiPost, type Offer, type Trade } from '../api';
 import { assetInfo } from '../assets';
 import { Button } from '../components/Button';
 import { useAdvanced } from '../advanced';
-import { HashLink, ProvenanceTag } from '../components/Provenance';
+import { HashLink, ProvenanceTag, explorerTxUrl } from '../components/Provenance';
 import { EmptyState, Notice, Skeleton } from '../components/States';
 import { StatusPill } from '../components/StatusPill';
 import { Countdown } from '../components/Timeline';
@@ -330,11 +330,33 @@ function OffersTab({ identity, trades }: { identity: string; trades: Trade[] }) 
                   {advanced ? (
                     <>
                       {t.offer} <HashLink value={offer.offerTxid} kind="transaction" />
+                      {offer.closeTxid && (
+                        <>
+                          {' '}· {t.close} <HashLink value={offer.closeTxid} kind="transaction" />
+                        </>
+                      )}
                     </>
                   ) : (
                     <ProvenanceTag kind="chain" />
                   )}
                 </span>
+                {/* The transactions that opened and closed the offer, in the explorer. A close the service only
+                    detected on-chain has no recorded transaction, so it has no link. */}
+                {!advanced && (
+                  <span className="cf-small">
+                    <a href={explorerTxUrl(offer.offerTxid)} target="_blank" rel="noreferrer">
+                      {t.publicationTx}
+                    </a>
+                    {offer.closeTxid && (
+                      <>
+                        {' '}·{' '}
+                        <a href={explorerTxUrl(offer.closeTxid)} target="_blank" rel="noreferrer">
+                          {t.closingTx}
+                        </a>
+                      </>
+                    )}
+                  </span>
+                )}
                 {offer.sponsored && <span className="cf-small cf-subtle">{t.feePaid}</span>}
                 {offer.status === 'Expired' && (
                   <span className="cf-small cf-subtle">{t.expiredNote(buying, formatBch(1000n))}</span>

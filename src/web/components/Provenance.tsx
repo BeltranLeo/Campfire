@@ -53,6 +53,9 @@ export function SimBox({
 
 const EXPLORER = 'https://blockchair.com/bitcoin-cash';
 
+/** A transaction's page in the block explorer. */
+export const explorerTxUrl = (txid: string) => `${EXPLORER}/transaction/${txid}`;
+
 /**
  * A chain reference: a transaction id or an address, shortened in the middle and linked to the
  * block explorer in a new tab. `plain` shows a value that is not on-chain (an identity, a key) without a link.
