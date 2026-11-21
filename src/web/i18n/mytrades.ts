@@ -33,6 +33,9 @@ const en = {
   tradeCount: (n: number) => `${n} ${n === 1 ? 'trade' : 'trades'}`,
   expires: (expired: boolean, date: string) => `${expired ? 'expired' : 'expires'} ${date}`,
   offer: 'Offer',
+  close: 'Close',
+  publicationTx: 'Publication transaction',
+  closingTx: 'Closing transaction',
   feePaid: 'Publishing fee paid by Campfire',
   expiredNote: (buying: boolean, marker: string) =>
     `It no longer shows to ${buying ? 'sellers' : 'buyers'}. Close it to get the ${marker} marker back.`,
@@ -95,6 +98,9 @@ const es: typeof en = {
   tradeCount: (n) => `${n} ${n === 1 ? 'operación' : 'operaciones'}`,
   expires: (expired, date) => `${expired ? 'venció el' : 'vence el'} ${date}`,
   offer: 'Oferta',
+  close: 'Cierre',
+  publicationTx: 'Transacción de publicación',
+  closingTx: 'Transacción de cierre',
   feePaid: 'Campfire pagó la comisión de publicación',
   expiredNote: (buying, marker) =>
     `Ya no se les muestra a los ${buying ? 'vendedores' : 'compradores'}. Ciérrala para recuperar el marcador de ${marker}.`,
