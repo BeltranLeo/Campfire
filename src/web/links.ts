@@ -4,10 +4,12 @@ export const REPO_URL = 'https://github.com/BeltranLeo/Campfire';
 export const PROTOCOL_SPEC_URL = `${REPO_URL}/blob/master/docs/protocol.md`;
 
 // Hackathon banner: the code and demo at the start of the judged window and at the end.
-// TODO: fill in the Nov 14 links before submission.
+// The first commit (Nov 15) holds only the pre-hackathon notes; no demo existed yet,
+// so the Nov 14 demo link points to those notes.
+const FIRST_COMMIT_URL = `${REPO_URL}/tree/80fdb03d5f7f3be1c96d7f33796865b85838a10d`;
 export const BANNER_LINKS: { label: string; url: string | null }[] = [
-  { label: 'Code at Nov 14', url: null },
-  { label: 'Demo at Nov 14', url: null },
+  { label: 'Code at Nov 14', url: FIRST_COMMIT_URL },
+  { label: 'Demo at Nov 14', url: `${FIRST_COMMIT_URL}/preparation` },
   { label: 'Final code', url: REPO_URL },
   { label: 'Final demo', url: 'https://campfire-rosy.vercel.app/' },
 ];
