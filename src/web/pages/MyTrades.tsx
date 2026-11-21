@@ -233,7 +233,8 @@ function OffersTab({ identity, trades }: { identity: string; trades: Trade[] }) 
     try {
       const receiveXpub = wallet.xpubs.receive;
       const tx = await withKeptElectrum((provider) => buildCloseOffer({ offer, provider, receiveXpub }));
-      const closeTxHex = await wallet.sign(tx.request, tx.inputPaths);
+      // No transaction when the marker is already spent: the offer is closed on-chain and the service only checks it.
+      const closeTxHex = tx ? await wallet.sign(tx.request, tx.inputPaths) : undefined;
       const send = (hex?: string) =>
         apiPost(`/api/offers/${offer.offerTxid}/close`, { sellerIdentity: identity, ...(hex ? { closeTxHex: hex } : {}) });
       try {

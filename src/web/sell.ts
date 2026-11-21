@@ -273,12 +273,16 @@ const MARKER_SEARCH_LIMIT = 200;
  * fee), and the service sees the marker gone. The marker sits on a `receive` address of this wallet, found by
  * deriving the path, because the service does not keep the index. Anything that does not fit stops here with a
  * sentence, before the wallet is asked to sign.
+ *
+ * Null when the marker is already spent: by the protocol a spent marker is a closed offer, so there is nothing to
+ * sign and the caller only asks the service to record it. This happens when the wallet itself spent the marker as
+ * an ordinary coin, which the wallet app outside Campfire may do.
  */
 export async function buildCloseOffer(params: {
   offer: Pick<ListedOffer, 'offerTxid' | 'markerAddress' | 'markerVout' | 'markerReceiveIndex'>;
   provider: NetworkProvider;
   receiveXpub: string;
-}): Promise<WalletTransactionRequest> {
+}): Promise<WalletTransactionRequest | null> {
   const { offer } = params;
   if (!offer.markerAddress) throw new TradeActionError(text().create.noMarker);
   const wanted = binToHex(cashAddressToPkh(offer.markerAddress));
@@ -291,7 +295,7 @@ export async function buildCloseOffer(params: {
   if (index < 0) throw new TradeActionError(text().create.foreignMarker);
   const utxos = await params.provider.getUtxos(offer.markerAddress);
   const marker = utxos.find((u) => u.txid === offer.offerTxid && u.vout === (offer.markerVout ?? 1));
-  if (!marker) throw new TradeActionError(text().create.markerSpent);
+  if (!marker) return null;
   const markerUtxo = {
     ...marker,
     lockingBytecode: binToHex(pkhToLockingBytecode(wanted)),

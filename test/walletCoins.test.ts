@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { formatBchBalance } from '../src/web/format.js';
-import { tokenBalance, type CoinKeys, type ScanProgress, type WalletScan } from '../src/web/coins.js';
+import { tokenBalance, withoutOfferMarkers, type CoinKeys, type ScanProgress, type WalletScan } from '../src/web/coins.js';
 import { WalletCoinsStore, browserScanMemory, describeProgress } from '../src/web/walletCoins.js';
 import { unusedIndex } from '../src/web/indices.js';
 import type { WalletSpendableUtxo } from '../src/protocol/keys.js';
@@ -191,5 +191,27 @@ describe('a fresh address from the scan', () => {
     // A buyer's next payout follows Campfire's own last one when that is further.
     expect(unusedIndex(scan, 'receive', 500)).toBe(505);
     expect(unusedIndex({ ...scan, paths: scan.paths.slice(0, 1) }, 'change')).toBeNull();
+  });
+});
+
+describe('offer markers in the wallet', () => {
+  const coin = (txid: string, vout: number, satoshis: bigint, token = false) =>
+    ({ txid, vout, satoshis, ...(token ? { token: { category: 'cd'.repeat(32), amount: 1n } } : {}) }) as WalletSpendableUtxo;
+  const scan: WalletScan = {
+    coins: [coin('aa'.repeat(32), 1, 1_000n), coin('bb'.repeat(32), 1, 1_000n), coin('cc'.repeat(32), 0, 50_000n), coin('dd'.repeat(32), 1, 1_000n, true)],
+    paths: [],
+    noChangePath: false,
+  };
+
+  it('sets aside the markers of offers not closed yet, so no action spends one by accident', () => {
+    const offers = [
+      { offerTxid: 'AA'.repeat(32), status: 'Published' as const, markerVout: 1 },
+      { offerTxid: 'bb'.repeat(32), status: 'Closed' as const, markerVout: 1 },
+    ];
+    expect(withoutOfferMarkers(scan, offers).coins.map((c) => c.txid.slice(0, 2))).toEqual(['bb', 'cc', 'dd']);
+  });
+
+  it('sets aside every plain 1,000-sat coin at output 1 when the offers could not be read', () => {
+    expect(withoutOfferMarkers(scan, null).coins.map((c) => c.txid.slice(0, 2))).toEqual(['cc', 'dd']);
   });
 });
