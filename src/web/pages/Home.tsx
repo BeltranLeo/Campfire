@@ -12,6 +12,7 @@ import { StatusPill } from '../components/StatusPill';
 import { Countdown } from '../components/Timeline';
 import { HIDDEN_AMOUNT, useHideBalance } from '../hideBalance';
 import { BalanceEye } from '../components/BalanceEye';
+import { BalanceLoading } from '../components/BalanceLoading';
 import { freshReceiveAddress, spendableBch, tokenBalance } from '../coins';
 import { useConfig } from '../config';
 import { formatAmount, formatBchBalance, formatDate, formatFiat, formatFiatAmount, formatRange, fromBaseUnits, paymentMethodLabel } from '../format';
@@ -20,7 +21,7 @@ import { usePoll } from '../hooks/usePoll';
 import { isActive, nextStep, rowTitle, sortActive, sortHistory, historyNote } from '../mytrades';
 import { demoFirst, describeReputation, isSimulatedOffer, loadQuotes, loadReputations, priceOf } from '../offerData';
 import { roleOf } from '../trade';
-import { describeProgress, refreshWalletCoins, useWalletCoins } from '../walletCoins';
+import { refreshWalletCoins, useWalletCoins } from '../walletCoins';
 import { useWallet } from '../wallet';
 
 // Home (Home-* screens): what a connected person sees at "/". The balance read from the network, the four ways
@@ -84,7 +85,6 @@ function WalletCard({ receiveXpub, trades }: { receiveXpub: string | null; trade
   const quote = usePoll(() => apiGet<{ quote: PriceQuote }>(`/api/oracle/quote?pair=${BCH_USD}`).then((r) => r.quote), BCH_USD, 30_000);
 
   const scan = coins.data ?? null;
-  const scanProgress = describeProgress(coins.progress);
   const sats = scan ? spendableBch(scan.coins) : null;
   const pusd = scan && config ? tokenBalance(scan.coins, config.pusdCategory) : 0n;
   const usd = sats !== null && quote.data ? (Number(sats) / 1e8) * Number(quote.data.price) : null;
@@ -127,11 +127,8 @@ function WalletCard({ receiveXpub, trades }: { receiveXpub: string | null; trade
                 <span className="cf-small cf-muted">We could not read your balance from the network. Trading still works.</span>
               </>
             ) : (
-              <>
-                <Skeleton width={180} height={36} />
-                {/* A long-used wallet takes a while to read: say how far it has got instead of a bare bar. */}
-                {scanProgress ? <span className="cf-small cf-subtle">{scanProgress}</span> : <Skeleton width={120} height={14} />}
-              </>
+              // A long-used wallet takes a while to read: say what is happening and how far it has got.
+              <BalanceLoading progress={coins.progress} variant="card" />
             )}
           </div>
           {failed && (

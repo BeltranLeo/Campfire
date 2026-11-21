@@ -128,7 +128,7 @@ describe('a fresh read before spending', () => {
     });
     const store = new WalletCoinsStore(scan, 30_000);
     store.setKeys(keysA);
-    expect(describeProgress(store.getSnapshot().progress)).toBe('Reading your coins… 120 of 480');
+    expect(describeProgress(store.getSnapshot().progress)).toBe('Reading your balance… 25%');
     release(scanOf(1n));
     await vi.advanceTimersByTimeAsync(0);
     expect(store.getSnapshot().progress).toBeNull();

@@ -7,7 +7,7 @@ import { spendableBch, tokenBalance } from '../coins';
 import { useConfig } from '../config';
 import { formatBchBalance, fromBaseUnits } from '../format';
 import { HIDDEN_AMOUNT, useHideBalance } from '../hideBalance';
-import { describeProgress, refreshWalletCoins, useWalletCoins } from '../walletCoins';
+import { refreshWalletCoins, scanPercent, useWalletCoins } from '../walletCoins';
 import { useWallet } from '../wallet';
 import { CopyButton } from './CopyButton';
 import { Icon, type IconName } from './Icon';
@@ -16,6 +16,7 @@ import { Notice, Skeleton } from './States';
 import { NavBadge } from './Notifications';
 import { useMessages } from '../lang';
 import { BalanceEye } from './BalanceEye';
+import { BalanceLoading } from './BalanceLoading';
 
 // The WizardConnect button at the top right, in its four states (Shell-* screens):
 // disconnected, pairing, connecting and connected with its menu.
@@ -103,9 +104,14 @@ function useBalanceText() {
 
 function PillBalance() {
   const { bch, pusd, failed } = useBalanceText();
+  const percent = scanPercent(useWalletCoins().progress);
+  const percentText = useMessages().balanceLoading.percent;
   if (bch === null) {
-    // Without a balance the wallet still works: the dash says it could not be read, the bar says it is loading.
-    return failed ? <span className="cf-subtle cf-wallet__bal">— BCH</span> : <Skeleton width={84} height={12} style={{ display: 'inline-block' }} />;
+    // Without a balance the wallet still works: the dash says it could not be read, the percent (or the bar,
+    // until the scan knows how many addresses there are) says it is loading.
+    if (failed) return <span className="cf-subtle cf-wallet__bal">— BCH</span>;
+    if (percent !== null) return <span className="cf-subtle cf-wallet__bal cf-num">{percentText(percent)}</span>;
+    return <Skeleton width={84} height={12} style={{ display: 'inline-block' }} />;
   }
   return (
     <span className="cf-wallet__bal">
@@ -117,7 +123,7 @@ function PillBalance() {
 // The balance leads the menu: it is what people open it for. The explanation of where it comes from stays on Home.
 function MenuBalance() {
   const { bch, pusd, failed } = useBalanceText();
-  const progress = describeProgress(useWalletCoins().progress);
+  const { progress } = useWalletCoins();
   return (
     <div className="cf-well s-menu__balance">
       <span className="s-balancehead">
@@ -136,10 +142,7 @@ function MenuBalance() {
             </span>
           </>
         ) : (
-          <>
-            <Skeleton width={160} height={28} />
-            {progress && <span className="cf-small cf-subtle">{progress}</span>}
-          </>
+          <BalanceLoading progress={progress} variant="menu" />
         )
       ) : (
         <>

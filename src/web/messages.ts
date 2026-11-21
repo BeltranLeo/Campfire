@@ -68,6 +68,17 @@ const en = {
     sell: 'Sell',
   },
   offers: offers.en,
+  balanceLoading: {
+    findingTitle: 'Finding your wallet’s addresses…',
+    findingCount: (n: number) => (n > 0 ? `${n.toLocaleString('en-US')} checked so far` : ''),
+    readingTitle: 'Reading your balance from the network…',
+    readingCount: (done: number, total: number) => `${done.toLocaleString('en-US')} of ${total.toLocaleString('en-US')} addresses`,
+    why: 'Your wallet keeps its coins on many addresses. Campfire asks the network about each one and adds them up.',
+    soFar: 'found so far',
+    left: (seconds: number) => (seconds < 60 ? `about ${Math.max(5, Math.round(seconds / 5) * 5)} s left` : `about ${Math.round(seconds / 60)} min left`),
+    almostDone: 'almost done',
+    percent: (n: number) => `${n}%`,
+  },
   landing: {
     title: 'Buy or sell Bitcoin Cash directly with another person',
     lead: 'No exchange holds your money. A contract on the Bitcoin Cash network locks the seller’s coins until the payment is done.',
@@ -200,6 +211,18 @@ const es: Messages = {
     sell: 'Vender',
   },
   offers: offers.es,
+  balanceLoading: {
+    findingTitle: 'Buscando las direcciones de tu billetera…',
+    findingCount: (n: number) => (n > 0 ? `${n.toLocaleString('es')} revisadas hasta ahora` : ''),
+    readingTitle: 'Leyendo tu saldo desde la red…',
+    readingCount: (done: number, total: number) => `${done.toLocaleString('es')} de ${total.toLocaleString('es')} direcciones`,
+    why: 'Tu billetera guarda sus monedas en muchas direcciones. Campfire le pregunta a la red por cada una y las suma.',
+    soFar: 'encontrados hasta ahora',
+    left: (seconds: number) => (seconds < 60 ? `faltan unos ${Math.max(5, Math.round(seconds / 5) * 5)} s` : `faltan unos ${Math.round(seconds / 60)} min`),
+    almostDone: 'casi listo',
+    // The RAE puts a space before %, a non-breaking one so it never ends up alone on a line.
+    percent: (n: number) => `${n}\u00a0%`,
+  },
   landing: {
     title: 'Compra o vende Bitcoin Cash directamente con otra persona',
     lead: 'Ninguna plataforma guarda tu dinero. Un contrato en la red de Bitcoin Cash bloquea las monedas del vendedor hasta que se completa el pago.',

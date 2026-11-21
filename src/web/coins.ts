@@ -83,6 +83,8 @@ export interface ScanProgress {
   phase: 'addresses' | 'coins';
   done: number;
   total: number;
+  /** Plain BCH (satoshis, no token coins) on the addresses read so far: a floor that grows toward the balance. */
+  found?: bigint;
 }
 
 export interface ScanOptions {
@@ -192,13 +194,24 @@ async function scanPath(
   const pending: number[] = [];
   for (let i = 0; i <= last; i++) if (!coinsAt.has(i)) pending.push(i);
   let read = last + 1 - pending.length;
-  report({ phase: 'coins', done: read, total: last + 1 });
+  let found = 0n;
+  const add = (utxos: Utxo[] | undefined) => {
+    for (const utxo of utxos ?? []) if (!utxo.token) found += utxo.satoshis;
+  };
+  for (const utxos of coinsAt.values()) add(utxos);
+  report({ phase: 'coins', done: read, total: last + 1, found });
   for (let k = 0; k < pending.length; k += BATCH) {
     signal?.throwIfAborted();
     const slice = pending.slice(k, k + BATCH);
-    await Promise.all(slice.map(async (i) => void coinsAt.set(i, await provider.getUtxos(at(i).address))));
+    await Promise.all(
+      slice.map(async (i) => {
+        const utxos = await provider.getUtxos(at(i).address);
+        coinsAt.set(i, utxos);
+        add(utxos);
+      }),
+    );
     read += slice.length;
-    report({ phase: 'coins', done: read, total: last + 1 });
+    report({ phase: 'coins', done: read, total: last + 1, found });
   }
   const coins: WalletSpendableUtxo[] = [];
   for (let i = 0; i <= last; i++) for (const utxo of coinsAt.get(i) ?? []) coins.push({ ...utxo, ...at(i) } as WalletSpendableUtxo);
@@ -221,7 +234,12 @@ export async function scanWalletCoins(provider: NetworkProvider, keys: CoinKeys,
     progress.set(name, p);
     const all = [...progress.values()];
     const phase = all.some((x) => x.phase === 'addresses') || all.length < branches.length ? 'addresses' : 'coins';
-    opts.onProgress?.({ phase, done: all.reduce((n, x) => n + x.done, 0), total: phase === 'coins' ? all.reduce((n, x) => n + x.total, 0) : 0 });
+    opts.onProgress?.({
+      phase,
+      done: all.reduce((n, x) => n + x.done, 0),
+      total: phase === 'coins' ? all.reduce((n, x) => n + x.total, 0) : 0,
+      found: all.reduce((n, x) => n + (x.found ?? 0n), 0n),
+    });
   };
   const results = await Promise.all(
     branches.map(async ([name, xpub]) => ({ name, ...(await scanPath(provider, name, xpub, { ...opts, report: report(name) })) })),

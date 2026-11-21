@@ -228,12 +228,23 @@ describe('the wallet coins and the publication transaction', () => {
     used.add(address(keys.receive, 1005));
     used.add(address(keys.receive, 1012));
     const progress: string[] = [];
+    const found: bigint[] = [];
     const second = withHistory(base, used);
-    const scan = await scanWalletCoins(second.provider, { receive: keys.receive }, { memory, onProgress: (p) => progress.push(`${p.phase}:${p.done}/${p.total}`) });
+    const scan = await scanWalletCoins(second.provider, { receive: keys.receive }, {
+      memory,
+      onProgress: (p) => {
+        progress.push(`${p.phase}:${p.done}/${p.total}`);
+        if (p.phase === 'coins') found.push(p.found ?? -1n);
+      },
+    });
     expect(scan.paths[0].lastUsed).toBe(1012);
     expect(second.asked.length).toBe(32);
     expect(spendableBch(scan.coins)).toBe(5_000n);
     expect(progress.at(-1)).toBe('coins:1013/1013');
+    // The running total starts at nothing, never shrinks, and ends at the balance.
+    expect(found[0]).toBe(0n);
+    expect(found.every((f, i) => i === 0 || f >= found[i - 1])).toBe(true);
+    expect(found.at(-1)).toBe(5_000n);
   }, 30_000);
 
   it('reads an unused path in one window and stops', async () => {

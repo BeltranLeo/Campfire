@@ -201,9 +201,18 @@ export const freshWalletScan = (keys: CoinKeys) => walletCoins.fresh(keys);
 /** The scan the page has, for the last used addresses (see WalletCoinsStore.latest). */
 export const latestWalletScan = (keys: CoinKeys) => walletCoins.latest(keys);
 
-/** "Finding your addresses… 40" or "Reading your coins… 120 of 480", for a busy button or the balance. */
+/**
+ * "Finding your addresses… 40" or "Reading your balance… 25%", for a busy button. A percent, not "120 of 480":
+ * a count of addresses means little to someone who never saw their wallet's addresses.
+ */
 export function describeProgress(progress: ScanProgress | null): string | null {
   if (!progress) return null;
   if (progress.phase === 'addresses') return progress.done > 0 ? `Finding your addresses… ${progress.done}` : 'Finding your addresses…';
-  return `Reading your coins… ${progress.done} of ${progress.total}`;
+  return `Reading your balance… ${scanPercent(progress) ?? 0}%`;
+}
+
+/** Percent of the addresses read, or null while the scan is still finding how many there are. */
+export function scanPercent(progress: ScanProgress | null): number | null {
+  if (!progress || progress.phase !== 'coins' || progress.total <= 0) return null;
+  return Math.min(100, Math.floor((progress.done / progress.total) * 100));
 }

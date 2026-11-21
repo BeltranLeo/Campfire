@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { describeProgress, useWalletCoins } from '../walletCoins';
 
-/** The step that reads the wallet's coins: its label follows the scan ("Reading your coins… 120 of 480"). */
+/** The step that reads the wallet's coins: its label follows the scan ("Reading your balance… 25%"). */
 export const READING_WALLET = 'Reading your wallet…';
 
 /**

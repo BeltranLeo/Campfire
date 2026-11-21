@@ -18,7 +18,7 @@ export interface ButtonProps {
   note?: ReactNode;
   /** Working on it. A signing button reads "Preparing…" until the wallet has the request, then "Waiting for wallet…". */
   busy?: boolean;
-  /** What a busy button is doing ("Reading your coins… 120 of 480"), shown until the wallet has a request. */
+  /** What a busy button is doing ("Reading your balance… 25%"), shown until the wallet has a request. */
   busyLabel?: string | null;
   disabled?: boolean;
   onClick?: () => void;
