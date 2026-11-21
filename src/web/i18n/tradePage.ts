@@ -95,7 +95,7 @@ const en = {
     'Some of the locked coins come from a contract, not from a plain address (or from an unconfirmed transaction that spent one). Double-spend proofs do not cover those coins, so the network would not warn you of a double spend. You can still go on at 0-conf; after 1 confirmation the risk is gone.',
   // The escrow check
   checkingDeposit: 'Checking the deposit on-chain…',
-  checkFailed: 'This browser could not check the deposit on-chain right now. It will retry.',
+  checkFailed: 'This browser could not check the deposit on-chain right now. It will retry. Do not pay until it is checked.',
   mismatch: 'The escrow does not match the trade terms',
   mismatchBody: 'Do not pay. This browser rebuilt the contract from the terms and got a different result. Open a dispute or contact the arbiter.',
   depositMissing: 'The deposit is not visible on-chain yet',
@@ -273,7 +273,7 @@ const es: typeof en = {
   uncoveredBody:
     'Parte de las monedas bloqueadas sale de un contrato y no de una dirección común (o de una transacción sin confirmar que gastó una). Las pruebas de doble gasto no cubren esas monedas, así que la red no te avisaría de un doble gasto. Puedes seguir con 0-conf; tras 1 confirmación el riesgo desaparece.',
   checkingDeposit: 'Revisando el depósito en la cadena…',
-  checkFailed: 'Este navegador no pudo revisar el depósito en la cadena en este momento. Lo volverá a intentar.',
+  checkFailed: 'Este navegador no pudo revisar el depósito en la cadena en este momento. Lo volverá a intentar. No pagues hasta que lo revise.',
   mismatch: 'La garantía no coincide con las condiciones de la operación',
   mismatchBody: 'No pagues. Este navegador reconstruyó el contrato a partir de las condiciones y obtuvo otro resultado. Abre una disputa o contacta al árbitro.',
   depositMissing: 'El depósito todavía no se ve en la cadena',

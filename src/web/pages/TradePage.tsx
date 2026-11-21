@@ -246,6 +246,17 @@ function BuyerAction(props: {
   const [disputing, setDisputing] = useState(false);
   // Marking the payment needs no signature and cannot be undone, so the button asks once more before it sends.
   const [confirmingPaid, setConfirmingPaid] = useState(false);
+  // The last check before fiat leaves the buyer's account: this browser rebuilt the escrow from the terms and found the
+  // deposit in it. Until then (still checking, a lookup that failed, terms that do not match, no deposit) the buyer
+  // cannot mark the payment; the notice above says why.
+  const escrowChecked =
+    props.check !== null &&
+    props.check !== 'error' &&
+    props.check.termsMatch &&
+    props.check.addressMatch &&
+    props.check.payoutIsMine !== false &&
+    props.check.funding === 'match';
+  const cannotPay = props.ds.phase === 'proof' || !escrowChecked;
 
   const markPaid = () =>
     run('paid', t.notMarked, () =>
@@ -398,7 +409,7 @@ function BuyerAction(props: {
                 <Button
                   variant="primary"
                   busy={busy === 'paid'}
-                  disabled={props.ds.phase === 'proof' || (busy !== null && busy !== 'paid')}
+                  disabled={cannotPay || (busy !== null && busy !== 'paid')}
                   onClick={() => markPaid().finally(() => setConfirmingPaid(false))}
                 >
                   {t.confirmPaid}
@@ -413,7 +424,7 @@ function BuyerAction(props: {
               <Button
                 variant="primary"
                 // Also held while the deposit is still being watched: a double spend shows within those seconds.
-                disabled={props.ds.phase === 'proof' || props.ds.phase === 'watching' || busy !== null}
+                disabled={cannotPay || props.ds.phase === 'watching' || busy !== null}
                 onClick={() => setConfirmingPaid(true)}
                 note={t.noSignatureNeeded}
               >
