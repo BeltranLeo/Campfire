@@ -71,8 +71,9 @@ export function Shell() {
   );
 }
 
-// The hackathon banner is on every page. On a phone the four links fold behind one line, so the banner takes one
-// row instead of four; it never disappears.
+// The hackathon banner is on every page, in English in both languages: it is for the judges. On a phone the four
+// links fold behind one line, so the banner takes one row instead of four; it never disappears. The CashTokens
+// address for the vote has a row of its own, in full and with a copy button, on every screen size.
 function Banner() {
   const links = (
     <span className="cf-banner__links">
@@ -88,14 +89,23 @@ function Banner() {
     </span>
   );
   return (
-    <div className="cf-banner">
-      <strong>BCH BLAZE 2026 · Mainnet track</strong>
-      <span className="s-desktoponly">{links}</span>
-      <details className="s-bannerfold">
-        <summary>Code &amp; demo</summary>
-        {links}
-      </details>
-    </div>
+    <>
+      <div className="cf-banner">
+        <strong>BCH BLAZE 2026 · Mainnet track</strong>
+        <span className="s-desktoponly">{links}</span>
+        <details className="s-bannerfold">
+          <summary>Code &amp; demo</summary>
+          {links}
+        </details>
+      </div>
+      {VOTING_ADDRESS && (
+        <div className="cf-banner s-bannervote">
+          <span>Vote with CashTokens:</span>
+          <span className="cf-mono s-bannervote__address">{VOTING_ADDRESS}</span>
+          <CopyButton value={VOTING_ADDRESS} label="Copy" copiedLabel="Copied" />
+        </div>
+      )}
+    </>
   );
 }
 
