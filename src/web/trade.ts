@@ -9,6 +9,7 @@ import { verifyDerivedPayoutPkh, verifyDerivedPubkey } from '../protocol/keys.js
 import { computeFiatAmount, computeTradeId, verifyPriceQuote, type TradeTerms } from '../protocol/trades.js';
 import type { OfferDocument, Trade, TradeState } from './api';
 import { isFinalState } from './api';
+import { text } from './messages';
 
 export type Role = 'buyer' | 'seller' | 'visitor';
 
@@ -31,7 +32,7 @@ export const isFinal = (trade: Pick<Trade, 'status'>) => isFinalState(trade.stat
 /** "Buy 15,000 sats for 0.07 USD", "Bought …" once the buyer has the coins; "Sell …" / "Sold …" for the seller; no verb for visitors. */
 /** What the seller locks, in the words of every screen: "the BCH", or "the coins" for a token. */
 export function lockedCoins(asset: string): string {
-  return asset === 'BCH' ? 'the BCH' : 'the coins';
+  return text().trade.lockedCoins(asset === 'BCH');
 }
 
 /** The four named steps above a trade's action card, and which one the person is on. */
@@ -40,8 +41,6 @@ export interface Progress {
   current: number;
 }
 
-const BUYER_STEPS = ['Confirm', 'Lock', 'Pay', 'Receive'] as const;
-const SELLER_STEPS = ['Accept', 'Lock', 'Paid', 'Release'] as const;
 
 /**
  * Where an open trade stands, for the buyer or the seller. For the buyer of a sell offer, Requested and Accepted are
@@ -49,7 +48,7 @@ const SELLER_STEPS = ['Accept', 'Lock', 'Paid', 'Release'] as const;
  * or an ending has no step (null): the card says what happened instead.
  */
 export function actionProgress(status: TradeState, role: 'buyer' | 'seller', side: 'sell' | 'buy' = 'sell'): Progress | null {
-  const labels = role === 'buyer' ? BUYER_STEPS : SELLER_STEPS;
+  const labels = role === 'buyer' ? text().trade.buyerSteps : text().trade.sellerSteps;
   switch (status) {
     case 'Requested':
       return { labels, current: role === 'buyer' && side === 'sell' ? 1 : 0 };
@@ -75,11 +74,7 @@ export function releaseReady(ticked: ReadonlySet<ReleaseCheck>): boolean {
 }
 
 export function tradeTitle(status: TradeState, role: Role, amount: string, fiat: string): string {
-  const what = `${amount} for ${fiat}`;
-  if (role === 'visitor') return what;
-  const done = status === 'Released' || status === 'ResolvedBuyer';
-  if (role === 'seller') return done ? `Sold ${what}` : `Sell ${what}`;
-  return done ? `Bought ${what}` : `Buy ${what}`;
+  return text().trade.title(role, status === 'Released' || status === 'ResolvedBuyer', amount, fiat);
 }
 
 export interface Step {
@@ -137,8 +132,8 @@ export function timeline(trade: Trade, role: Role, amount: string): Step[] {
 function storySteps(trade: Trade, role: Role, amount: string): Step[] {
   const you = role === 'buyer';
   const mine = role === 'seller';
-  const buyer = you ? 'You' : 'Buyer';
-  const toBuyer = you ? 'to your wallet' : 'to the buyer';
+  const v = { you, mine };
+  const t = text().trade;
   const s = trade.status;
   const funded = trade.fundingTxid !== undefined;
   const paid = trade.paidAt !== undefined;
@@ -146,15 +141,7 @@ function storySteps(trade: Trade, role: Role, amount: string): Step[] {
   // On a buy offer the seller takes the offer and the buyer accepts; the deposit is still the seller's (section 2.2).
   const buyOffer = trade.side === 'buy';
   const coins = lockedCoins(trade.asset);
-  const firstTitle = buyOffer
-    ? mine
-      ? 'You answered the buyer’s offer'
-      : you
-        ? 'A seller answered your offer'
-        : 'A seller answered the buy offer'
-    : mine
-      ? 'Buyer took your offer'
-      : `${buyer} took the offer`;
+  const firstTitle = buyOffer ? t.answeredBuyOffer(v) : t.tookOffer(v);
   const steps: Step[] = [{ state: 'done', title: firstTitle, at: trade.createdAt, offchain: true }];
   // Accepting opens the 30-minute funding window, so its start is when the trade was accepted.
   const acceptedAt = trade.fundingDeadline !== undefined ? trade.fundingDeadline - 1800 : undefined;
@@ -163,7 +150,7 @@ function storySteps(trade: Trade, role: Role, amount: string): Step[] {
   if (funded) {
     steps.push({
       state: 'done',
-      title: mine ? `You locked ${coins}` : `Seller locked ${coins}`,
+      title: t.locked(v, coins),
       at: trade.fundedAt,
       txid: trade.fundingTxid,
       confirmations: trade.fundingConfirmations,
@@ -171,71 +158,64 @@ function storySteps(trade: Trade, role: Role, amount: string): Step[] {
   } else if (buyOffer && s === 'Requested') {
     steps.push({
       state: 'current',
-      title: you ? `You accept, then the seller locks ${coins}` : mine ? `Buyer accepts, then you lock ${coins}` : `Buyer accepts, then the seller locks ${coins}`,
-      note: 'Up to 10 min to accept, then 30 min to lock',
+      title: t.acceptThenLock(v, coins),
+      note: t.acceptWindow,
     });
   } else if (buyOffer && s === 'Accepted') {
     if (mine) {
-      steps.push({ state: 'current', title: `Buyer accepted. You lock ${coins}`, at: acceptedAt, offchain: true, note: 'Locking window: 30 min' });
+      steps.push({ state: 'current', title: t.buyerAcceptedYouLock(coins), at: acceptedAt, offchain: true, note: t.lockingWindow });
     } else {
-      steps.push({ state: 'done', title: you ? 'You accepted' : 'Buyer accepted', at: acceptedAt, offchain: true });
-      steps.push({ state: 'current', title: `Seller locks ${coins}`, note: 'Up to 30 min to lock' });
+      steps.push({ state: 'done', title: t.accepted(v), at: acceptedAt, offchain: true });
+      steps.push({ state: 'current', title: t.sellerLocks(coins), note: t.lockWindow });
     }
   } else if (buyOffer) {
     // Dropped before any deposit: either the buyer never accepted, or the seller did not lock the coins in time.
-    const title = acceptedAt === undefined
-      ? you
-        ? 'You did not accept the request'
-        : 'The buyer did not accept'
-      : mine
-        ? `You did not lock ${coins} in time`
-        : `The seller did not lock ${coins} in time`;
+    const title = acceptedAt === undefined ? t.notAccepted(v) : t.notLocked(v, coins);
     steps.push({ state: 'failed', title, at: trade.updatedAt });
     return steps;
   } else if (mine && s === 'Accepted') {
-    steps.push({ state: 'done', title: 'You accepted', offchain: true, note: 'Payment details encrypted for the buyer' });
-    steps.push({ state: 'current', title: `You lock ${coins}`, note: 'Locking window: 30 min' });
+    steps.push({ state: 'done', title: t.accepted(v), offchain: true, note: t.detailsEncrypted });
+    steps.push({ state: 'current', title: t.youLock(coins), note: t.lockingWindow });
   } else if (s === 'Requested' || s === 'Accepted') {
     steps.push({
       state: 'current',
-      title: mine ? `You accept and lock ${coins}` : `Seller accepts and locks ${coins}`,
-      note: 'Up to 10 min to accept, then 30 min to lock',
+      title: t.acceptAndLock(v, coins),
+      note: t.acceptWindow,
     });
   } else {
     // Dropped before any deposit: nothing reached the chain.
-    steps.push({ state: 'failed', title: mine ? 'The trade was dropped' : `The seller did not accept and lock ${coins} in time`, at: trade.updatedAt });
+    steps.push({ state: 'failed', title: mine ? t.dropped : t.notAcceptedAndLocked(coins), at: trade.updatedAt });
     return steps;
   }
 
   // Step 3: the buyer pays off-chain and marks it.
-  const pays = `${buyer} send${you ? '' : 's'} the payment and mark${you ? '' : 's'} it as paid`;
+  const pays = t.pays(v);
   if (paid) {
-    steps.push({ state: 'done', title: `${buyer} marked the payment as sent`, at: trade.paidAt, offchain: true, simulated: trade.isDemo });
+    steps.push({ state: 'done', title: t.markedPaid(v), at: trade.paidAt, offchain: true, simulated: trade.isDemo });
   } else if (s === 'Funded') {
     steps.push({ state: 'current', title: pays, note: windowNote(trade) });
   } else if (s === 'Requested' || s === 'Accepted') {
     steps.push({ state: 'todo', title: pays });
   } else if (s === 'ResolvedSeller' && !trade.disputedAt) {
-    steps.push({ state: 'failed', title: 'Payment window ended without a payment', at: trade.verdictIssuedAt });
+    steps.push({ state: 'failed', title: t.windowEnded, at: trade.verdictIssuedAt });
   } else if (trade.disputedAt !== undefined && s !== 'Dropped') {
     // A dispute opened before the payment was marked as sent: whoever reads the story must see that.
-    steps.push({ state: 'failed', title: `${buyer} had not marked the payment as sent`, note: 'The dispute was opened first' });
+    steps.push({ state: 'failed', title: t.notMarked(v), note: t.disputeFirst });
   }
 
   // A dispute takes the place of the release while it is open, and stays in the story once it is decided.
   if (trade.disputedAt !== undefined && s !== 'Dropped') {
-    const opener = trade.disputedBy;
-    const by = opener === 'seller' ? (mine ? 'you' : 'the seller') : opener === 'buyer' ? (you ? 'you' : 'the buyer') : undefined;
+    const opener = trade.disputedBy === 'seller' || trade.disputedBy === 'buyer' ? trade.disputedBy : undefined;
     steps.push({
       state: s === 'Disputed' ? 'current' : 'done',
-      title: by ? `Dispute opened by ${by}` : 'Dispute opened',
+      title: t.disputeOpened(v, opener),
       at: trade.disputedAt,
-      note: s === 'Disputed' ? 'Waiting for the arbiter' : undefined,
+      note: s === 'Disputed' ? t.waitingArbiter : undefined,
     });
   }
 
   // Step 4, or the ending that replaced it.
-  const release = mine ? 'You confirm the payment and release' : `Seller releases ${amount} ${toBuyer}`;
+  const release = t.release(v, amount);
   switch (s) {
     case 'Requested':
     case 'Accepted':
@@ -246,25 +226,25 @@ function storySteps(trade: Trade, role: Role, amount: string): Step[] {
       steps.push({ state: 'current', title: release });
       break;
     case 'Disputed':
-      steps.push({ state: 'todo', title: 'Arbiter decides: funds go to buyer or seller' });
+      steps.push({ state: 'todo', title: t.arbiterDecides });
       break;
     case 'Released':
-      steps.push({ state: 'done', title: `${mine ? 'You released' : 'Seller released'} ${amount} ${toBuyer}`, at: trade.completedAt, txid: trade.settlementTxid });
+      steps.push({ state: 'done', title: t.released(v, amount), at: trade.completedAt, txid: trade.settlementTxid });
       break;
     case 'ResolvedBuyer':
-      steps.push({ state: 'done', title: `Arbiter released ${amount} ${toBuyer}`, at: trade.completedAt ?? trade.verdictIssuedAt, txid: trade.settlementTxid });
+      steps.push({ state: 'done', title: t.arbiterReleased(v, amount), at: trade.completedAt ?? trade.verdictIssuedAt, txid: trade.settlementTxid });
       break;
     case 'ResolvedSeller':
-      steps.push({ state: 'done', title: `Arbiter returned ${amount} to ${mine ? 'you' : 'the seller'}`, at: trade.completedAt ?? trade.verdictIssuedAt, txid: trade.settlementTxid });
+      steps.push({ state: 'done', title: t.arbiterReturned(v, amount), at: trade.completedAt ?? trade.verdictIssuedAt, txid: trade.settlementTxid });
       break;
     case 'Cancelled':
-      steps.push({ state: 'done', title: `${buyer} cancelled: ${amount} went back to ${mine ? 'you' : 'the seller'}`, at: trade.completedAt, txid: trade.settlementTxid });
+      steps.push({ state: 'done', title: t.cancelled(v, amount), at: trade.completedAt, txid: trade.settlementTxid });
       break;
     case 'Refunded':
-      steps.push({ state: 'done', title: `${mine ? 'You' : 'The seller'} recovered ${amount} after the refund time`, at: trade.completedAt, txid: trade.settlementTxid });
+      steps.push({ state: 'done', title: t.refunded(v, amount), at: trade.completedAt, txid: trade.settlementTxid });
       break;
     case 'Dropped':
-      steps.push({ state: 'failed', title: 'The trade was dropped', at: trade.updatedAt });
+      steps.push({ state: 'failed', title: t.dropped, at: trade.updatedAt });
       break;
   }
   return steps;
@@ -314,19 +294,19 @@ export async function buildBuyerCancel(
   buyerDefiXpub: string,
 ): Promise<WalletContractSpendRequest> {
   if (!trade.termsJson || !trade.tradeId || !trade.fundingTxid || trade.buyerDefiIndex === undefined) {
-    throw new TradeActionError('There is no deposit to cancel yet.');
+    throw new TradeActionError(text().trade.noDeposit);
   }
   const terms = JSON.parse(trade.termsJson) as TradeTerms;
   // The wallet signs with whatever key it is told to and does not compare it with the contract (docs/decisions.md).
   if (!verifyDerivedPubkey(buyerDefiXpub, trade.buyerDefiIndex, terms.buyerPk)) {
-    throw new TradeActionError('This wallet is not the one that took this trade. Connect the wallet you used to take it.');
+    throw new TradeActionError(text().trade.wrongWallet);
   }
   const contract = createEscrowContract(terms, trade.tradeId, provider);
   const utxos = await provider.getUtxos(contract.address);
   const utxo = utxos.find(
     (u) => u.txid === trade.fundingTxid && (trade.fundingVout === undefined || u.vout === trade.fundingVout) && matchesEscrowFunding(u, terms),
   );
-  if (!utxo) throw new TradeActionError('The deposit is not visible on-chain yet. Try again in a moment.');
+  if (!utxo) throw new TradeActionError(text().trade.depositNotVisible);
   return buildCancelRequest({ contract, utxo, sellerPayoutPkh: terms.sellerPayoutPkh, buyerDefiIndex: trade.buyerDefiIndex });
 }
 
@@ -402,19 +382,20 @@ export function checkForArbiter(trade: Trade, offer: Pick<OfferDocument, 'price'
  * shown. A sentence for the first problem, or null when there is none.
  */
 export function checkBuyRequest(trade: Trade, offer: Pick<OfferDocument, 'side' | 'arbiter' | 'price' | 'oracle' | 'min' | 'max'>): string | null {
-  if (offer.side !== 'buy' || trade.side !== 'buy') return 'This request is not for a buy offer.';
-  if (BigInt(trade.amount) < BigInt(offer.min) || BigInt(trade.amount) > BigInt(offer.max)) return 'The amount is outside the range of your offer.';
-  if (trade.arbiterPk.toLowerCase() !== offer.arbiter.toLowerCase()) return 'The request names a different arbiter than your offer.';
+  const t = text().trade;
+  if (offer.side !== 'buy' || trade.side !== 'buy') return t.notBuyOffer;
+  if (BigInt(trade.amount) < BigInt(offer.min) || BigInt(trade.amount) > BigInt(offer.max)) return t.outsideRange;
+  if (trade.arbiterPk.toLowerCase() !== offer.arbiter.toLowerCase()) return t.otherArbiter;
   const checks = checkForArbiter(trade, offer);
-  if (checks.quote === 'wrong-signature' || checks.quote === 'other-oracle') return "The price is not signed by your offer's oracle.";
-  if (offer.price.type === 'floating' && checks.quote === 'none') return 'The request has no signed price.';
-  if (!checks.fiat || !checks.fiat.ok) return 'The amount to pay does not match the price.';
+  if (checks.quote === 'wrong-signature' || checks.quote === 'other-oracle') return t.otherOracle;
+  if (offer.price.type === 'floating' && checks.quote === 'none') return t.noSignedPrice;
+  if (!checks.fiat || !checks.fiat.ok) return t.fiatMismatch;
   return null;
 }
 
 function windowNote(trade: Trade): string | undefined {
   if (trade.paymentDeadline === undefined || trade.fundedAt === undefined) return undefined;
-  return `Payment window: ${Math.round((trade.paymentDeadline - trade.fundedAt) / 60)} min`;
+  return text().trade.paymentWindow(Math.round((trade.paymentDeadline - trade.fundedAt) / 60));
 }
 
 // --- The browser's own check of the escrow ---

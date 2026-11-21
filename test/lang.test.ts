@@ -26,3 +26,18 @@ describe('the interface language', () => {
     expect(MESSAGES.es.landing.how).toHaveLength(MESSAGES.en.landing.how.length);
   });
 });
+
+describe('Spanish outside components', () => {
+  it('words the trade story in Spanish while Spanish is chosen, and goes back to English', async () => {
+    const { setActiveLang } = await import('../src/web/messages.js');
+    const { tradeTitle, lockedCoins } = await import('../src/web/trade.js');
+    setActiveLang('es');
+    try {
+      expect(tradeTitle('Released', 'buyer', '0.001 BCH', '493.82 ARS')).toBe('Compraste 0.001 BCH por 493.82 ARS');
+      expect(lockedCoins('BCH')).toBe('los BCH');
+    } finally {
+      setActiveLang('en');
+    }
+    expect(tradeTitle('Released', 'buyer', '0.001 BCH', '493.82 ARS')).toBe('Bought 0.001 BCH for 493.82 ARS');
+  });
+});

@@ -280,7 +280,7 @@ export function SellerAction(props: { trade: Trade; amount: string; fiat: string
     </Button>
   );
   const disputeForm = disputing && (
-    <DisputeForm reasons={DISPUTE_REASONS} busy={busy === 'dispute'} locked={busy !== null} onSend={openDispute} onBack={() => setDisputing(false)} />
+    <DisputeForm reasons={DISPUTE_REASONS.map((value) => ({ value, label: value }))} busy={busy === 'dispute'} locked={busy !== null} onSend={openDispute} onBack={() => setDisputing(false)} />
   );
   const walletNotices = (
     <>

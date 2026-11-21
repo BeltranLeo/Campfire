@@ -1,6 +1,7 @@
 import type { ReactNode } from 'react';
 import type { Progress, Turn } from '../trade';
 import { Icon } from './Icon';
+import { useMessages } from '../lang';
 
 /**
  * The card at the top of a trade page, the only part that changes with the state and the viewer. `turn` says whose
@@ -8,7 +9,7 @@ import { Icon } from './Icon';
  * while the other party or the contract works, violet in a dispute. `progress` draws the four named steps above it,
  * so nobody reads "Step 2 of 4" without knowing what the steps are.
  */
-const TURN_LABEL: Record<Turn, string> = { you: 'Your turn', other: 'Waiting', arbiter: 'Paused · In dispute' };
+const TURN_LABEL = { you: 'turnYou', other: 'turnOther', arbiter: 'turnArbiter' } as const satisfies Record<Turn, string>;
 
 export function ActionCard(props: {
   turn: Turn;
@@ -18,11 +19,12 @@ export function ActionCard(props: {
   deadline?: ReactNode;
   children?: ReactNode;
 }) {
+  const t = useMessages().trade;
   return (
     <section className="cf-card s-action" data-flush>
       <div className="cf-card__section">
         {props.progress && <Steps progress={props.progress} turn={props.turn} />}
-        <span className="cf-stepper">{TURN_LABEL[props.turn]}</span>
+        <span className="cf-stepper">{t[TURN_LABEL[props.turn]]}</span>
         <h2 className="cf-heading">{props.title}</h2>
         {props.reassurance && (
           <p className="cf-row cf-small" data-nowrap style={{ color: 'var(--escrow)', alignItems: 'flex-start' }}>
@@ -38,8 +40,9 @@ export function ActionCard(props: {
 }
 
 function Steps({ progress, turn }: { progress: Progress; turn: Turn }) {
+  const t = useMessages().trade;
   return (
-    <ol className="cf-steps" aria-label="Trade progress" data-turn={turn}>
+    <ol className="cf-steps" aria-label={t.progressLabel} data-turn={turn}>
       {progress.labels.map((label, i) => (
         <li
           key={label}

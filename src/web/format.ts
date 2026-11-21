@@ -65,10 +65,10 @@ export function applyMargin(price: string, marginBps: number): number {
 }
 
 /** "Market price", "Market price + 2.5%", "Market price − 1%". */
-export function describeMargin(marginBps: number): string {
-  if (marginBps === 0) return 'Market price';
+export function describeMargin(marginBps: number, base = text().common.marketPrice): string {
+  if (marginBps === 0) return base;
   const percent = Math.abs(marginBps) / 100;
-  return `Market price ${marginBps > 0 ? '+' : '−'} ${percent}%`;
+  return `${base} ${marginBps > 0 ? '+' : '−'} ${percent}%`;
 }
 
 /**
@@ -86,12 +86,12 @@ export function formatPaymentWindow(seconds: number): string {
 
 /** "14 Nov" from Unix seconds. */
 export function formatDayMonth(seconds: number): string {
-  return new Date(seconds * 1000).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' });
+  return new Date(seconds * 1000).toLocaleDateString(text().common.dateLocale, { day: 'numeric', month: 'short' });
 }
 
 /** "15 Nov 2026" from Unix seconds. */
 export function formatDate(seconds: number): string {
-  return new Date(seconds * 1000).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' });
+  return new Date(seconds * 1000).toLocaleDateString(text().common.dateLocale, { day: 'numeric', month: 'short', year: 'numeric' });
 }
 
 /** "16 Nov 2026, 14:04" from Unix seconds. */

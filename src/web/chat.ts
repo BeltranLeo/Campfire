@@ -12,6 +12,7 @@ import {
 } from '../protocol/crypto.js';
 import { encodeChatImage, looksLikeChatImage, parseChatImage, type ChatImage } from '../protocol/chatImage.js';
 import { apiGet, apiPost, isFinalState, type ChatMessage, type Trade } from './api';
+import { text } from './messages';
 import { disputeKeyHex, type Role } from './trade';
 
 export { MAX_CHAT_MESSAGE_CHARS };
@@ -31,7 +32,8 @@ export type ChatTrade = Pick<Trade, 'id' | 'tradeId' | 'status' | 'buyerSessionP
  */
 export type ChatState = 'visitor' | 'not-open' | 'no-key' | 'closed' | 'open';
 
-export const NO_CHAT_KEY = 'This browser does not have the key for this trade. Open it on the device where you started it.';
+/** Said when this browser has no session key for the trade. A function, so it follows the language switch. */
+export const noChatKey = () => text().chat.noKey;
 
 const sessionPkOf = (trade: ChatTrade, role: ChatRole) => (role === 'buyer' ? trade.buyerSessionPk : trade.sellerSessionPk);
 const peerOf = (role: ChatRole): ChatRole => (role === 'buyer' ? 'seller' : 'buyer');
@@ -209,10 +211,10 @@ async function sendPlaintext(params: SendParams, plaintext: string): Promise<Cha
   const { trade, role, sessionPrivateKey } = params;
   const state = chatState(trade, role, sessionPrivateKey);
   if (state === 'not-open') throw new ChatSendError('The chat opens once the trade is accepted.');
-  if (state === 'no-key') throw new ChatSendError(NO_CHAT_KEY);
+  if (state === 'no-key') throw new ChatSendError(noChatKey());
   if (state === 'closed') throw new ChatSendError('The chat closed when the trade ended.');
   const key = chatKeyHex(trade, role, sessionPrivateKey);
-  if (!key || !sessionPrivateKey || !trade.tradeId) throw new ChatSendError(NO_CHAT_KEY);
+  if (!key || !sessionPrivateKey || !trade.tradeId) throw new ChatSendError(noChatKey());
   const ciphertext = await encryptChatMessage(key, plaintext);
   const post: Post = params.post ?? ((path, body) => apiPost(path, body));
   const { message } = await post(`/api/trades/${trade.id}/chat`, {

@@ -16,7 +16,6 @@ import { EmptyState, Notice, Skeleton } from '../components/States';
 import { StatusPill } from '../components/StatusPill';
 import { TradeChat } from '../components/TradeChat';
 import { Countdown, Timeline, confirmationsText } from '../components/Timeline';
-import { NO_CHAT_KEY } from '../chat';
 import { useConfig } from '../config';
 import { electrum } from '../electrum';
 import {
@@ -59,6 +58,8 @@ import {
 } from '../trade';
 import { DSPROOF_WATCH_SEC, useDoubleSpendWatch, type DoubleSpendState } from '../dsproof';
 import { WalletDeclined, useWallet } from '../wallet';
+import { useMessages } from '../lang';
+import { MESSAGES, text } from '../messages';
 
 // One trade, for the buyer or a visitor (Main, Trade-* screens). One column: title and status, the action
 // card (the only part that changes with the state), progress, and the on-chain details folded away.
@@ -67,13 +68,9 @@ import { WalletDeclined, useWallet } from '../wallet';
 // (Trade-BuyOffer-Buyer). Under progress the buyer and the seller get the trade chat (TradeChat.tsx).
 
 const POLL_MS = 3000;
-// Invented copy: generic reasons for a dispute, chosen from a list.
-const DISPUTE_REASONS = [
-  'The seller did not release after I paid',
-  'The payment details do not work',
-  'The seller is not answering',
-  'Something else',
-];
+// Invented copy: generic reasons for a dispute, chosen from a list. The arbiter reads the English one.
+const disputeReasons = () =>
+  MESSAGES.en.tradePage.disputeReasons.map((value, i) => ({ value, label: text().tradePage.disputeReasons[i] ?? value }));
 
 export function TradePage() {
   const { id = '' } = useParams();
@@ -116,6 +113,7 @@ function TradeView({ trade, role, onUpdate, reload }: { trade: Trade; role: Role
   // On a buy offer the buyer's payout is chosen when the buyer accepts.
   const payout = trade.buyerPayoutPkh ? pkhToCashAddress(trade.buyerPayoutPkh, { tokenAware: !asset.isBch }) : null;
   const view: Role = role;
+  const t = useMessages().tradePage;
 
   // The browser checks the escrow itself before telling the buyer the coins are locked (protocol section 5).
   const [check, setCheck] = useState<EscrowCheck | null | 'error'>(null);
@@ -155,26 +153,26 @@ function TradeView({ trade, role, onUpdate, reload }: { trade: Trade; role: Role
         <div className="s-pagehead">
           {view === 'buyer' && trade.side !== 'buy' ? (
             <Link className="s-back" to="/offers">
-              ← Offers
+              {t.backOffers}
             </Link>
           ) : view === 'buyer' || view === 'seller' ? (
             <Link className="s-back" to="/trades">
-              ← My trades
+              {t.backTrades}
             </Link>
           ) : (
             <Link className="s-back" to="/transparency">
-              ← Transparency
+              {t.backTransparency}
             </Link>
           )}
           <h1 className="cf-title">{tradeTitle(trade.status, view, amount, fiat)}</h1>
           <div className="cf-row">
             <StatusPill state={trade.status} role={view} side={trade.side} />
             {trade.fundingTxid ? (
-              <ProvenanceTag kind="chain">Real escrow on mainnet</ProvenanceTag>
+              <ProvenanceTag kind="chain">{t.realEscrow}</ProvenanceTag>
             ) : (
-              <ProvenanceTag kind="offchain">Nothing on-chain yet</ProvenanceTag>
+              <ProvenanceTag kind="offchain">{t.nothingOnChain}</ProvenanceTag>
             )}
-            {trade.isDemo && <ProvenanceTag kind="sim">Simulated fiat payment</ProvenanceTag>}
+            {trade.isDemo && <ProvenanceTag kind="sim">{t.simulatedPayment}</ProvenanceTag>}
           </div>
         </div>
 
@@ -210,12 +208,13 @@ function ProgressCard({ steps }: { steps: Step[] }) {
   const at = steps.findIndex((step) => step.state === 'current' || step.state === 'failed');
   const index = at >= 0 ? at : steps.length - 1;
   const allDone = at < 0 && steps.every((step) => step.state === 'done');
+  const t = useMessages().tradePage;
   return (
     <details className="cf-card tr-progress" data-flush>
       <summary className="cf-card__section">
-        <h2 className="cf-heading">Progress</h2>
+        <h2 className="cf-heading">{t.progress}</h2>
         <span className="cf-small cf-muted tr-progress__now">
-          {allDone ? `All ${steps.length} steps done` : `Step ${index + 1} of ${steps.length}: ${steps[index]?.title ?? ''}`}
+          {allDone ? t.allDone(steps.length) : t.stepOf(index + 1, steps.length, steps[index]?.title ?? '')}
         </span>
       </summary>
       <div className="cf-card__section">
@@ -241,17 +240,19 @@ function BuyerAction(props: {
   const { busy, error, run } = useTradeAction<'paid' | 'dispute' | 'cancel'>(trade, wallet.identity, props.onUpdate);
   const progress = actionProgress(trade.status, 'buyer', trade.side);
   const coins = lockedCoins(trade.asset);
+  const t = useMessages().tradePage;
+  const isBch = trade.asset === 'BCH';
   // The dispute asks for a reason first, so it opens a small form.
   const [disputing, setDisputing] = useState(false);
 
   const markPaid = () =>
-    run('paid', 'The trade was not marked as paid', () =>
+    run('paid', t.notMarked, () =>
       apiPost<{ trade: Trade }>(`/api/trades/${trade.id}/paid`, { buyerIdentity: wallet.identity }).then((r) => r.trade),
     );
 
   // The chat key goes along when this browser has it, so the arbiter can read the messages (protocol section 6).
   const openDispute = (reason: string, details: string) =>
-    run('dispute', 'The dispute was not opened', () => {
+    run('dispute', t.notDisputed, () => {
       const sharedTradeKeyHex = disputeKeyHex(readSessionKey(trade.id), trade.sellerSessionPk);
       const extra = details.trim();
       return apiPost<{ trade: Trade }>(`/api/trades/${trade.id}/dispute`, {
@@ -263,7 +264,7 @@ function BuyerAction(props: {
 
   // The wallet signs the escrow's `cancel` path; the server checks it and broadcasts.
   const cancelTrade = () =>
-    run('cancel', 'The trade was not cancelled', async () => {
+    run('cancel', t.notCancelled, async () => {
       if (!wallet.xpubs) throw new WalletDeclined();
       const built = await buildBuyerCancel(trade, electrum(), wallet.xpubs.defi);
       const signedTxHex = await wallet.sign(built.request, built.inputPaths);
@@ -276,18 +277,18 @@ function BuyerAction(props: {
     </Notice>
   );
   const disputeForm = disputing && (
-    <DisputeForm reasons={DISPUTE_REASONS} busy={busy === 'dispute'} locked={busy !== null} onSend={openDispute} onBack={() => setDisputing(false)} />
+    <DisputeForm reasons={disputeReasons()} busy={busy === 'dispute'} locked={busy !== null} onSend={openDispute} onBack={() => setDisputing(false)} />
   );
   // Cancelling signs and ends the trade, so while the buyer can still pay it sits in the fold, away from the main button.
   // The fold stays open while the dispute form is showing, so the person does not lose what they typed.
   // The cancel note depends on the step: before the payment it is a plain exit; after it, cancelling would lose the money.
   const somethingWrong = (arbiterLine: string, cancelNote: string) => (
-    <Details summary="Something wrong?" tag={null} open={disputing || undefined}>
+    <Details summary={t.somethingWrong} tag={null} open={disputing || undefined}>
       <div className="cf-stack">
         {disputeForm || (
           <div className="cf-stack" data-gap="2">
             <Button block variant="arbiter" disabled={busy !== null} onClick={() => setDisputing(true)}>
-              Ask the arbiter for help
+              {t.askArbiter}
             </Button>
             <p className="cf-small cf-muted">{arbiterLine}</p>
           </div>
@@ -301,9 +302,9 @@ function BuyerAction(props: {
             disabled={busy !== null && busy !== 'cancel'}
             onClick={cancelTrade}
           >
-            Cancel and return {coins}
+            {t.cancelReturn(coins)}
           </Button>
-          <p className="cf-small cf-muted">Ends the trade and sends the locked {trade.asset === 'BCH' ? 'BCH' : 'coins'} back to the seller.</p>
+          <p className="cf-small cf-muted">{t.cancelNote(isBch)}</p>
         </div>
       </div>
     </Details>
@@ -312,12 +313,12 @@ function BuyerAction(props: {
   const cancelButton = (
     <Button
       variant="danger"
-      signs="Signs in your wallet. Returns the funds to the seller."
+      signs={t.cancelSigns}
       busy={busy === 'cancel'}
       disabled={busy !== null && busy !== 'cancel'}
       onClick={cancelTrade}
     >
-      Cancel trade
+      {t.cancelTrade}
     </Button>
   );
 
@@ -328,20 +329,20 @@ function BuyerAction(props: {
         <ActionCard
           turn="other"
           progress={progress}
-          title="Waiting for the seller to accept"
-          reassurance="You have not paid anything. Nothing is charged if the seller does not answer."
+          title={t.waitingAccept}
+          reassurance={t.nothingCharged}
           deadline={
             trade.quoteExpiresAt && (
               <>
                 <Countdown deadline={trade.quoteExpiresAt} windowSec={600} />
-                <span className="cf-small cf-muted">left on the signed quote</span>
+                <span className="cf-small cf-muted">{t.leftOnQuote}</span>
               </>
             )
           }
         >
-          <p className="cf-muted">The price is locked. If the seller does not accept in time, the trade is dropped and nothing is charged.</p>
+          <p className="cf-muted">{t.priceLocked}</p>
           <div className="s-actions">
-            <Button to="/offers">Back to offers</Button>
+            <Button to="/offers">{t.backToOffers}</Button>
           </div>
         </ActionCard>
       );
@@ -350,19 +351,19 @@ function BuyerAction(props: {
         <ActionCard
           turn="other"
           progress={progress}
-          title={`Waiting for the seller to lock ${coins}`}
-          reassurance={`Don't pay yet. We'll tell you when ${coins} ${trade.asset === 'BCH' ? 'is' : 'are'} locked.`}
+          title={t.waitingLock(coins)}
+          reassurance={t.dontPayYet(coins, isBch)}
           deadline={
             trade.fundingDeadline && (
               <>
                 <Countdown deadline={trade.fundingDeadline} windowSec={1800} />
-                <span className="cf-small cf-muted">left for the seller to lock {coins}</span>
+                <span className="cf-small cf-muted">{t.leftToLock(coins)}</span>
               </>
             )
           }
         >
           <div className="s-actions">
-            <Button to="/offers">Back to offers</Button>
+            <Button to="/offers">{t.backToOffers}</Button>
           </div>
         </ActionCard>
       );
@@ -372,13 +373,13 @@ function BuyerAction(props: {
         <ActionCard
           turn="you"
           progress={progress}
-          title="Send the payment, then mark it as paid"
-          reassurance={props.check && props.check !== 'error' && props.check.funding === 'match' ? "The seller's coins are locked for you. They can only go to you or back to the seller." : undefined}
+          title={t.sendPayment}
+          reassurance={props.check && props.check !== 'error' && props.check.funding === 'match' ? t.lockedForYou : undefined}
           deadline={
             trade.paymentDeadline && (
               <>
                 <Countdown deadline={trade.paymentDeadline} windowSec={windowSec} />
-                <span className="cf-small cf-muted">left to mark as paid. After that the arbiter returns the funds to the seller.</span>
+                <span className="cf-small cf-muted">{t.leftToMark}</span>
               </>
             )
           }
@@ -393,12 +394,12 @@ function BuyerAction(props: {
               busy={busy === 'paid'}
               disabled={props.ds.phase === 'proof' || (busy !== null && busy !== 'paid')}
               onClick={markPaid}
-              note="No signature needed"
+              note={t.noSignatureNeeded}
             >
-              I've sent the payment
+              {t.sentPayment}
             </Button>
           </div>
-          {somethingWrong("The seller isn't answering, or the payment details don't work.", 'Signs in your wallet. Only if you have not paid.')}
+          {somethingWrong(t.wrongFunded, t.cancelFunded)}
         </ActionCard>
       );
     }
@@ -407,31 +408,25 @@ function BuyerAction(props: {
         <ActionCard
           turn="other"
           progress={progress}
-          title="Waiting for the seller to release"
-          reassurance={props.check && props.check !== 'error' && props.check.funding === 'match' ? "The seller's coins are locked for you. They can only go to you or back to the seller." : undefined}
+          title={t.waitingRelease}
+          reassurance={props.check && props.check !== 'error' && props.check.funding === 'match' ? t.lockedForYou : undefined}
         >
-          <p className="cf-muted">You marked the payment as sent. When the seller confirms it, {props.amount} go to your wallet.</p>
+          <p className="cf-muted">{t.youMarked(props.amount)}</p>
           {failure}
-          {somethingWrong("The seller hasn't released after you paid.", 'Signs in your wallet. If you already paid, ask the arbiter instead.')}
+          {somethingWrong(t.wrongPaid, t.cancelPaid)}
         </ActionCard>
       );
     case 'Disputed': {
       const opened = trade.disputedAt !== undefined ? formatHourMinute(new Date(trade.disputedAt * 1000)) : null;
       return (
-        <ActionCard turn="arbiter" title="The arbiter is reviewing this trade">
-          <p className="cf-muted">
-            {trade.disputedBy === 'seller' ? 'The seller opened a dispute' : 'You opened a dispute'}
-            {opened ? ` at ${opened}` : ''}. The arbiter can now read the chat and will decide for the buyer or the seller.
-          </p>
+        <ActionCard turn="arbiter" title={t.reviewing}>
+          <p className="cf-muted">{t.disputeBy(trade.disputedBy === 'seller', opened)}</p>
           {trade.isDemo && (
-            <SimBox tag="Simulated arbiter" label="In this demo you can decide the dispute yourself." bodyGap={3}>
-              <p className="cf-small">
-                On a real trade only the arbiter named in the offer can decide. Here the console signs your choice with the real
-                arbiter key and the result is a real mainnet transaction.
-              </p>
+            <SimBox tag={t.simulatedArbiter} label={t.decideYourself} bodyGap={3}>
+              <p className="cf-small">{t.realArbiterOnly}</p>
               <div>
                 <Button variant="primary" to={`/trade/${trade.id}/arbiter`}>
-                  Open demo arbiter console
+                  {t.openConsole}
                 </Button>
               </div>
             </SimBox>
@@ -457,13 +452,14 @@ function BuyRequest(props: { trade: Trade; amount: string; fiat: string; onUpdat
   const findingNote = useFindingAddressNote();
   const prep = usePoll(() => (identity && xpubs ? prepareIndices(identity, xpubs, 'buyer') : Promise.resolve(null)), `${identity}:${trade.id}`);
   const problem = offer.data ? checkBuyRequest(trade, offer.data) : null;
-  const methods = offer.data?.paymentMethods.map(paymentMethodLabel).join(' or ');
+  const t = useMessages().tradePage;
+  const methods = offer.data?.paymentMethods.map(paymentMethodLabel).join(` ${t.or} `);
 
   const accept = () =>
-    run('accept', 'The request was not accepted', async () => {
-      if (!identity || !xpubs || !prep.data || !offer.data) throw new TradeActionError('Campfire is still preparing your wallet. Try again in a moment.');
+    run('accept', t.notAccepted, async () => {
+      if (!identity || !xpubs || !prep.data || !offer.data) throw new TradeActionError(t.stillPreparing);
       const stop = checkBuyRequest(trade, offer.data);
-      if (stop) throw new TradeActionError(`${stop} Nothing was accepted.`);
+      if (stop) throw new TradeActionError(t.nothingAccepted(stop));
       // The session key is saved before the request, so a lost answer can still be matched to its trade.
       const store = browserStore();
       const session = (store && loadPendingSession(store, trade.id)) || generateSessionKeyPair();
@@ -482,7 +478,7 @@ function BuyRequest(props: { trade: Trade; amount: string; fiat: string; onUpdat
     });
 
   const decline = () =>
-    run('decline', 'The request was not declined', () =>
+    run('decline', t.notDeclined, () =>
       apiPost<{ trade: Trade }>(`/api/trades/${trade.id}/decline`, { buyerIdentity: identity }).then((r) => r.trade),
     );
 
@@ -490,24 +486,21 @@ function BuyRequest(props: { trade: Trade; amount: string; fiat: string; onUpdat
     <ActionCard
       turn="you"
       progress={actionProgress(trade.status, 'buyer', trade.side)}
-      title={`A seller wants to sell you ${props.amount}`}
-      reassurance="Accepting is free and needs no signature. You pay only after the coins are locked for you."
+      title={t.sellerWants(props.amount)}
+      reassurance={t.acceptFree}
       deadline={
         trade.quoteExpiresAt && (
           <>
             <Countdown deadline={trade.quoteExpiresAt} windowSec={600} />
-            <span className="cf-small cf-muted">left to accept at this price</span>
+            <span className="cf-small cf-muted">{t.leftToAccept}</span>
           </>
         )
       }
     >
-      <p className="cf-muted">
-        You will pay {props.fiat}
-        {methods ? ` by ${methods}` : ''}, after the coins are locked for you.
-      </p>
+      <p className="cf-muted">{t.youWillPay(props.fiat, methods || null)}</p>
       {problem && (
         // Invented copy: the design has no screen for a request that fails the check.
-        <Notice tone="danger" title="Do not accept this request">
+        <Notice tone="danger" title={t.doNotAccept}>
           {problem}
         </Notice>
       )}
@@ -522,12 +515,12 @@ function BuyRequest(props: { trade: Trade; amount: string; fiat: string; onUpdat
           busy={busy === 'accept'}
           disabled={!prep.data || !offer.data || problem !== null || (busy !== null && busy !== 'accept')}
           onClick={accept}
-          note={!prep.data ? findingNote : 'No signature needed.'}
+          note={!prep.data ? findingNote : t.noSignature}
         >
-          Accept
+          {t.accept}
         </Button>
         <Button busy={busy === 'decline'} disabled={busy !== null && busy !== 'decline'} onClick={decline}>
-          Decline
+          {t.decline}
         </Button>
       </div>
     </ActionCard>
@@ -537,38 +530,37 @@ function BuyRequest(props: { trade: Trade; amount: string; fiat: string; onUpdat
 // The deposit at zero confirmations (Bitcoin Cash 0-conf): watched for a double-spend proof for a few
 // seconds, then safe to act on. Without the check the page falls back to asking for one confirmation.
 function ZeroConfNotice({ ds, isDemo }: { ds: DoubleSpendState; isDemo: boolean }) {
+  const t = useMessages().tradePage;
   switch (ds.phase) {
     case 'watching':
       return (
         <div className="cf-notice">
           <div>
-            <strong>Checking the lock… ready in a few seconds</strong>
-            Bitcoin Cash nodes publish a double-spend proof (DSProof) within seconds if anyone tries to spend these coins
-            twice. Ready in about {ds.secondsLeft} s.
+            <strong>{t.checkingLock}</strong>
+            {t.checkingLockBody(ds.secondsLeft)}
           </div>
         </div>
       );
     case 'clear':
       return (
-        <Notice tone="verified" title="Safe at 0-conf">
-          The locked coins reached the network and no double-spend attempt was seen in {DSPROOF_WATCH_SEC} seconds. On Bitcoin Cash
-          you can rely on it now, without waiting for a block.
+        <Notice tone="verified" title={t.safe}>
+          {t.safeBody(DSPROOF_WATCH_SEC)}
         </Notice>
       );
     case 'proof':
       return (
-        <Notice tone="danger" title="Double-spend attempt detected">
-          Do not pay. The network saw an attempt to spend the locked coins twice. Wait until they are confirmed in a block.
+        <Notice tone="danger" title={t.doubleSpend}>
+          {t.doubleSpendBody}
         </Notice>
       );
     case 'error':
       return isDemo ? (
-        <Notice tone="attention" title="Could not check for double spends">
-          With real money, wait for 1 confirmation before you pay. In this demo no money is sent, so you can continue.
+        <Notice tone="attention" title={t.noDsCheck}>
+          {t.noDsCheckDemo}
         </Notice>
       ) : (
-        <Notice tone="attention" title="Could not check for double spends">
-          Wait for 1 confirmation before you pay.
+        <Notice tone="attention" title={t.noDsCheck}>
+          {t.noDsCheckReal}
         </Notice>
       );
     default:
@@ -578,22 +570,22 @@ function ZeroConfNotice({ ds, isDemo }: { ds: DoubleSpendState; isDemo: boolean 
 
 // Says what this browser verified about the escrow, or that it could not.
 function EscrowCheckNotice({ check }: { check: EscrowCheck | null | 'error' }) {
-  if (check === null) return <p className="cf-small cf-muted">Checking the deposit on-chain…</p>;
+  const t = useMessages().tradePage;
+  if (check === null) return <p className="cf-small cf-muted">{t.checkingDeposit}</p>;
   if (check === 'error') {
-    return <p className="cf-small cf-muted">This browser could not check the deposit on-chain right now. It will retry.</p>;
+    return <p className="cf-small cf-muted">{t.checkFailed}</p>;
   }
   if (!check.termsMatch || !check.addressMatch || check.payoutIsMine === false) {
     return (
-      <Notice tone="danger" title="The escrow does not match the trade terms">
-        Do not pay. This browser rebuilt the contract from the terms and got a different result. Open a dispute or
-        contact the arbiter.
+      <Notice tone="danger" title={t.mismatch}>
+        {t.mismatchBody}
       </Notice>
     );
   }
   if (check.funding === 'missing') {
     return (
-      <Notice tone="attention" title="The deposit is not visible on-chain yet">
-        Do not pay until it appears. This browser looks for it at the escrow address every 15 seconds.
+      <Notice tone="attention" title={t.depositMissing}>
+        {t.depositMissingBody}
       </Notice>
     );
   }
@@ -605,6 +597,8 @@ function PaymentDetails({ trade, fiat }: { trade: Trade; fiat: string }) {
   const [state, setState] = useState<
     { kind: 'loading' } | { kind: 'nokey' } | { kind: 'failed' } | { kind: 'unsigned' } | { kind: 'ok'; view: PaymentDetailsView }
   >({ kind: 'loading' });
+  const m = useMessages();
+  const t = m.tradePage;
   useEffect(() => {
     let current = true;
     const key = readSessionKey(trade.id);
@@ -630,21 +624,21 @@ function PaymentDetails({ trade, fiat }: { trade: Trade; fiat: string }) {
   }, [trade.id, trade.side, trade.tradeId, trade.encryptedPaymentDetails, trade.paymentDetailsSignature, trade.sellerSessionPk]);
 
   if (state.kind === 'loading') return <Skeleton height={96} />;
-  if (state.kind === 'nokey') return <Notice tone="attention">{NO_CHAT_KEY}</Notice>;
+  if (state.kind === 'nokey') return <Notice tone="attention">{m.chat.noKey}</Notice>;
   // Invented copy: the key is here but does not open the details.
-  if (state.kind === 'failed') return <Notice tone="attention">The payment details could not be decrypted with this browser's key for the trade.</Notice>;
+  if (state.kind === 'failed') return <Notice tone="attention">{t.cannotDecrypt}</Notice>;
   // Invented copy.
   if (state.kind === 'unsigned') {
     return (
-      <Notice tone="danger" title="Do not pay">
-        These payment details are not signed by the seller of this trade. Open a dispute so the arbiter can look at it.
+      <Notice tone="danger" title={t.doNotPay}>
+        {t.unsigned}
       </Notice>
     );
   }
 
   const amount = (
     <>
-      <dt>Amount</dt>
+      <dt>{t.amount}</dt>
       <dd>
         <span className="cf-num">{fiat}</span>
       </dd>
@@ -654,7 +648,7 @@ function PaymentDetails({ trade, fiat }: { trade: Trade; fiat: string }) {
     return (
       <div className="cf-well">
         <dl className="cf-dl">
-          <dt>Pay to</dt>
+          <dt>{t.payTo}</dt>
           <dd style={{ whiteSpace: 'pre-wrap', overflowWrap: 'anywhere' }}>{state.view.text}</dd>
           {amount}
         </dl>
@@ -666,13 +660,13 @@ function PaymentDetails({ trade, fiat }: { trade: Trade; fiat: string }) {
     <dl className="cf-dl">
       {method !== undefined && (
         <>
-          <dt>Method</dt>
+          <dt>{t.method}</dt>
           <dd>{String(method)}</dd>
         </>
       )}
       {reference !== undefined && (
         <>
-          <dt>Reference</dt>
+          <dt>{t.reference}</dt>
           <dd>
             <span className="cf-mono">{String(reference)}</span>
           </dd>
@@ -689,7 +683,7 @@ function PaymentDetails({ trade, fiat }: { trade: Trade; fiat: string }) {
   );
   // Only details the seller marked as simulated go in the violet box; the demo seller marks its own.
   return simulated === true ? (
-    <SimBox label="Demo payment details. Do not send any money.">{rows}</SimBox>
+    <SimBox label={t.demoDetails}>{rows}</SimBox>
   ) : (
     <div className="cf-well">{rows}</div>
   );
@@ -698,6 +692,7 @@ function PaymentDetails({ trade, fiat }: { trade: Trade; fiat: string }) {
 // --- Endings ---
 
 function BuyerResult({ trade, amount, payout }: { trade: Trade; amount: string; payout: string | null }) {
+  const t = useMessages().tradePage;
   const settlement = trade.settlementTxid && (
     <>
       <HashLink value={trade.settlementTxid} kind="transaction" /> · <ProvenanceTag kind="chain" />
@@ -710,28 +705,27 @@ function BuyerResult({ trade, amount, payout }: { trade: Trade; amount: string; 
     case 'Released':
     case 'ResolvedBuyer':
       notice = (
-        <Notice tone="verified" title="Trade completed">
-          {trade.status === 'Released' ? `The seller released ${amount} to your wallet.` : `The arbiter released ${amount} to your wallet.`} You can
-          use them right away: on Bitcoin Cash there is no need to wait for a block.
+        <Notice tone="verified" title={t.completed}>
+          {trade.status === 'Released' ? t.releasedBySeller(amount) : t.releasedByArbiter(amount)} {t.useRightAway}
         </Notice>
       );
       rows = (
         <>
           {settlement && (
             <>
-              <dt>{trade.status === 'Released' ? 'Release' : 'Arbitrate'}</dt>
+              <dt>{trade.status === 'Released' ? t.release : t.arbitrate}</dt>
               <dd>{settlement}</dd>
             </>
           )}
           {payout && (
             <>
-              <dt>Received at</dt>
+              <dt>{t.receivedAt}</dt>
               <dd>
                 <HashLink value={payout} kind="address" />
               </dd>
             </>
           )}
-          <dt>Completed</dt>
+          <dt>{t.completedAt}</dt>
           <dd>{formatDateTime(ended)}</dd>
         </>
       );
@@ -739,26 +733,25 @@ function BuyerResult({ trade, amount, payout }: { trade: Trade; amount: string; 
     case 'ResolvedSeller': {
       const minutes = trade.paymentDeadline && trade.fundedAt ? Math.round((trade.paymentDeadline - trade.fundedAt) / 60) : null;
       notice = trade.disputedAt ? (
-        <Notice tone="attention" title="The arbiter decided for the seller">
-          The funds went back to the seller.
+        <Notice tone="attention" title={t.decidedSeller}>
+          {t.fundsBack}
         </Notice>
       ) : (
-        <Notice tone="attention" title="The payment window ended">
-          The trade was not marked as paid{minutes ? ` within ${minutes} minutes` : ' in time'}, so the arbiter returned the funds to the
-          seller. You were not charged.
+        <Notice tone="attention" title={t.windowEnded}>
+          {t.notMarkedInTime(minutes)}
         </Notice>
       );
       rows = (
         <>
           {settlement && (
             <>
-              <dt>Arbitrate</dt>
+              <dt>{t.arbitrate}</dt>
               <dd>{settlement}</dd>
             </>
           )}
-          <dt>Verdict</dt>
-          <dd>{trade.disputedAt ? 'For the seller' : 'For the seller, issued automatically'}</dd>
-          <dt>Ended</dt>
+          <dt>{t.verdict}</dt>
+          <dd>{trade.disputedAt ? t.forSeller : t.forSellerAuto}</dd>
+          <dt>{t.ended}</dt>
           <dd>{formatDateTime(ended)}</dd>
         </>
       );
@@ -766,11 +759,11 @@ function BuyerResult({ trade, amount, payout }: { trade: Trade; amount: string; 
     }
     case 'Dropped':
       notice = (
-        <Notice title="The trade was dropped">The seller did not accept and lock the coins in time. Nothing was charged.</Notice>
+        <Notice title={t.dropped}>{t.droppedBody}</Notice>
       );
       rows = (
         <>
-          <dt>Ended</dt>
+          <dt>{t.ended}</dt>
           <dd>{formatDateTime(ended)}</dd>
         </>
       );
@@ -779,19 +772,19 @@ function BuyerResult({ trade, amount, payout }: { trade: Trade; amount: string; 
       const cancelled = trade.status === 'Cancelled';
       notice = cancelled ? (
         // Invented copy: the design has no screen for a cancelled trade.
-        <Notice title="Trade cancelled">You cancelled the trade. The coins went back to the seller. You were not charged.</Notice>
+        <Notice title={t.cancelled}>{t.cancelledBody}</Notice>
       ) : (
-        <Notice title="The coins went back to the seller">The locked coins went back to the seller.</Notice>
+        <Notice title={t.returned}>{t.returnedBody}</Notice>
       );
       rows = (
         <>
           {settlement && (
             <>
-              <dt>{cancelled ? 'Cancel' : 'Refund'}</dt>
+              <dt>{cancelled ? t.cancel : t.refund}</dt>
               <dd>{settlement}</dd>
             </>
           )}
-          <dt>Ended</dt>
+          <dt>{t.ended}</dt>
           <dd>{formatDateTime(ended)}</dd>
         </>
       );
@@ -804,9 +797,9 @@ function BuyerResult({ trade, amount, payout }: { trade: Trade; amount: string; 
         <dl className="cf-dl">{rows}</dl>
         <div className="s-actions">
           <Button variant="primary" to="/offers">
-            Back to offers
+            {t.backToOffers}
           </Button>
-          {(trade.status === 'Released' || trade.status === 'ResolvedBuyer') && <Button to="/transparency">See all contract paths</Button>}
+          {(trade.status === 'Released' || trade.status === 'ResolvedBuyer') && <Button to="/transparency">{t.seeAllPaths}</Button>}
         </div>
       </div>
     </section>
@@ -815,18 +808,19 @@ function BuyerResult({ trade, amount, payout }: { trade: Trade; amount: string; 
 
 function VisitorCard({ trade }: { trade: Trade }) {
   const ended = trade.completedAt ?? trade.verdictIssuedAt;
+  const t = useMessages().tradePage;
   return (
     <section className="cf-card" data-flush>
       <div className="cf-card__section">
         <div className="cf-stack">
-          <Notice title="You are viewing this trade as a visitor.">
-            Payment details and chat are visible only to the buyer and the seller. Everything on-chain is public and linked below.
+          <Notice title={t.visitor}>
+            {t.visitorBody}
           </Notice>
           {isFinal(trade) && (
             <dl className="cf-dl">
               {trade.settlementTxid && (
                 <>
-                  <dt>{trade.status === 'Released' ? 'Release' : 'Settlement'}</dt>
+                  <dt>{trade.status === 'Released' ? t.release : t.settlement}</dt>
                   <dd>
                     <HashLink value={trade.settlementTxid} kind="transaction" /> · <ProvenanceTag kind="chain" />
                   </dd>
@@ -834,7 +828,7 @@ function VisitorCard({ trade }: { trade: Trade }) {
               )}
               {ended && (
                 <>
-                  <dt>{trade.status === 'Released' ? 'Completed' : 'Ended'}</dt>
+                  <dt>{trade.status === 'Released' ? t.completedAt : t.ended}</dt>
                   <dd>{formatDateTime(ended)}</dd>
                 </>
               )}
@@ -870,19 +864,21 @@ function OnChainDetails(props: {
   const quoteOk = trade.quote && trade.oraclePk ? verifyPriceQuote(trade.quote, trade.oraclePk) : false;
   const check = props.check && props.check !== 'error' ? props.check : null;
   const rep = reputation.data;
+  const m = useMessages();
+  const t = m.tradePage;
 
   return (
     <Details>
-      <p className="cf-small cf-muted">For checking the trade yourself: the contract address, the transactions, the price quote and the other person.</p>
+      <p className="cf-small cf-muted">{t.forChecking}</p>
 
       {!trade.escrowAddress && !isFinal(trade) && (
         <section className="cf-card" data-flush>
           <div className="cf-card__section">
             <div className="cf-row" data-between style={{ marginBottom: 'var(--space-2)' }}>
-              <h2 className="cf-heading">Escrow contract</h2>
-              <span className="cf-tag">Not created yet</span>
+              <h2 className="cf-heading">{t.escrow}</h2>
+              <span className="cf-tag">{t.notCreated}</span>
             </div>
-            <p className="cf-small cf-muted">The contract address exists once both sides have accepted. Nothing is on-chain yet.</p>
+            <p className="cf-small cf-muted">{t.notCreatedBody}</p>
           </div>
         </section>
       )}
@@ -891,24 +887,24 @@ function OnChainDetails(props: {
         <section className="cf-card cf-glass cf-glass--escrow" data-flush>
           <div className="cf-card__section">
             <div className="cf-row" data-between style={{ marginBottom: 'var(--space-3)' }}>
-              <h2 className="cf-heading">Escrow contract</h2>
+              <h2 className="cf-heading">{t.escrow}</h2>
               <ProvenanceTag kind="chain" />
             </div>
             <dl className="cf-dl">
-              <dt>Address</dt>
+              <dt>{t.address}</dt>
               <dd>
                 <HashLink value={trade.escrowAddress} kind="address" /> <CopyButton value={trade.escrowAddress} />
               </dd>
-              <dt>{isFinal(trade) ? 'Held' : 'Holds'}</dt>
+              <dt>{isFinal(trade) ? t.held : t.holds}</dt>
               <dd>
                 <span className="cf-num">
                   {holds}
-                  {!expected.token && <span className="cf-subtle"> ({props.amount} + {formatBch(1000n)} fee budget)</span>}
+                  {!expected.token && <span className="cf-subtle">{t.feeBudget(props.amount, formatBch(1000n))}</span>}
                 </span>
               </dd>
               {trade.fundingTxid && (
                 <>
-                  <dt>Deposit</dt>
+                  <dt>{t.deposit}</dt>
                   <dd>
                     <HashLink value={trade.fundingTxid} kind="transaction" />
                     {trade.fundingConfirmations !== undefined && ` · ${confirmationsText(trade.fundingConfirmations)}`}
@@ -917,7 +913,7 @@ function OnChainDetails(props: {
               )}
               {trade.tradeId && (
                 <>
-                  <dt>Trade ID</dt>
+                  <dt>{t.tradeId}</dt>
                   <dd>
                     <HashLink value={trade.tradeId} kind="plain" /> <CopyButton value={trade.tradeId} />
                   </dd>
@@ -925,26 +921,24 @@ function OnChainDetails(props: {
               )}
               {trade.refundTime && (
                 <>
-                  <dt>Refund path</dt>
+                  <dt>{t.refundPath}</dt>
                   <dd>
-                    <span className="cf-small">Seller can recover the funds after {formatDateTime(trade.refundTime)}</span>
+                    <span className="cf-small">{t.recoverAfter(formatDateTime(trade.refundTime))}</span>
                   </dd>
                 </>
               )}
             </dl>
             <p className="cf-small cf-subtle" style={{ marginTop: 'var(--space-3)' }}>
-              The address is derived from the trade terms. Anyone with the terms can recompute it.
+              {t.derived}
             </p>
             {check && (
               <div className="cf-stack" data-gap="2" style={{ marginTop: 'var(--space-3)' }}>
-                <span className="cf-label">Checked by this browser</span>
-                {check.termsMatch && <span className="s-check">The trade ID is the hash of the published terms.</span>}
-                {check.addressMatch && <span className="s-check">The address is the contract built from those terms.</span>}
-                {check.payoutIsMine && <span className="s-check">The contract pays the buyer at an address of your wallet.</span>}
-                {check.funding === 'match' && <span className="s-check">The deposit holds exactly {holds}.</span>}
-                {props.ds.phase === 'clear' && (
-                  <span className="s-check">No double-spend proof for the deposit (checked at {formatClock(props.ds.checkedAt)}).</span>
-                )}
+                <span className="cf-label">{t.checkedHere}</span>
+                {check.termsMatch && <span className="s-check">{t.checkTerms}</span>}
+                {check.addressMatch && <span className="s-check">{t.checkAddress}</span>}
+                {check.payoutIsMine && <span className="s-check">{t.checkPayout}</span>}
+                {check.funding === 'match' && <span className="s-check">{t.checkFunding(holds)}</span>}
+                {props.ds.phase === 'clear' && <span className="s-check">{t.checkDs(formatClock(props.ds.checkedAt))}</span>}
               </div>
             )}
           </div>
@@ -954,60 +948,60 @@ function OnChainDetails(props: {
       <section className="cf-card" data-flush>
         <div className="cf-card__section">
           <h2 className="cf-heading" style={{ marginBottom: 'var(--space-3)' }}>
-            Trade terms
+            {t.terms}
           </h2>
           <dl className="cf-dl">
-            <dt>Amount</dt>
+            <dt>{t.amount}</dt>
             <dd>
               <span className="cf-num">{props.amount}</span>
             </dd>
             {trade.quote && (
               <>
-                <dt>Price</dt>
+                <dt>{t.price}</dt>
                 <dd>
                   <span className="cf-num">
                     {formatFiat(applyMargin(trade.quote.price, trade.marginBps ?? 0), trade.fiat)}/{asset.symbol}
                   </span>
                   <br />
                   <span className="cf-small cf-muted">
-                    Floating, {describeMargin(trade.marginBps ?? 0).replace('Market price', 'market price')}.
+                    {t.floating(describeMargin(trade.marginBps ?? 0, t.marketPrice))}
                     {quoteOk && trade.oraclePk && (
                       <>
                         {' '}
-                        Quote signed by oracle <HashLink value={trade.oraclePk} kind="plain" />
+                        {t.quoteSigned} <HashLink value={trade.oraclePk} kind="plain" />
                       </>
                     )}
                   </span>
                 </dd>
               </>
             )}
-            <dt>Fiat amount</dt>
+            <dt>{t.fiatAmount}</dt>
             <dd>
               <span className="cf-num">{props.fiat}</span>
             </dd>
-            <dt>Paid to</dt>
+            <dt>{t.paidTo}</dt>
             <dd>
               {/* Invented copy: on a buy offer the payout is not known before the buyer accepts. */}
-              {props.payout ? <HashLink value={props.payout} kind="address" /> : <span className="cf-small cf-muted">Chosen when the buyer accepts</span>}
+              {props.payout ? <HashLink value={props.payout} kind="address" /> : <span className="cf-small cf-muted">{t.chosenOnAccept}</span>}
               {props.view === 'buyer' && check?.payoutIsMine && (
                 <>
                   <br />
-                  <span className="cf-small cf-muted">An address of your wallet</span>
+                  <span className="cf-small cf-muted">{t.yourAddress}</span>
                 </>
               )}
             </dd>
-            <dt>Arbiter</dt>
+            <dt>{t.arbiter}</dt>
             <dd>
               <HashLink value={trade.arbiterPk} kind="plain" />
             </dd>
-            <dt>Offer</dt>
+            <dt>{t.offer}</dt>
             <dd>
               <HashLink value={trade.offerTxid} kind="transaction" />
               {/* Buy offers are only published by Campfire, which pays for them. */}
               {trade.side === 'buy' && (
                 <>
                   <br />
-                  <span className="cf-small cf-muted">Buy offer. Publishing fee paid by Campfire</span>
+                  <span className="cf-small cf-muted">{t.buyOfferSponsored}</span>
                 </>
               )}
             </dd>
@@ -1018,21 +1012,22 @@ function OnChainDetails(props: {
       <section className="cf-card" data-flush>
         <div className="cf-card__section">
           <div className="cf-row" data-between style={{ marginBottom: 'var(--space-2)' }}>
-            <h2 className="cf-heading">{party === 'buyer' ? 'Buyer' : 'Seller'}</h2>
-            {party === 'seller' && trade.isDemo && <ProvenanceTag kind="sim">Simulated fiat</ProvenanceTag>}
+            <h2 className="cf-heading">{party === 'buyer' ? t.buyer : t.seller}</h2>
+            {party === 'seller' && trade.isDemo && <ProvenanceTag kind="sim">{m.trade.simulatedFiat}</ProvenanceTag>}
           </div>
           <div className="cf-stack" data-gap="1">
             <span>
-              {party === 'seller' && trade.isDemo && <strong>Demo seller </strong>}
+              {party === 'seller' && trade.isDemo && <strong>{t.demoSeller}</strong>}
               <HashLink value={partyIdentity} kind="plain" />
             </span>
             {rep && (
               <span className="cf-small">
-                <strong>{party === 'buyer' ? rep.completedAsBuyer : rep.completedAsSeller}</strong> completed as {party}
-                {rep.firstCompletedAt !== null && ` · since ${formatDate(rep.firstCompletedAt)}`}
+                <strong>{party === 'buyer' ? rep.completedAsBuyer : rep.completedAsSeller}</strong>
+                {t.completedAs(party)}
+                {rep.firstCompletedAt !== null && t.since(formatDate(rep.firstCompletedAt))}
               </span>
             )}
-            <span className="cf-small cf-subtle">Counted by Campfire. It cannot be verified on-chain and can be inflated with a second wallet.</span>
+            <span className="cf-small cf-subtle">{t.countedByCampfire}</span>
           </div>
         </div>
       </section>
@@ -1043,11 +1038,12 @@ function OnChainDetails(props: {
 // --- Loading and errors (Trade-Loading, Trade-Error) ---
 
 function TradeLoading() {
+  const t = useMessages().tradePage;
   return (
     <main className="s-main">
       <div className="s-trade">
         <div className="s-pagehead" aria-busy="true">
-          <span className="cf-small cf-muted">Loading trade…</span>
+          <span className="cf-small cf-muted">{t.loading}</span>
           <Skeleton width="65%" height={30} />
           <Skeleton width="35%" height={24} />
         </div>
@@ -1069,34 +1065,35 @@ function TradeLoading() {
 
 function TradeError({ error, id, onRetry }: { error: unknown; id: string; onRetry: () => void }) {
   const notFound = error instanceof ApiError && error.status === 404;
+  const m = useMessages();
+  const t = m.tradePage;
   return (
     <main className="s-main">
       <div className="s-trade">
         <div className="s-pagehead">
           <Link className="s-back" to="/offers">
-            ← Offers
+            {t.backOffers}
           </Link>
-          <h1 className="cf-title">Trade</h1>
+          <h1 className="cf-title">{t.trade}</h1>
         </div>
         <section className="cf-card" data-flush>
           <div className="cf-card__section">
             {notFound ? (
-              <EmptyState title="Trade not found" action={<Button to="/offers">Back to offers</Button>}>
-                No trade has the ID <span className="cf-mono">{id.length > 12 ? `${id.slice(0, 6)}…${id.slice(-4)}` : id}</span>. Check the link,
-                or find your trades in the wallet menu.
+              <EmptyState title={t.notFound} action={<Button to="/offers">{t.backToOffers}</Button>}>
+                {t.noTradeWithId} <span className="cf-mono">{id.length > 12 ? `${id.slice(0, 6)}…${id.slice(-4)}` : id}</span>. {t.checkLink}
               </EmptyState>
             ) : (
               <div className="cf-stack">
-                <Notice tone="danger" title="We could not load this trade">
+                <Notice tone="danger" title={t.loadError}>
                   {error instanceof ApiError && error.status >= 400 && error.status < 500
                     ? error.message
-                    : 'The server did not answer. Your funds are not affected: the escrow lives on-chain, not on this server.'}
+                    : t.loadErrorBody}
                 </Notice>
                 <div className="s-actions">
                   <Button variant="primary" onClick={onRetry}>
-                    Try again
+                    {m.common.tryAgain}
                   </Button>
-                  <Button to="/offers">Back to offers</Button>
+                  <Button to="/offers">{t.backToOffers}</Button>
                 </div>
               </div>
             )}

@@ -4,7 +4,7 @@ import { ApiError, isFinalState, type Trade } from '../api';
 import {
   ChatSendError,
   MAX_CHAT_MESSAGE_CHARS,
-  NO_CHAT_KEY,
+  noChatKey,
   chatState,
   createChatFeed,
   createChatReader,
@@ -52,7 +52,7 @@ export function TradeChat({ trade, role }: { trade: Trade; role: ChatRole }) {
     // A new key when the trade ends: the closed chat fetches once and stops polling.
     body = <ChatThread key={state} trade={trade} role={role} sessionKey={sessionKey} open={state === 'open'} />;
   } else if (state === 'no-key') {
-    body = <Notice tone="attention">{NO_CHAT_KEY}</Notice>;
+    body = <Notice tone="attention">{noChatKey()}</Notice>;
   } else {
     body = (
       <div className="cf-chat">

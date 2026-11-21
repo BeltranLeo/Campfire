@@ -1,4 +1,6 @@
 import type { TradeState } from '../api';
+import { useLang } from '../lang';
+import { text } from '../messages';
 
 // A trade's state as a short label, tinted by meaning. The party whose turn it is reads "your …" in amber (it depends
 // on them and has a deadline); the other party and visitors see blue (someone else or the contract is working).
@@ -9,39 +11,41 @@ export type TradeRole = 'buyer' | 'seller' | 'visitor';
 type Tone = 'attention' | 'escrow' | 'verified' | 'arbiter' | undefined;
 
 function pill(state: TradeState, role: TradeRole, side: 'sell' | 'buy'): [string, Tone] {
+  const t = text().trade.pill;
   const turn = (who: TradeRole, mine: string, theirs: string): [string, Tone] =>
     role === who ? [mine, 'attention'] : [theirs, 'escrow'];
 
   switch (state) {
     case 'Requested':
-      return side === 'buy' ? turn('buyer', 'Waiting for you', 'Waiting for buyer') : turn('seller', 'Waiting for you', 'Waiting for seller');
+      return side === 'buy' ? turn('buyer', t.waitingYou, t.waitingBuyer) : turn('seller', t.waitingYou, t.waitingSeller);
     case 'Accepted':
-      return turn('seller', 'Waiting for your deposit', 'Waiting for deposit');
+      return turn('seller', t.waitingYourDeposit, t.waitingDeposit);
     case 'Funded':
-      return turn('buyer', 'Waiting for your payment', 'Waiting for payment');
+      return turn('buyer', t.waitingYourPayment, t.waitingPayment);
     case 'Paid':
-      return turn('seller', 'Paid, waiting for your release', 'Paid, waiting for release');
+      return turn('seller', t.waitingYourRelease, t.waitingRelease);
     case 'Disputed':
-      return ['In dispute', 'arbiter'];
+      return [t.inDispute, 'arbiter'];
     case 'Released':
-      return ['Completed', 'verified'];
+      return [t.completed, 'verified'];
     case 'ResolvedBuyer':
-      return ['Resolved for buyer', 'verified'];
+      return [t.resolvedBuyer, 'verified'];
     case 'ResolvedSeller':
-      return ['Resolved for seller', 'verified'];
+      return [t.resolvedSeller, 'verified'];
     case 'Refunded':
-      return ['Returned to seller', undefined];
+      return [t.returned, undefined];
     case 'Cancelled':
     case 'Dropped':
-      return ['Cancelled', undefined];
+      return [t.cancelled, undefined];
   }
 }
 
 export function StatusPill({ state, role, side = 'sell' }: { state: TradeState; role: TradeRole; side?: 'sell' | 'buy' }) {
-  const [text, tone] = pill(state, role, side);
+  useLang(); // re-render on a language switch
+  const [label, tone] = pill(state, role, side);
   return (
     <span className="cf-pill" data-tone={tone}>
-      {text}
+      {label}
     </span>
   );
 }

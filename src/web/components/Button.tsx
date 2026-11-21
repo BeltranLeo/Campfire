@@ -1,6 +1,7 @@
 import type { ReactNode } from 'react';
 import { Link } from 'react-router';
 import { useWallet } from '../wallet';
+import { useMessages } from '../lang';
 
 // Design principle 3: a button says whether it opens the wallet. A signing button carries
 // "Signs in your wallet" under its label; others may say "No signature needed" with `note`.
@@ -44,6 +45,7 @@ export function Button({
   // "Waiting for wallet…" is true only once the request is out. Before that the page is still preparing it
   // (reading coins), and a visitor who switches to the wallet app then leaves the page with nothing to approve.
   const { signing } = useWallet();
+  const t = useMessages().trade;
   const common = {
     className: 'cf-btn',
     'data-variant': variant,
@@ -58,7 +60,7 @@ export function Button({
   ) : (
     // A busy button keeps its full colour (as in the design) but ignores further clicks.
     <button {...common} type={type} onClick={busy ? undefined : onClick} disabled={disabled} aria-busy={busy || undefined}>
-      {busy && signs && signing ? 'Waiting for wallet…' : busy && busyLabel ? busyLabel : busy && signs ? 'Preparing…' : children}
+      {busy && signs && signing ? t.waitingWallet : busy && busyLabel ? busyLabel : busy && signs ? t.preparing : children}
     </button>
   );
 
@@ -68,7 +70,7 @@ export function Button({
       {control}
       {signs ? (
         <span className="cf-signs">
-          {busy && signing ? 'Open your wallet to approve, then come back here.' : typeof signs === 'string' ? signs : 'Signs in your wallet'}
+          {busy && signing ? t.openWallet : typeof signs === 'string' ? signs : t.signsInWallet}
         </span>
       ) : (
         <span className="cf-small cf-subtle">{note}</span>
