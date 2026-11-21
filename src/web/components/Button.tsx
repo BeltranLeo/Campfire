@@ -78,6 +78,3 @@ export function Button({
     </div>
   );
 }
-
-/** Shown when the wallet refuses a signature request. */
-export const WALLET_DECLINED = 'The wallet did not sign. Nothing was sent. Try again.';

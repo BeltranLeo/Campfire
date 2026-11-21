@@ -5,6 +5,7 @@ import type { Offer, Trade } from './api';
 import { isFinalState } from './api';
 import { formatDayMonth, formatHourMinute } from './format';
 import { lockedCoins } from './trade';
+import { text } from './messages';
 
 export interface NextStep {
   /** What happens next, in a few words. */
@@ -22,42 +23,43 @@ export interface NextStep {
  */
 export function nextStep(trade: Trade, role: 'buyer' | 'seller', now = Math.floor(Date.now() / 1000)): NextStep {
   const seller = role === 'seller';
+  const t = text().mytrades;
   if (trade.status === 'Requested' && trade.quoteExpiresAt !== undefined && now >= trade.quoteExpiresAt) {
-    return { step: 'The request expired', turn: false };
+    return { step: t.requestExpired, turn: false };
   }
   if (trade.status === 'Accepted' && trade.fundingDeadline !== undefined && now >= trade.fundingDeadline) {
-    return { step: 'The time to lock ended', turn: false };
+    return { step: t.lockEnded, turn: false };
   }
   switch (trade.status) {
     case 'Requested':
       // On a buy offer the seller took it, and the buyer who published it accepts.
       if (trade.side === 'buy') {
         return seller
-          ? { step: 'Waiting for the buyer to accept', turn: false, deadline: trade.quoteExpiresAt, windowSec: 600 }
-          : { step: 'Accept or decline the request', turn: true, deadline: trade.quoteExpiresAt, windowSec: 600 };
+          ? { step: t.waitingBuyerAccept, turn: false, deadline: trade.quoteExpiresAt, windowSec: 600 }
+          : { step: t.acceptOrDecline, turn: true, deadline: trade.quoteExpiresAt, windowSec: 600 };
       }
       return seller
-        ? { step: 'Accept or decline the request', turn: true, deadline: trade.quoteExpiresAt, windowSec: 600 }
-        : { step: 'Waiting for the seller to accept', turn: false, deadline: trade.quoteExpiresAt, windowSec: 600 };
+        ? { step: t.acceptOrDecline, turn: true, deadline: trade.quoteExpiresAt, windowSec: 600 }
+        : { step: t.waitingSellerAccept, turn: false, deadline: trade.quoteExpiresAt, windowSec: 600 };
     case 'Accepted':
       return seller
         ? {
-            step: trade.side === 'buy' ? `Lock ${lockedCoins(trade.asset)} and share how to pay you` : `Lock ${lockedCoins(trade.asset)} for this trade`,
+            step: trade.side === 'buy' ? t.lockAndShare(lockedCoins(trade.asset)) : t.lockForTrade(lockedCoins(trade.asset)),
             turn: true,
             deadline: trade.fundingDeadline,
             windowSec: 1800,
           }
-        : { step: `Waiting for the seller to lock ${lockedCoins(trade.asset)}`, turn: false, deadline: trade.fundingDeadline, windowSec: 1800 };
+        : { step: t.waitingSellerLock(lockedCoins(trade.asset)), turn: false, deadline: trade.fundingDeadline, windowSec: 1800 };
     case 'Funded': {
       const windowSec = trade.paymentDeadline && trade.fundedAt ? trade.paymentDeadline - trade.fundedAt : undefined;
       return seller
-        ? { step: "Waiting for the buyer's payment", turn: false, deadline: trade.paymentDeadline, windowSec }
-        : { step: 'Send the payment, then mark it as paid', turn: true, deadline: trade.paymentDeadline, windowSec };
+        ? { step: t.waitingPayment, turn: false, deadline: trade.paymentDeadline, windowSec }
+        : { step: t.sendPayment, turn: true, deadline: trade.paymentDeadline, windowSec };
     }
     case 'Paid':
-      return seller ? { step: 'Check the payment, then release', turn: true } : { step: 'Waiting for the seller to release', turn: false };
+      return seller ? { step: t.checkRelease, turn: true } : { step: t.waitingRelease, turn: false };
     case 'Disputed':
-      return { step: 'Waiting for the arbiter', turn: false };
+      return { step: t.waitingArbiter, turn: false };
     default:
       return { step: '', turn: false };
   }
@@ -78,36 +80,35 @@ export const endedAt = (trade: Trade) => trade.completedAt ?? trade.verdictIssue
 
 /** "Buying 15,000 sats for 0.07 USD" while it lasts, "Bought …" / "Sold …" once the buyer has the coins. */
 export function rowTitle(trade: Trade, role: 'buyer' | 'seller', amount: string, fiat: string): string {
-  const what = `${amount} for ${fiat}`;
   const done = trade.status === 'Released' || trade.status === 'ResolvedBuyer';
-  if (role === 'seller') return `${done ? 'Sold' : 'Selling'} ${what}`;
-  return `${done ? 'Bought' : 'Buying'} ${what}`;
+  return text().mytrades.rowTitle(role, done, amount, fiat);
 }
 
 /** "16 Nov, 13:40", and how it ended when it did not simply complete. */
 export function historyNote(trade: Trade, role: 'buyer' | 'seller'): string {
   const at = endedAt(trade);
   const when = `${formatDayMonth(at)}, ${formatHourMinute(new Date(at * 1000))}`;
+  const t = text().mytrades;
   let how: string | null = null;
   switch (trade.status) {
     case 'ResolvedBuyer':
-      how = 'decided by the arbiter';
+      how = t.byArbiter;
       break;
     case 'ResolvedSeller':
-      how = trade.disputedAt ? 'decided by the arbiter' : 'payment window ended';
+      how = trade.disputedAt ? t.byArbiter : t.windowEnded;
       break;
     case 'Cancelled':
-      how = role === 'buyer' ? 'cancelled by you' : 'cancelled by the buyer';
+      how = role === 'buyer' ? t.cancelledByYou : t.cancelledByBuyer;
       break;
     case 'Refunded':
-      how = 'returned after the refund time';
+      how = t.returned;
       break;
     case 'Dropped':
       if (trade.side === 'buy') {
         // Accepting opens the funding window, so a deadline means the buyer accepted and the deposit never came.
-        how = trade.fundingDeadline !== undefined ? 'not locked in time' : role === 'buyer' ? 'declined or not accepted in time' : 'not accepted in time';
+        how = trade.fundingDeadline !== undefined ? t.notLockedInTime : role === 'buyer' ? t.declinedOrNotAccepted : t.notAcceptedInTime;
       } else {
-        how = role === 'buyer' ? 'not accepted in time' : 'declined or not locked in time';
+        how = role === 'buyer' ? t.notAcceptedInTime : t.declinedOrNotLocked;
       }
       break;
   }

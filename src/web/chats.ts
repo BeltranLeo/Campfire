@@ -4,18 +4,21 @@
 import { isFinalState, type ChatMessage, type Trade } from './api';
 import { unreadCount, type ChatLine, type ChatRole, type ChatState } from './chat';
 import { formatDayMonth, formatHourMinute } from './format';
+import { MESSAGES, text } from './messages';
 
 /** Longest message preview, in characters, before it is cut with an ellipsis. */
 export const PREVIEW_CHARS = 60;
 
-export const NO_MESSAGES = 'No messages yet';
+// The notes shown instead of a message preview, in English; chatRow words them in the chosen language.
+const EN = MESSAGES.en.chats;
+export const NO_MESSAGES = EN.noMessages;
 // Invented copy: the other notes shown instead of a message preview.
-export const OPENS_ON_ACCEPT = 'Chat opens once accepted';
-export const KEY_ELSEWHERE = 'Readable on the device that started it';
-export const UNREADABLE_MESSAGE = 'Message could not be read';
-/** The Chats row for a receipt image: the preview is text, so it says what was sent. */
-export const IMAGE_PREVIEW = 'Sent a receipt';
-export const NOT_LOADED = 'Messages could not be loaded';
+export const OPENS_ON_ACCEPT = EN.opensOnAccept;
+export const KEY_ELSEWHERE = EN.keyElsewhere;
+export const UNREADABLE_MESSAGE = EN.unreadable;
+/** The Chats row for a receipt image: the preview is text, so it says what was sent. A marker, worded by chatRow. */
+export const IMAGE_PREVIEW = EN.imagePreview;
+export const NOT_LOADED = EN.notLoaded;
 
 /**
  * Whether a trade gets a row: every trade whose chat exists or existed. A request not yet accepted is listed too
@@ -63,8 +66,7 @@ export function previewText(text: string, max = PREVIEW_CHARS): string {
 
 function verbOf(trade: Pick<Trade, 'status'>, role: ChatRole): string {
   const done = trade.status === 'Released' || trade.status === 'ResolvedBuyer';
-  if (role === 'seller') return done ? 'Sold' : 'Selling';
-  return done ? 'Bought' : 'Buying';
+  return text().chats.verb(role === 'seller', done);
 }
 
 /**
@@ -73,15 +75,16 @@ function verbOf(trade: Pick<Trade, 'status'>, role: ChatRole): string {
  */
 export function chatRow(entry: ChatEntry, lastReadAt: number): ChatRow {
   const { trade, role, state, messages, last } = entry;
+  const t = text().chats;
   let preview: string;
   let quoted = false;
-  if (state === 'not-open') preview = OPENS_ON_ACCEPT;
-  else if (messages === null) preview = NOT_LOADED;
-  else if (!last) preview = NO_MESSAGES;
-  else if (state === 'no-key') preview = KEY_ELSEWHERE;
-  else if (last.text === null) preview = UNREADABLE_MESSAGE;
+  if (state === 'not-open') preview = t.opensOnAccept;
+  else if (messages === null) preview = t.notLoaded;
+  else if (!last) preview = t.noMessages;
+  else if (state === 'no-key') preview = t.keyElsewhere;
+  else if (last.text === null) preview = t.unreadable;
   else {
-    preview = previewText(last.text);
+    preview = previewText(last.text === IMAGE_PREVIEW ? t.imagePreview : last.text);
     quoted = true;
   }
   const readable = state === 'open' || state === 'closed';

@@ -3,7 +3,7 @@ import { Link, useSearchParams } from 'react-router';
 import { aliasFor } from '../alias';
 import { ApiError, apiGet, apiPost, type Offer, type Trade } from '../api';
 import { assetInfo } from '../assets';
-import { Button, WALLET_DECLINED } from '../components/Button';
+import { Button } from '../components/Button';
 import { useAdvanced } from '../advanced';
 import { HashLink, ProvenanceTag } from '../components/Provenance';
 import { EmptyState, Notice, Skeleton } from '../components/States';
@@ -18,6 +18,7 @@ import { historyNote, isActive, myOffers, nextStep, rowTitle, sortActive, sortHi
 import { buildCloseOffer } from '../sell';
 import { TradeActionError, roleOf } from '../trade';
 import { WalletDeclined, useWallet } from '../wallet';
+import { useMessages } from '../lang';
 
 // My trades (Trades-* screens): the trades in progress with what each needs next, the finished ones, and the
 // offers published from this wallet. The lists refresh every few seconds, so a new request shows up on its own.
@@ -33,7 +34,9 @@ export function MyTrades() {
   const wallet = useWallet();
   const [params] = useSearchParams();
   const requested = params.get('tab');
-  const tab: Tab = TABS.find((t) => t === requested) ?? 'active';
+  const tab: Tab = TABS.find((name) => name === requested) ?? 'active';
+  const messages = useMessages();
+  const t = messages.mytrades;
   const identity = wallet.status === 'connected' ? wallet.identity : null;
 
   const trades = usePoll(
@@ -46,32 +49,33 @@ export function MyTrades() {
   return (
     <main className="s-main" data-desk="medium">
       <div className="s-toolbar">
-        <h1 className="cf-display">My trades</h1>
-        <Button to="/offers/new">Create an offer</Button>
+        <h1 className="cf-display">{t.title}</h1>
+        <Button to="/offers/new">{t.createOffer}</Button>
       </div>
-      <nav className="s-tabs" aria-label="Sections">
+      <nav className="s-tabs" aria-label={t.sections}>
         <Link to="/trades" aria-current={tab === 'active' ? 'page' : undefined}>
-          Active{activeCount > 0 && <span className="cf-badge">{activeCount}</span>}
+          {t.active}
+          {activeCount > 0 && <span className="cf-badge">{activeCount}</span>}
         </Link>
         <Link to="/trades?tab=history" aria-current={tab === 'history' ? 'page' : undefined}>
-          History
+          {t.history}
         </Link>
         <Link to="/trades?tab=offers" aria-current={tab === 'offers' ? 'page' : undefined}>
-          My offers
+          {t.myOffers}
         </Link>
       </nav>
 
       {!identity ? (
         <section className="cf-card">
           <EmptyState
-            title="Connect your wallet"
+            title={t.connectTitle}
             action={
               <Button variant="primary" busy={wallet.status === 'pairing' || wallet.status === 'connecting'} onClick={wallet.connect}>
-                Connect wallet
+                {t.connect}
               </Button>
             }
           >
-            Your trades and offers are found through your wallet. Connecting needs no signature.
+            {t.connectBody}
           </EmptyState>
         </section>
       ) : tab === 'offers' ? (
@@ -85,12 +89,12 @@ export function MyTrades() {
       ) : trades.error ? (
         <section className="cf-card">
           <div className="cf-stack">
-            <Notice tone="danger" title="We could not load your trades">
-              {trades.error instanceof ApiError ? trades.error.message : 'The server did not answer.'}
+            <Notice tone="danger" title={t.loadError}>
+              {trades.error instanceof ApiError ? trades.error.message : t.serverSilent}
             </Notice>
             <div className="s-actions">
               <Button variant="primary" onClick={trades.reload}>
-                Try again
+                {messages.common.tryAgain}
               </Button>
             </div>
           </div>
@@ -130,6 +134,7 @@ const sideOf = (trade: Trade, identity: string): 'buyer' | 'seller' => (roleOf(t
 
 function ActiveTab({ trades, identity }: { trades: Trade[]; identity: string }) {
   const title = useRowText();
+  const t = useMessages().mytrades;
   const now = Math.floor(useNow(1000) / 1000);
   const rows = sortActive(
     trades.filter(isActive).map((trade) => ({ trade, next: nextStep(trade, sideOf(trade, identity), now) })),
@@ -137,8 +142,15 @@ function ActiveTab({ trades, identity }: { trades: Trade[]; identity: string }) 
   if (rows.length === 0) {
     return (
       <section className="cf-card">
-        <EmptyState title="No active trades" action={<Button variant="primary" to="/offers">Browse offers</Button>}>
-          When you take an offer or someone takes yours, it shows up here.
+        <EmptyState
+          title={t.noActive}
+          action={
+            <Button variant="primary" to="/offers">
+              {t.browseOffers}
+            </Button>
+          }
+        >
+          {t.noActiveBody}
         </EmptyState>
       </section>
     );
@@ -147,25 +159,25 @@ function ActiveTab({ trades, identity }: { trades: Trade[]; identity: string }) 
     <section className="cf-card" data-flush>
       {rows.map(({ trade, next }) => {
         const role = sideOf(trade, identity);
-        const other = role === 'buyer' ? (trade.isDemo ? 'Demo seller' : aliasFor(trade.sellerIdentity).name) : aliasFor(trade.buyerIdentity).name;
+        const other = role === 'buyer' ? (trade.isDemo ? t.demoSeller : aliasFor(trade.sellerIdentity).name) : aliasFor(trade.buyerIdentity).name;
         return (
           <Link key={trade.id} className="s-item" to={`/trade/${trade.id}`}>
             <span className="s-cell">
               <strong>{title(trade, role)}</strong>
               <span className="cf-small cf-muted">
-                With {other} · {next.step}
+                {t.with(other, next.step)}
               </span>
             </span>
             {next.deadline && next.windowSec ? <Countdown deadline={next.deadline} windowSec={next.windowSec} /> : null}
             {next.turn ? (
               <span className="cf-pill" data-tone="attention">
-                Your turn
+                {t.yourTurn}
               </span>
             ) : trade.status === 'Disputed' ? (
               <StatusPill state={trade.status} role={role} side={trade.side} />
             ) : (
               <span className="cf-pill" data-tone="escrow">
-                Waiting
+                {t.waiting}
               </span>
             )}
           </Link>
@@ -177,11 +189,12 @@ function ActiveTab({ trades, identity }: { trades: Trade[]; identity: string }) 
 
 function HistoryTab({ trades, identity }: { trades: Trade[]; identity: string }) {
   const title = useRowText();
-  const rows = sortHistory(trades.filter((t) => !isActive(t)));
+  const t = useMessages().mytrades;
+  const rows = sortHistory(trades.filter((trade) => !isActive(trade)));
   if (rows.length === 0) {
     return (
       <section className="cf-card">
-        <EmptyState title="No finished trades yet">Completed, cancelled and returned trades are listed here.</EmptyState>
+        <EmptyState title={t.noHistory}>{t.noHistoryBody}</EmptyState>
       </section>
     );
   }
@@ -210,6 +223,8 @@ function OffersTab({ identity, trades }: { identity: string; trades: Trade[] }) 
   const [closing, setClosing] = useState<string | null>(null);
   const advanced = useAdvanced();
   const [failure, setFailure] = useState<string | null>(null);
+  const messages = useMessages();
+  const t = messages.mytrades;
 
   async function close(offer: Offer) {
     if (!wallet.xpubs) return;
@@ -241,10 +256,10 @@ function OffersTab({ identity, trades }: { identity: string; trades: Trade[] }) 
     } catch (err) {
       setFailure(
         err instanceof WalletDeclined
-          ? WALLET_DECLINED
+          ? messages.trade.walletDeclined
           : err instanceof TradeActionError || err instanceof ApiError
             ? err.message
-            : 'Something went wrong. Try again.',
+            : t.somethingWrong,
       );
     } finally {
       setClosing(null);
@@ -255,12 +270,12 @@ function OffersTab({ identity, trades }: { identity: string; trades: Trade[] }) 
     return offers.error ? (
       <section className="cf-card">
         <div className="cf-stack">
-          <Notice tone="danger" title="We could not load your offers">
-            {offers.error instanceof ApiError ? offers.error.message : 'The server did not answer.'}
+          <Notice tone="danger" title={t.offersError}>
+            {offers.error instanceof ApiError ? offers.error.message : t.serverSilent}
           </Notice>
           <div className="s-actions">
             <Button variant="primary" onClick={offers.reload}>
-              Try again
+              {messages.common.tryAgain}
             </Button>
           </div>
         </div>
@@ -274,8 +289,15 @@ function OffersTab({ identity, trades }: { identity: string; trades: Trade[] }) 
   if (mine.length === 0) {
     return (
       <section className="cf-card">
-        <EmptyState title="No offers yet" action={<Button variant="primary" to="/offers/new">Create an offer</Button>}>
-          Offers you publish from this wallet are listed here, and you can close them.
+        <EmptyState
+          title={t.noOffers}
+          action={
+            <Button variant="primary" to="/offers/new">
+              {t.createOffer}
+            </Button>
+          }
+        >
+          {t.noOffersBody}
         </EmptyState>
       </section>
     );
@@ -283,7 +305,7 @@ function OffersTab({ identity, trades }: { identity: string; trades: Trade[] }) 
   return (
     <>
       {failure && (
-        <Notice tone="danger" title="The offer was not closed">
+        <Notice tone="danger" title={t.notClosed}>
           {failure}
         </Notice>
       )}
@@ -297,32 +319,30 @@ function OffersTab({ identity, trades }: { identity: string; trades: Trade[] }) 
             <div key={offer.offerTxid} className="s-req">
               <div className="s-cell">
                 <span>
-                  <strong>{buying ? `Buying ${asset.symbol} with ${doc.fiat}` : `Selling ${asset.symbol} for ${doc.fiat}`}</strong>{' '}
+                  <strong>{t.offerTitle(buying, asset.symbol, doc.fiat)}</strong>{' '}
                   · <span className="cf-mono">{formatRange(doc.min, doc.max, asset)}</span>
                 </span>
                 <span className="cf-small cf-muted">
                   <span className="cf-pill" data-tone={offer.status === 'Published' ? 'escrow' : undefined}>
-                    {offer.status === 'Published' ? 'Open' : offer.status}
+                    {t.offerStatus(offer.status)}
                   </span>{' '}
-                  {n} {n === 1 ? 'trade' : 'trades'} · {offer.status === 'Expired' ? 'expired' : 'expires'} {formatDayMonth(doc.expiresAt)} ·{' '}
+                  {t.tradeCount(n)} · {t.expires(offer.status === 'Expired', formatDayMonth(doc.expiresAt))} ·{' '}
                   {advanced ? (
                     <>
-                      Offer <HashLink value={offer.offerTxid} kind="transaction" />
+                      {t.offer} <HashLink value={offer.offerTxid} kind="transaction" />
                     </>
                   ) : (
                     <ProvenanceTag kind="chain" />
                   )}
                 </span>
-                {offer.sponsored && <span className="cf-small cf-subtle">Publishing fee paid by Campfire</span>}
+                {offer.sponsored && <span className="cf-small cf-subtle">{t.feePaid}</span>}
                 {offer.status === 'Expired' && (
-                  <span className="cf-small cf-subtle">
-                    It no longer shows to {buying ? 'sellers' : 'buyers'}. Close it to get the {formatBch(1000n)} marker back.
-                  </span>
+                  <span className="cf-small cf-subtle">{t.expiredNote(buying, formatBch(1000n))}</span>
                 )}
               </div>
               {offer.status !== 'Closed' && (
                 <Button size="sm" signs busy={closing === offer.offerTxid} disabled={closing !== null && closing !== offer.offerTxid} onClick={() => close(offer)}>
-                  Close offer
+                  {t.closeOffer}
                 </Button>
               )}
             </div>
