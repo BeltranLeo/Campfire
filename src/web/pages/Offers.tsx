@@ -152,7 +152,7 @@ export function Offers() {
 
   return (
     // Wide on a computer: the offers are a table, compared by reading down each column.
-    <main className="s-main" data-wide>
+    <main className="s-main" data-wide data-desk="wide">
       {/* Title and side in one row, so the list starts high on a phone. */}
       <div className="s-pagehead o-head">
         <h1 className="cf-display">Offers</h1>

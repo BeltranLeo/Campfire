@@ -44,7 +44,7 @@ export function MyTrades() {
   const activeCount = trades.data ? trades.data.filter(isActive).length : 0;
 
   return (
-    <main className="s-main">
+    <main className="s-main" data-desk="medium">
       <div className="s-toolbar">
         <h1 className="cf-display">My trades</h1>
         <Button to="/offers/new">Create an offer</Button>

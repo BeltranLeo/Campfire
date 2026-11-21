@@ -150,7 +150,7 @@ function TradeView({ trade, role, onUpdate, reload }: { trade: Trade; role: Role
   const ds = useDoubleSpendWatch(trade.fundingTxid, trade.fundedAt, zeroConf);
 
   return (
-    <main className="s-main">
+    <main className="s-main" data-desk="wide">
       <div className="s-trade">
         <div className="s-pagehead">
           {view === 'buyer' && trade.side !== 'buy' ? (

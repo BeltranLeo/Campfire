@@ -46,7 +46,7 @@ function HomeBody({ identity, receiveXpub }: { identity: string; receiveXpub: st
   const finished = sortHistory(all.filter((t) => !isActive(t)));
 
   return (
-    <main className="s-main">
+    <main className="s-main" data-desk="wide">
       <div className="s-pagehead">
         <h1 className="cf-display">{trades.data && all.length === 0 ? 'Welcome' : 'Welcome back'}</h1>
       </div>

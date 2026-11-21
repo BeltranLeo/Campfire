@@ -1,6 +1,7 @@
 /* Offers list: one table for both sides of the market, the amount field, and the create-offer button. */
 
-/* The page widens on a computer so the offers can be a table; the question above it keeps a readable width. */
+/* The page widens on a computer so the offers can be a table (960 px, and as wide as the header from 1100 px, see
+   data-desk in screens.css); the question above it keeps a readable width. */
 .s-main[data-wide] { max-width: calc(960px + 2 * var(--layout-app-margin)); }
 .s-main[data-wide] > .o-ask, .s-main[data-wide] > .s-intent { max-width: 560px; }
 
