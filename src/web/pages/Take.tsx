@@ -2,6 +2,7 @@ import { useState, type ReactNode } from 'react';
 import { Link, useNavigate, useParams } from 'react-router';
 import { verifyPriceQuote } from '../../protocol/trades.js';
 import { expectedEscrowFunding } from '../../protocol/escrow.js';
+import { onlySimulatedPayment } from '../../protocol/offers.js';
 import { aliasFor } from '../alias';
 import { ApiError, apiGet, apiPost, type DemoInfo, type Offer, type PriceQuote, type Reputation, type TradeSummary } from '../api';
 import { assetInfo, type AssetInfo } from '../assets';
@@ -493,7 +494,14 @@ function TakeBuyOffer({ offer }: { offer: Offer }) {
       <OfferSummary
         asset={asset}
         title={`A buyer wants ${asset.symbol}`}
-        tag={<ProvenanceTag kind="chain">Offer on mainnet</ProvenanceTag>}
+        tag={
+          // Next to a real method the trade is real, so only an offer paid in simulated fiat alone gets the tag.
+          onlySimulatedPayment(doc.paymentMethods) ? (
+            <ProvenanceTag kind="sim">Simulated fiat</ProvenanceTag>
+          ) : (
+            <ProvenanceTag kind="chain">Offer on mainnet</ProvenanceTag>
+          )
+        }
         range={formatRange(doc.min, doc.max, asset)}
         methods={doc.paymentMethods}
         window={`within ${formatPaymentWindow(doc.paymentWindowSec).replace(' to pay', '')}`}
@@ -508,6 +516,14 @@ function TakeBuyOffer({ offer }: { offer: Offer }) {
           {/* Invented copy: the closed state of a buy offer. */}
           <EmptyState title="This offer is closed" action={<Button to="/offers?side=sell">Back to offers</Button>}>
             The buyer closed it or it expired. Other offers are still open.
+          </EmptyState>
+        </section>
+      ) : onlySimulatedPayment(doc.paymentMethods) ? (
+        <section className="cf-card">
+          {/* The service refuses a real seller here too (requestBuyOfferTrade); this says why before anyone tries. */}
+          <EmptyState title="Only the demo seller answers this offer" action={<Button to="/offers?side=sell">Back to offers</Button>}>
+            The buyer asked for a demo answer, so the payment is simulated. Selling here would lock real coins for a
+            payment that never comes.
           </EmptyState>
         </section>
       ) : (

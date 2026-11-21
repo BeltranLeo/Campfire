@@ -1,8 +1,17 @@
 // What the offer lists need besides the offers themselves: the indicative price of each, the quotes it comes from
 // and the seller's or buyer's track record. Shared by Offers and Home.
 
+import { namesSimulatedPayment } from '../protocol/offers.js';
 import { apiGet, type Offer, type PriceQuote, type Reputation } from './api';
 import { applyMargin, formatDayMonth } from './format';
+
+/**
+ * The offer's fiat payment is simulated, at least in part: the demo seller's own offers, and buy offers that asked
+ * for a demo answer. The service flags only the first, so the methods decide the rest.
+ */
+export function isSimulatedOffer(offer: Pick<Offer, 'isDemo' | 'document'>): boolean {
+  return offer.isDemo || namesSimulatedPayment(offer.document.paymentMethods);
+}
 
 export function priceOf(offer: Offer, quotes: Map<string, PriceQuote> | undefined): number | null {
   const price = offer.document.price;

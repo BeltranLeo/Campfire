@@ -34,6 +34,19 @@ export const BCH_DECIMALS = 8;
 export const PUSD_CATEGORY = '2469acc5afa4b10cb5b5c04afb89c3a3ffd61c5da9c01e26d00951cae2a02544';
 export const PUSD_DECIMALS = 2;
 
+/** The demo's payment method: the fiat payment is simulated, and only the service's demo seller answers it. */
+export const SIMULATED_PAYMENT_METHOD = 'simulated';
+
+/** The offer names the simulated payment, alone or next to real methods. */
+export function namesSimulatedPayment(methods: readonly string[]): boolean {
+  return methods.includes(SIMULATED_PAYMENT_METHOD);
+}
+
+/** The offer can only be paid in simulated fiat: a real counterparty would trade real coins for nothing. */
+export function onlySimulatedPayment(methods: readonly string[]): boolean {
+  return methods.length > 0 && methods.every((m) => m === SIMULATED_PAYMENT_METHOD);
+}
+
 export const ZERO_PUBKEY_HEX = '00'.repeat(33);
 export const MIN_UNIX_TIMESTAMP = 500_000_000;
 

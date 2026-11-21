@@ -30,6 +30,7 @@ import {
   BCH_DECIMALS,
   PUSD_CATEGORY,
   PUSD_DECIMALS,
+  SIMULATED_PAYMENT_METHOD,
   buildFundEscrowTransaction,
   buildPublishOfferTransaction,
   buildReleaseRequest,
@@ -72,7 +73,7 @@ const BOT_SIGHASH = SighashType.SIGHASH_ALL | SighashType.SIGHASH_UTXOS;
 const ACTIVE_STATES: TradeState[] = ['Requested', 'Accepted', 'Funded', 'Paid', 'Disputed'];
 const SELLER_PAYOUT_STATES: TradeState[] = ['Cancelled', 'ResolvedSeller', 'Refunded'];
 
-export const DEMO_PAYMENT_METHOD = 'simulated';
+export const DEMO_PAYMENT_METHOD = SIMULATED_PAYMENT_METHOD;
 export const DEMO_GREETING =
   'Automatic message from the demo seller: the coins are locked in the escrow. Send the simulated payment and mark it as paid.';
 export const DEMO_OFFER_TERMS =

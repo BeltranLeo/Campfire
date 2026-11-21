@@ -541,6 +541,22 @@ describe('The demo seller and buy offers', () => {
     expect(ars.data.trade?.fiatAmount).toBe('25.13'); // the bot takes it too: 5,000 sats at 500,000 ARS + 0.5%, rounded up
   });
 
+  it('lets only the demo seller answer an offer whose payment is simulated alone', async () => {
+    const ctx = await setup();
+    const buyerId = await ctx.register(buyer);
+    const sellerId = await ctx.register(seller);
+    const demoOnly = (await ctx.publish(buyerId, ctx.buyOffer({ paymentMethods: ['simulated'], fiat: 'USD', price: { type: 'floating', pair: 'BCH/USD', marginBps: 0 }, min: '5000', max: '50000' }))).data.offer;
+    const human = await ctx.req<{ error: string }>('POST', '/api/trades', { offerTxid: demoOnly.offerTxid, amount: '20000', sellerIdentity: sellerId, ...sellerKeys(0) });
+    expect(human.status).toBe(400);
+    expect(human.data.error).toMatch(/Only the demo seller/);
+
+    // Next to a real method, a real seller may answer: the buyer can pay for real.
+    const mixed = (await ctx.publish(buyerId, ctx.buyOffer({ paymentMethods: ['simulated', 'Bank transfer'], fiat: 'USD', price: { type: 'floating', pair: 'BCH/USD', marginBps: 0 }, min: '5000', max: '50000' }), 1)).data.offer;
+    const real = await ctx.req<{ trade: StoredTrade }>('POST', '/api/trades', { offerTxid: mixed.offerTxid, amount: '20000', sellerIdentity: sellerId, ...sellerKeys(1) });
+    expect(real.status).toBe(201);
+    expect(real.data.trade.isDemo).toBe(false);
+  });
+
   it('retries the deposit on the next read when it failed right after the buyer accepted', async () => {
     const ctx = await setup({ botSats: 500_000n });
     const buyerId = await ctx.register(buyer);

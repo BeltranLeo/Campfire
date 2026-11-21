@@ -4,7 +4,7 @@
 
 import { binToHex } from '@bitauth/libauth';
 import type { NetworkProvider } from 'cashscript';
-import { buildCloseOfferTransaction, isPositiveDecimalString, validateOfferDocument, type OfferDocument } from '../protocol/offers.js';
+import { SIMULATED_PAYMENT_METHOD, buildCloseOfferTransaction, isPositiveDecimalString, validateOfferDocument, type OfferDocument } from '../protocol/offers.js';
 import { cashAddressToPkh, derivePayoutPkhFromXpub, pkhToLockingBytecode, type WalletSpendableUtxo, type WalletTransactionRequest } from '../protocol/keys.js';
 import type { Offer as ListedOffer, OfferDocument as ListedOfferDocument } from './api';
 import { applyMargin, formatBch, formatFiat, fromBaseUnits } from './format';
@@ -38,7 +38,7 @@ export interface OfferForm {
 }
 
 /** The payment method the demo seller answers to (src/server/demo.ts). The fiat payment is simulated. */
-export const DEMO_METHOD = 'simulated';
+export const DEMO_METHOD = SIMULATED_PAYMENT_METHOD;
 
 export type FormField = 'margin' | 'fixedPrice' | 'min' | 'max' | 'methods';
 export type FormErrors = Partial<Record<FormField, string>>;

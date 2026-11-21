@@ -16,6 +16,7 @@ import {
   DEFAULT_FEE_RATES,
   MARKER_SATOSHIS,
   PUSD_CATEGORY,
+  onlySimulatedPayment,
   VERDICT_BUYER,
   VERDICT_SELLER,
   buildArbitrateSpend,
@@ -814,6 +815,10 @@ export class CampfireService {
     recordId?: string;
   }): Promise<StoredTrade> {
     const offerView = await this.offerToTake(params.offerTxid, 'buy', params.amount);
+    // A buyer who asked for a demo answer pays in simulated fiat: a real seller would lock real coins for nothing.
+    if (onlySimulatedPayment(offerView.document.paymentMethods) && !this.isDemoTrade({ sellerIdentity: params.sellerIdentity })) {
+      throw new Error('Only the demo seller answers this offer: its fiat payment is simulated');
+    }
     await this.verifyParty('seller', {
       identity: params.sellerIdentity,
       pk: params.sellerPk,

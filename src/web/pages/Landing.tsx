@@ -11,7 +11,7 @@ import { useConfig } from '../config';
 import { DSPROOF_WATCH_SEC } from '../dsproof';
 import { formatFiat, formatRange, fromBaseUnits, paymentMethodLabel } from '../format';
 import { usePoll } from '../hooks/usePoll';
-import { loadQuotes, priceOf, unique } from '../offerData';
+import { isSimulatedOffer, loadQuotes, priceOf, unique } from '../offerData';
 
 // The front page (Landing-* screens): the two intentions and where to get a wallet, the demo, how a trade works
 // (with why nobody waits for blocks folded under it), the latest offers and Campfire's numbers. Every number is real.
@@ -122,7 +122,7 @@ export function Landing() {
                   <span className="cf-small cf-muted">
                     {formatRange(doc.min, doc.max, asset)} · {doc.paymentMethods.map(paymentMethodLabel).join(', ')}
                   </span>
-                  {offer.isDemo && (
+                  {isSimulatedOffer(offer) && (
                     <span>
                       <ProvenanceTag kind="sim">Simulated fiat</ProvenanceTag>
                     </span>

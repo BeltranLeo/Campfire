@@ -20,7 +20,7 @@ import {
 import { fiatForUnits, parseFiatCents, unitsForFiat } from '../fiatAmount';
 import { parseAmount } from '../take';
 import { usePoll } from '../hooks/usePoll';
-import { loadQuotes, loadReputations, priceOf, unique } from '../offerData';
+import { isSimulatedOffer, loadQuotes, loadReputations, priceOf, unique } from '../offerData';
 import { filterOptions, offerTakes } from '../paymentMethods';
 
 // The offer list (Offers-* screens). The visitor starts from an intention: "I want to buy" lists
@@ -228,7 +228,7 @@ export function Offers() {
       )}
       {demo && !showSkeleton && !failed && (
         <div className="cf-simbox o-demo">
-          <ProvenanceTag kind="sim">Demo</ProvenanceTag>
+          <ProvenanceTag kind="sim" />
           <span className="o-demotext">Try first with simulated {moneyWord(demo.document.fiat)}</span>
           <Button size="sm" to={`/offers/${demo.offerTxid}`}>
             Try
@@ -293,7 +293,7 @@ export function Offers() {
                 methods={doc.paymentMethods.map(paymentMethodLabel).join(', ')}
                 paymentWindow={formatPaymentWindow(doc.paymentWindowSec)}
                 range={!applies || outside ? range : null}
-                isDemo={offer.isDemo}
+                simulated={isSimulatedOffer(offer)}
                 action={
                   <Button size="sm" to={`/offers/${offer.offerTxid}`}>
                     {intent === 'buy' ? 'Buy' : 'Sell'}

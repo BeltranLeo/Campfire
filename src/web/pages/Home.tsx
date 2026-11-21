@@ -16,7 +16,7 @@ import { formatAmount, formatBchBalance, formatDate, formatFiat, formatFiatAmoun
 import { useNow } from '../hooks/useNow';
 import { usePoll } from '../hooks/usePoll';
 import { isActive, nextStep, rowTitle, sortActive, sortHistory, historyNote } from '../mytrades';
-import { demoFirst, describeReputation, loadQuotes, loadReputations, priceOf } from '../offerData';
+import { demoFirst, describeReputation, isSimulatedOffer, loadQuotes, loadReputations, priceOf } from '../offerData';
 import { roleOf } from '../trade';
 import { describeProgress, refreshWalletCoins, useWalletCoins } from '../walletCoins';
 import { useWallet } from '../wallet';
@@ -300,7 +300,7 @@ function ForYou() {
                   {formatRange(doc.min, doc.max, asset)} · {doc.paymentMethods.map(paymentMethodLabel).join(', ')}
                   {rep && ` · ${describeReputation(rep, doc.side)}`}
                 </span>
-                {offer.isDemo && (
+                {isSimulatedOffer(offer) && (
                   <span>
                     <ProvenanceTag kind="sim">Simulated fiat</ProvenanceTag>
                   </span>

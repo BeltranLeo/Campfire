@@ -20,8 +20,8 @@ export interface OfferRowProps {
   paymentWindow: string;
   /** "0.001 – 0.02 BCH", shown only when no amount is typed or it does not fit. */
   range: string | null;
-  /** Demo offers keep a visible Simulated tag. */
-  isDemo: boolean;
+  /** The fiat payment is simulated (a demo offer, or one that asked for a demo answer): it keeps a visible tag. */
+  simulated: boolean;
   action: ReactNode;
 }
 
@@ -34,12 +34,12 @@ export function OfferRow(props: OfferRowProps) {
         {props.initials}
       </span>
       <div className="o-main">
-        {/* Three lines at most: what you get (with the Simulated tag of a demo offer), who and how fast, how and how much. */}
+        {/* Three lines at most: what you get (with the Simulated tag), who and how fast, how and how much. */}
         <span className="o-top">
           <span className="o-headline" data-muted={props.headlineMuted || undefined}>
             {props.headline}
           </span>
-          {props.isDemo && <ProvenanceTag kind="sim" />}
+          {props.simulated && <ProvenanceTag kind="sim" />}
         </span>
         <span className="o-line">
           {props.alias}
