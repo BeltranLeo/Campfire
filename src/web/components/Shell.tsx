@@ -9,6 +9,7 @@ import logoLight from '../logos/logo-light.png';
 import logoSymbol from '../logos/symbol-64.png';
 import { AdvancedSwitch } from './AdvancedSwitch';
 import { CopyButton } from './CopyButton';
+import { Icon, type IconName } from './Icon';
 import { NavBadge, NotificationsProvider } from './Notifications';
 import { BottomNav, WalletButton, WalletError } from './Wallet';
 
@@ -113,24 +114,23 @@ function Footer() {
           <a href={PROTOCOL_SPEC_URL}>Protocol spec</a>
           <span>Mainnet. Real funds.</span>
         </div>
-        {/* Display settings fold into one line so the footer stays short on a phone. The technical-details switch is
-            also here, so a visitor without a wallet (a judge, say) can open every technical detail at once. */}
-        <details className="s-footsettings">
-          <summary>Display settings</summary>
-          <div className="s-footsettings__body">
-            <ThemeSwitch />
-            <AdvancedSwitch compact />
-          </div>
-        </details>
+        {/* Display settings stay in view in one compact row, so nothing opens and the footer never shifts. The
+            technical-details switch is here too, so a visitor without a wallet (a judge, say) sees it right away and
+            can open every technical detail at once. */}
+        <div className="s-footsettings">
+          <ThemeSwitch />
+          <AdvancedSwitch compact />
+        </div>
       </div>
     </footer>
   );
 }
 
-const THEME_OPTIONS: { value: ThemePref; label: string }[] = [
-  { value: 'system', label: 'System' },
-  { value: 'light', label: 'Light' },
-  { value: 'dark', label: 'Dark' },
+// Icons only, to keep the row short; the label goes to screen readers and to the tooltip.
+const THEME_OPTIONS: { value: ThemePref; label: string; icon: IconName }[] = [
+  { value: 'system', label: 'System theme', icon: 'monitor' },
+  { value: 'light', label: 'Light theme', icon: 'sun' },
+  { value: 'dark', label: 'Dark theme', icon: 'moon' },
 ];
 
 function ThemeSwitch() {
@@ -142,12 +142,14 @@ function ThemeSwitch() {
           key={option.value}
           type="button"
           aria-pressed={pref === option.value}
+          aria-label={option.label}
+          title={option.label}
           onClick={() => {
             setThemePref(option.value);
             setPref(option.value);
           }}
         >
-          {option.label}
+          <Icon name={option.icon} />
         </button>
       ))}
     </div>
