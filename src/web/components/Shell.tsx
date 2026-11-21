@@ -117,6 +117,7 @@ function Footer() {
         <div className="cf-row" style={{ gap: 'var(--space-4)' }}>
           <a href={REPO_URL}>GitHub</a>
           <a href={PROTOCOL_SPEC_URL}>{t.spec}</a>
+          <Link to="/roadmap">{t.roadmap}</Link>
           <span>{t.mainnet}</span>
         </div>
         {/* Display settings stay in view in one compact row, so nothing opens and the footer never shifts. The

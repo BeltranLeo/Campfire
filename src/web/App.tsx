@@ -11,6 +11,7 @@ import { Landing } from './pages/Landing';
 import { MyTrades } from './pages/MyTrades';
 import { NotBuilt } from './pages/NotBuilt';
 import { Offers } from './pages/Offers';
+import { Roadmap } from './pages/Roadmap';
 import { Take } from './pages/Take';
 import { TradePage } from './pages/TradePage';
 import { Welcome } from './pages/Welcome';
@@ -60,6 +61,7 @@ export function App() {
         {/* The design's Help FAQ lives at the end of About. */}
         <Route path="help" element={<Navigate to="/about" replace />} />
         <Route path="transparency" element={<Transparency />} />
+        <Route path="roadmap" element={<Roadmap />} />
         {import.meta.env.DEV && <Route path="dev/components" element={<DevComponents />} />}
         <Route path="*" element={<NotBuilt title="Page not found" />} />
       </Route>

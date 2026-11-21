@@ -34,6 +34,7 @@ const en = {
   footer: {
     vote: 'Vote for Campfire with CashTokens',
     spec: 'Protocol spec',
+    roadmap: 'Roadmap',
     mainnet: 'Mainnet. Real funds.',
     theme: 'Theme',
     themeSystem: 'System theme',
@@ -147,6 +148,7 @@ const es: Messages = {
   footer: {
     vote: 'Vota por Campfire con CashTokens',
     spec: 'Especificación del protocolo',
+    roadmap: 'Hoja de ruta',
     mainnet: 'Mainnet. Fondos reales.',
     theme: 'Tema',
     themeSystem: 'Tema del sistema',
