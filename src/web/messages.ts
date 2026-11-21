@@ -13,6 +13,7 @@ import { chat } from './i18n/chat';
 import { create } from './i18n/create';
 import { chats } from './i18n/chats';
 import { mytrades } from './i18n/mytrades';
+import { home } from './i18n/home';
 
 export type Lang = 'en' | 'es';
 
@@ -112,6 +113,7 @@ const en = {
   create: create.en,
   chats: chats.en,
   mytrades: mytrades.en,
+  home: home.en,
   landing: {
     title: 'Buy or sell Bitcoin Cash directly with another person',
     lead: 'No exchange holds your money. A contract on the Bitcoin Cash network locks the seller’s coins until the payment is done.',
@@ -279,6 +281,7 @@ const es: Messages = {
   create: create.es,
   chats: chats.es,
   mytrades: mytrades.es,
+  home: home.es,
   landing: {
     title: 'Compra o vende Bitcoin Cash directamente con otra persona',
     lead: 'Ninguna plataforma guarda tu dinero. Un contrato en la red de Bitcoin Cash bloquea las monedas del vendedor hasta que se completa el pago.',

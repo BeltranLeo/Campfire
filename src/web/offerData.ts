@@ -4,6 +4,7 @@
 import { namesSimulatedPayment } from '../protocol/offers.js';
 import { apiGet, type Offer, type PriceQuote, type Reputation } from './api';
 import { applyMargin, formatDayMonth } from './format';
+import { text } from './messages';
 
 /**
  * The offer's fiat payment is simulated, at least in part: the demo seller's own offers, and buy offers that asked
@@ -23,8 +24,9 @@ export function priceOf(offer: Offer, quotes: Map<string, PriceQuote> | undefine
 // The count for the role the person has on this offer: sellers on sell offers, buyers on buy offers.
 export function describeReputation(rep: Reputation, offerSide: 'sell' | 'buy'): string {
   const count = offerSide === 'sell' ? rep.completedAsSeller : rep.completedAsBuyer;
-  if (count === 0 || rep.firstCompletedAt === null) return `0 completed · new ${offerSide === 'sell' ? 'seller' : 'buyer'}`;
-  return `${count} completed · since ${formatDayMonth(rep.firstCompletedAt)}`;
+  const t = text().home;
+  if (count === 0 || rep.firstCompletedAt === null) return t.newTrader(offerSide === 'sell');
+  return t.completedSince(count, formatDayMonth(rep.firstCompletedAt));
 }
 
 export async function loadQuotes(pairs: string[]): Promise<{ byPair: Map<string, PriceQuote>; updatedAt: Date | null }> {
