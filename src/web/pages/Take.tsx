@@ -2,7 +2,7 @@ import { useState, type ReactNode } from 'react';
 import { Link, useNavigate, useParams } from 'react-router';
 import { verifyPriceQuote } from '../../protocol/trades.js';
 import { expectedEscrowFunding } from '../../protocol/escrow.js';
-import { onlySimulatedPayment } from '../../protocol/offers.js';
+import { SIMULATED_PAYMENT_METHOD, onlySimulatedPayment } from '../../protocol/offers.js';
 import { aliasFor } from '../alias';
 import { ApiError, apiGet, apiPost, type DemoInfo, type Offer, type PriceQuote, type Reputation, type TradeSummary } from '../api';
 import { assetInfo, type AssetInfo } from '../assets';
@@ -234,7 +234,14 @@ function TakeOffer({ offer }: { offer: Offer }) {
       <OfferSummary
         asset={asset}
         title={offer.isDemo ? t.fromDemoSeller(asset.symbol) : asset.symbol}
-        tag={offer.isDemo && <ProvenanceTag kind="sim">{t.demoTag}</ProvenanceTag>}
+        tag={
+          // Only what is simulated is marked, as everywhere else: an offer without a tag is real.
+          offer.isDemo ? (
+            <ProvenanceTag kind="sim">{t.demoTag}</ProvenanceTag>
+          ) : (
+            onlySimulatedPayment(doc.paymentMethods) && <ProvenanceTag kind="sim">{t.simulatedFiat}</ProvenanceTag>
+          )
+        }
         range={formatRange(doc.min, doc.max, asset)}
         methods={doc.paymentMethods}
         window={formatPaymentWindow(doc.paymentWindowSec)}
@@ -301,7 +308,7 @@ function TakeOffer({ offer }: { offer: Offer }) {
                 marginBps={marginBps}
                 fiat={doc.fiat}
                 asset={asset}
-                lockWhen={t.lockWhenTake}
+                holds={t.priceHeldTake}
                 loading={price.type === 'floating' && quote.loading && !quote.data}
               />
             )}
@@ -359,23 +366,22 @@ function TakeOffer({ offer }: { offer: Offer }) {
                   busy={taking}
                   disabled={!prep.data}
                   onClick={take}
-                  note={
-                    // Say why the button waits: a long-used wallet takes a few seconds to find a fresh address.
-                    !prep.data
-                      ? findingNote
-                      : offer.isDemo
-                        ? t.noSignatureDemo
-                        : t.noSignature
-                  }
+                  // Say why the button waits: a long-used wallet takes a few seconds to find a fresh address.
+                  note={!prep.data ? findingNote : t.noSignature}
                 >
-                  {t.takeBuy(formatAmount(amount!, asset), youPay)}
+                  {/* Only the coins: the fiat is re-quoted when the offer is taken, so the well above gives it with ≈. */}
+                  {t.takeBuy(formatAmount(amount!, asset))}
                 </Button>
               )}
             </div>
-            {/* What reassures a first-time buyer, in one line under the button instead of a box above it. */}
+            {/* What reassures a first-time buyer, under the button instead of a box above it: what it costs, and what
+                taking starts. "You pay only once the coins are locked" is the escrow's whole promise to the buyer. */}
             <p className="cf-small cf-muted">
               <strong>{t.noBchNeeded}</strong>{' '}
-              {identity ? t.freeWithWallet(prep.data?.fresh !== false) : t.freeNoWallet}
+              {identity ? t.freeWithWallet(prep.data?.fresh !== false, asset.symbol) : t.freeNoWallet}
+            </p>
+            <p className="cf-small cf-muted">
+              <strong>{t.nextTitle}</strong> {t.nextTake(offer.isDemo === true, asset.symbol)}
             </p>
           </div>
         </section>
@@ -567,7 +573,7 @@ function TakeBuyOffer({ offer }: { offer: Offer }) {
                 marginBps={marginBps}
                 fiat={doc.fiat}
                 asset={asset}
-                lockWhen={t.lockWhenRequest}
+                holds={t.priceHeldRequest}
                 loading={price.type === 'floating' && quote.loading && !quote.data}
               />
             )}
@@ -657,6 +663,8 @@ function OfferSummary(props: {
   terms?: string;
 }) {
   const t = useMessages().take;
+  const realMethods = props.methods.filter((method) => method !== SIMULATED_PAYMENT_METHOD);
+  const mixed = realMethods.length > 0 && realMethods.length < props.methods.length;
   return (
     <section className="cf-card" data-flush>
       <div className="cf-card__section tk-summary">
@@ -669,12 +677,20 @@ function OfferSummary(props: {
         </div>
         <span className="s-chips">
           <span className="cf-mono">{props.range}</span>
-          {props.methods.map((method) => (
-            <span key={method} className="s-chip">
-              {paymentMethodLabel(method)}
-            </span>
-          ))}
+          {props.methods.map((method) =>
+            // The simulated payment is drawn like everything simulated, never like a real method next to it.
+            method === SIMULATED_PAYMENT_METHOD ? (
+              <ProvenanceTag key={method} kind="sim">
+                {paymentMethodLabel(method)}
+              </ProvenanceTag>
+            ) : (
+              <span key={method} className="s-chip">
+                {paymentMethodLabel(method)}
+              </span>
+            ),
+          )}
         </span>
+        {mixed && <span className="cf-small cf-muted">{t.mixedMethods(realMethods.map(paymentMethodLabel).join(', '))}</span>}
         <span className="cf-small cf-muted">
           {props.window} · {props.party}
         </span>
@@ -699,8 +715,8 @@ function TakeWell(props: {
   marginBps: number;
   fiat: string;
   asset: AssetInfo;
-  /** "you take it" or "you send the request". */
-  lockWhen: string;
+  /** When the final price is signed and how long it holds, worded for this side. */
+  holds: string;
   loading: boolean;
 }) {
   const t = useMessages().take;
@@ -710,8 +726,7 @@ function TakeWell(props: {
       <span className="tk-big">{props.big ?? (props.loading ? <Skeleton width={140} height={28} /> : '—')}</span>
       {props.unitPrice ? (
         <p className="cf-small cf-muted">
-          1 {props.asset.symbol} = {formatFiat(applyMargin(props.unitPrice, props.marginBps), props.fiat)} · {t.priceLocked}{' '}
-          <strong>10:00</strong> {t.once(props.lockWhen)}
+          1 {props.asset.symbol} = {formatFiat(applyMargin(props.unitPrice, props.marginBps), props.fiat)} · {props.holds}
         </p>
       ) : props.loading ? null : (
         <p className="cf-small cf-muted">{t.priceUnavailable}</p>

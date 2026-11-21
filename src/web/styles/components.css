@@ -11,6 +11,8 @@
 /* Links are blue: blue is information and waiting, never the action. */
 .cf a { color: var(--escrow); text-underline-offset: 3px; }
 .cf h1, .cf h2, .cf h3, .cf p { margin: 0; }
+/* Paragraphs never end on a lone word on a narrow screen. */
+.cf p { text-wrap: pretty; }
 
 /* Icons (Phosphor Bold) drawn by CSS: a mask over currentColor, so they take the colour of their meaning. */
 :root {

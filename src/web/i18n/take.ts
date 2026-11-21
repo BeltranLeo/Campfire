@@ -19,6 +19,9 @@ const en = {
   // Taking a sell offer
   fromDemoSeller: (symbol: string) => `${symbol} from Demo seller`,
   demoTag: 'Demo seller · simulated fiat',
+  // An offer that lists the simulated payment next to real methods: which one applies depends on who answers.
+  mixedMethods: (real: string) =>
+    `Simulated payment only applies when Campfire's demo seller answers. With anyone else the payment is real: ${real}.`,
   sellerRecord: (name: string, completed: number | null, withYou: number | null) =>
     [name, completed === null ? null : `${completed} completed`, withYouText(withYou)].filter(Boolean).join(' · '),
   closed: 'This offer is closed',
@@ -36,8 +39,8 @@ const en = {
   rangeEnds: (low: string, high: string) => `${low} and ${high}`,
   expired: 'This quote expired',
   expiredBody: 'The price was not refreshed for over 10 minutes. Get a new quote to continue.',
-  lockWhenTake: 'you take it',
-  lockWhenRequest: 'you send the request',
+  priceHeldTake: 'Final price signed when you take it, then held 10 minutes for the seller to accept.',
+  priceHeldRequest: 'Final price signed when you send the request, then held 10 minutes for the buyer to accept.',
   prepError: 'We could not prepare your wallet for this trade',
   notTaken: 'The offer was not taken',
   connectToTake: 'Connect wallet to take this offer',
@@ -45,12 +48,11 @@ const en = {
   seePastTrades: 'See past trades on-chain',
   newQuote: 'Get a new quote',
   takeOffer: 'Take offer',
-  noSignatureDemo: 'No signature needed. The demo seller locks the BCH right away.',
   noSignature: 'No signature needed.',
-  takeBuy: (amount: string, pay: string) => `Take offer: buy ${amount} for ${pay}`,
+  takeBuy: (amount: string) => `Take offer: buy ${amount}`,
   noBchNeeded: 'You do not need any BCH.',
-  freeWithWallet: (fresh: boolean) =>
-    `Taking an offer is free. The seller locks the BCH and pays its network fee; the funds go to ${fresh ? 'a fresh address' : 'an address'} of your wallet, shown under Offer details.`,
+  freeWithWallet: (fresh: boolean, coins: string) =>
+    `Taking an offer is free. The seller locks the ${coins} and pays its network fee; the funds go to ${fresh ? 'a fresh address' : 'an address'} of your wallet, shown under Offer details.`,
   freeNoWallet: 'You only need a wallet to receive the funds. Taking an offer is free.',
   // Answering a buy offer
   buyerWants: (symbol: string) => `A buyer wants ${symbol}`,
@@ -80,13 +82,16 @@ const en = {
   offerToSell: (amount: string | null) => (amount ? `Offer to sell ${amount}` : 'Offer to sell'),
   plus: (amount: string, bch: string) => `${amount} plus ${bch}`,
   nextTitle: 'What happens next.',
+  // Taking a sell offer: the seller's deadlines are the protocol's (QUOTE_VALIDITY_SEC, FUNDING_WINDOW_SEC).
+  nextTake: (demo: boolean, coins: string) =>
+    demo
+      ? `The demo seller accepts and locks the ${coins} in the contract right away. You pay only once the coins are locked for you; here the payment is simulated.`
+      : `The seller has 10 minutes to accept, then 30 to lock the ${coins} in the contract. You pay only once the coins are locked for you. If the seller does not lock in time, the request lapses and you lose nothing.`,
   next: (lock: string | null) =>
     `The buyer accepts. Then you lock ${lock ?? 'the coins'} in the contract and share how to pay you. The buyer pays, and you release the coins.`,
   // Summary, price and details
   terms: 'Terms:',
   priceUnavailable: 'The price could not be loaded or verified. It is retried every 30 s.',
-  priceLocked: 'Price locked for',
-  once: (when: string) => `once ${when}`,
   offerDetails: 'Offer details',
   offer: 'Offer',
   sponsored: ' Publishing fee paid by Campfire',
@@ -124,6 +129,8 @@ const es: typeof en = {
   somethingWrong: 'Algo salió mal. Inténtalo de nuevo.',
   fromDemoSeller: (symbol) => `${symbol} del vendedor de demostración`,
   demoTag: 'Vendedor de demostración · dinero simulado',
+  mixedMethods: (real) =>
+    `El pago simulado solo vale cuando responde el vendedor de demostración de Campfire. Con cualquier otra persona el pago es real: ${real}.`,
   sellerRecord: (name, completed, withYou) =>
     [name, completed === null ? null : `${completed} completadas`, withYouTextEs(withYou)].filter(Boolean).join(' · '),
   closed: 'Esta oferta está cerrada',
@@ -140,8 +147,8 @@ const es: typeof en = {
   rangeEnds: (low, high) => `${low} y ${high}`,
   expired: 'Esta cotización venció',
   expiredBody: 'El precio no se actualizó en más de 10 minutos. Pide una cotización nueva para seguir.',
-  lockWhenTake: 'la tomes',
-  lockWhenRequest: 'envíes la solicitud',
+  priceHeldTake: 'El precio final se firma cuando la tomas y queda fijo 10 minutos para que el vendedor acepte.',
+  priceHeldRequest: 'El precio final se firma cuando envías la solicitud y queda fijo 10 minutos para que el comprador acepte.',
   prepError: 'No pudimos preparar tu billetera para esta operación',
   notTaken: 'No se tomó la oferta',
   connectToTake: 'Conecta tu billetera para tomar esta oferta',
@@ -149,12 +156,11 @@ const es: typeof en = {
   seePastTrades: 'Ver operaciones anteriores en la cadena',
   newQuote: 'Pedir una cotización nueva',
   takeOffer: 'Tomar la oferta',
-  noSignatureDemo: 'No hace falta firmar. El vendedor de demostración bloquea los BCH en el momento.',
   noSignature: 'No hace falta firmar.',
-  takeBuy: (amount, pay) => `Tomar la oferta: comprar ${amount} por ${pay}`,
+  takeBuy: (amount) => `Tomar la oferta: comprar ${amount}`,
   noBchNeeded: 'No necesitas tener BCH.',
-  freeWithWallet: (fresh) =>
-    `Tomar una oferta es gratis. El vendedor bloquea los BCH y paga la comisión de red; los fondos van a ${fresh ? 'una dirección nueva' : 'una dirección'} de tu billetera, que aparece en «Detalles de la oferta».`,
+  freeWithWallet: (fresh, coins) =>
+    `Tomar una oferta es gratis. El vendedor bloquea los ${coins} y paga la comisión de red; los fondos van a ${fresh ? 'una dirección nueva' : 'una dirección'} de tu billetera, que aparece en «Detalles de la oferta».`,
   freeNoWallet: 'Solo necesitas una billetera para recibir los fondos. Tomar una oferta es gratis.',
   buyerWants: (symbol) => `Un comprador quiere ${symbol}`,
   simulatedFiat: 'Dinero simulado',
@@ -183,12 +189,14 @@ const es: typeof en = {
   offerToSell: (amount) => (amount ? `Ofrecer vender ${amount}` : 'Ofrecer vender'),
   plus: (amount, bch) => `${amount} más ${bch}`,
   nextTitle: 'Qué pasa después.',
+  nextTake: (demo, coins) =>
+    demo
+      ? `El vendedor de demostración acepta y bloquea los ${coins} en el contrato en el momento. Pagas recién cuando están bloqueados para ti; aquí el pago es simulado.`
+      : `El vendedor tiene 10 minutos para aceptar y luego 30 para bloquear los ${coins} en el contrato. Pagas recién cuando están bloqueados para ti. Si no los bloquea a tiempo, la solicitud vence y no pierdes nada.`,
   next: (lock) =>
     `El comprador acepta. Luego bloqueas ${lock ?? 'las monedas'} en el contrato y compartes cómo pagarte. El comprador paga, y tú liberas las monedas.`,
   terms: 'Condiciones:',
   priceUnavailable: 'No se pudo cargar ni verificar el precio. Se reintenta cada 30 s.',
-  priceLocked: 'Precio fijo durante',
-  once: (when) => `cuando ${when}`,
   offerDetails: 'Detalles de la oferta',
   offer: 'Oferta',
   sponsored: ' Campfire pagó la comisión de publicación',
