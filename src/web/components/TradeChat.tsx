@@ -26,6 +26,7 @@ import { useMessages } from '../lang';
 import type { Messages } from '../messages';
 import { Button } from './Button';
 import { ChatImageView } from './ChatImage';
+import { Icon } from './Icon';
 import { Notice, Skeleton } from './States';
 
 // The chat card on /trade/:id (Trade-* screens), for the buyer and the seller only. Messages are encrypted and
@@ -267,9 +268,19 @@ function ChatThread({ trade, role, sessionKey, open }: { trade: Trade; role: Cha
               }}
             />
             <input ref={fileRef} type="file" accept={CHAT_IMAGE_ACCEPT} hidden aria-label={t.receiptImage} onChange={attach} />
-            <Button variant="ghost" disabled={!identity || sending} onClick={() => fileRef.current?.click()}>
-              {t.attach}
-            </Button>
+            {/* An icon, not a label: "Attach receipt" beside the field left no room to type. The name stays for
+                screen readers and as a tooltip. */}
+            <button
+              type="button"
+              className="cf-btn tr-chat__attach"
+              data-variant="ghost"
+              aria-label={t.attach}
+              title={t.attach}
+              disabled={!identity || sending}
+              onClick={() => fileRef.current?.click()}
+            >
+              <Icon name="paperclip" />
+            </button>
             <Button type="submit" busy={sending} disabled={!identity || !text.trim()}>
               {t.send}
             </Button>

@@ -5,6 +5,7 @@ import { decryptPaymentDetails, verifyPaymentDetailsSignature } from '../../prot
 import { pkhToCashAddress } from '../../protocol/keys.js';
 import { verifyPriceQuote } from '../../protocol/trades.js';
 import { ApiError, apiGet, apiPost, type Offer, type Reputation, type Trade } from '../api';
+import { aliasFor } from '../alias';
 import { assetInfo, type AssetInfo } from '../assets';
 import { ActionCard } from '../components/ActionCard';
 import { Button } from '../components/Button';
@@ -31,6 +32,8 @@ import {
   formatHourMinute,
   paymentMethodLabel,
 } from '../format';
+import { useCompletedWith } from '../hooks/useCompletedWith';
+import { otherParty } from '../mytrades';
 import { usePoll } from '../hooks/usePoll';
 import { useTradeAction } from '../hooks/useTradeAction';
 import { SellerAction, SellerResult } from './SellerTrade';
@@ -175,6 +178,7 @@ function TradeView({ trade, role, onUpdate, reload }: { trade: Trade; role: Role
             )}
             {trade.isDemo && <ProvenanceTag kind="sim">{t.simulatedPayment}</ProvenanceTag>}
           </div>
+          {(view === 'buyer' || view === 'seller') && <PartyLine trade={trade} view={view} />}
         </div>
 
         {view === 'buyer' ? (
@@ -200,6 +204,31 @@ function TradeView({ trade, role, onUpdate, reload }: { trade: Trade; role: Role
         <OnChainDetails trade={trade} asset={asset} amount={amount} fiat={fiat} payout={payout} check={check} ds={ds} view={view} />
       </div>
     </main>
+  );
+}
+
+// Who the other person is, under the title, for the two people in the trade only: the visitor's public view names
+// nobody. Their alias (the same name the offers list shows), their record, and how many trades the reader completed
+// with them, from the reader's own list. Invented: the design only names the other person under on-chain details.
+function PartyLine({ trade, view }: { trade: Trade; view: 'buyer' | 'seller' }) {
+  const party = view === 'seller' ? 'buyer' : 'seller';
+  const partyIdentity = party === 'buyer' ? trade.buyerIdentity : trade.sellerIdentity;
+  const reputation = usePoll(() => apiGet<Reputation>(`/api/identities/${partyIdentity}/reputation`), partyIdentity);
+  const withYou = useCompletedWith(partyIdentity);
+  const rep = reputation.data;
+  const t = useMessages().tradePage;
+  return (
+    <p className="cf-small">
+      <span className="cf-muted">{t.partyLabel(party)}</span> <strong>{otherParty(trade, view)}</strong>
+      {rep && (
+        <span className="cf-muted">
+          {' · '}
+          {party === 'buyer' ? rep.completedAsBuyer : rep.completedAsSeller}
+          {t.completedAs(party)}
+        </span>
+      )}
+      {withYou !== null && <span className="cf-muted"> · {t.withYou(withYou)}</span>}
+    </p>
   );
 }
 
@@ -1102,7 +1131,7 @@ function OnChainDetails(props: {
             </div>
             <div className="cf-stack" data-gap="1">
               <span>
-                {party === 'seller' && trade.isDemo && <strong>{t.demoSeller}</strong>}
+                {party === 'seller' && trade.isDemo ? <strong>{t.demoSeller}</strong> : <strong>{aliasFor(partyIdentity).name} </strong>}
                 <HashLink value={partyIdentity} kind="plain" />
               </span>
               {rep && (

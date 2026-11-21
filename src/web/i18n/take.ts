@@ -1,5 +1,10 @@
 // The offer page, where an offer is taken (pages/Take.tsx). `es` must have the shape of `en`; messages.ts checks it.
 
+// Invented copy: how many trades the reader has completed with this person (hooks/useCompletedWith.ts); null while
+// unknown, so a visitor without a wallet sees nothing.
+const withYouText = (n: number | null) => (n === null ? null : n === 0 ? 'first time' : `${n} with you`);
+const withYouTextEs = (n: number | null) => (n === null ? null : n === 0 ? 'primera vez' : `${n} contigo`);
+
 const en = {
   back: '← Offers',
   titleSellTo: (symbol: string) => `Sell ${symbol} to this buyer`,
@@ -14,7 +19,8 @@ const en = {
   // Taking a sell offer
   fromDemoSeller: (symbol: string) => `${symbol} from Demo seller`,
   demoTag: 'Demo seller · simulated fiat',
-  sellerRecord: (name: string, completed: number | null) => (completed === null ? name : `${name} · ${completed} completed`),
+  sellerRecord: (name: string, completed: number | null, withYou: number | null) =>
+    [name, completed === null ? null : `${completed} completed`, withYouText(withYou)].filter(Boolean).join(' · '),
   closed: 'This offer is closed',
   closedBySeller: 'The seller closed it or it expired. Other offers are still open.',
   closedByBuyer: 'The buyer closed it or it expired. Other offers are still open.',
@@ -51,8 +57,10 @@ const en = {
   simulatedFiat: 'Simulated fiat',
   offerOnMainnet: 'Offer on mainnet',
   within: (minutes: number) => `within ${minutes} min`,
-  buyerRecord: (name: string, completed: number | null) =>
-    completed === null ? name : `${name} · ${completed} ${completed === 1 ? 'trade' : 'trades'} completed`,
+  buyerRecord: (name: string, completed: number | null, withYou: number | null) =>
+    [name, completed === null ? null : `${completed} ${completed === 1 ? 'trade' : 'trades'} completed`, withYouText(withYou)]
+      .filter(Boolean)
+      .join(' · '),
   demoOnly: 'Only the demo seller answers this offer',
   demoOnlyBody:
     'The buyer asked for a demo answer, so the payment is simulated. Selling here would lock real coins for a payment that never comes.',
@@ -116,7 +124,8 @@ const es: typeof en = {
   somethingWrong: 'Algo salió mal. Inténtalo de nuevo.',
   fromDemoSeller: (symbol) => `${symbol} del vendedor de demostración`,
   demoTag: 'Vendedor de demostración · dinero simulado',
-  sellerRecord: (name, completed) => (completed === null ? name : `${name} · ${completed} completadas`),
+  sellerRecord: (name, completed, withYou) =>
+    [name, completed === null ? null : `${completed} completadas`, withYouTextEs(withYou)].filter(Boolean).join(' · '),
   closed: 'Esta oferta está cerrada',
   closedBySeller: 'El vendedor la cerró o venció. Hay otras ofertas abiertas.',
   closedByBuyer: 'El comprador la cerró o venció. Hay otras ofertas abiertas.',
@@ -151,8 +160,10 @@ const es: typeof en = {
   simulatedFiat: 'Dinero simulado',
   offerOnMainnet: 'Oferta en mainnet',
   within: (minutes) => `en menos de ${minutes} min`,
-  buyerRecord: (name, completed) =>
-    completed === null ? name : `${name} · ${completed} ${completed === 1 ? 'operación completada' : 'operaciones completadas'}`,
+  buyerRecord: (name, completed, withYou) =>
+    [name, completed === null ? null : `${completed} ${completed === 1 ? 'operación completada' : 'operaciones completadas'}`, withYouTextEs(withYou)]
+      .filter(Boolean)
+      .join(' · '),
   demoOnly: 'Solo el vendedor de demostración responde esta oferta',
   demoOnlyBody:
     'El comprador pidió una respuesta de demostración, así que el pago es simulado. Vender aquí bloquearía monedas reales por un pago que nunca llega.',

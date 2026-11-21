@@ -3,6 +3,7 @@
 
 import type { Offer, Trade } from './api';
 import { isFinalState } from './api';
+import { aliasFor } from './alias';
 import { formatDayMonth, formatHourMinute } from './format';
 import { lockedCoins } from './trade';
 import { text } from './messages';
@@ -84,8 +85,27 @@ export function rowTitle(trade: Trade, role: 'buyer' | 'seller', amount: string,
   return text().mytrades.rowTitle(role, done, amount, fiat);
 }
 
-/** "16 Nov, 13:40", and how it ended when it did not simply complete. */
-export function historyNote(trade: Trade, role: 'buyer' | 'seller'): string {
+/** The other person's name as this person sees it: the demo seller by role, anyone else by their alias. */
+export function otherParty(trade: Pick<Trade, 'buyerIdentity' | 'sellerIdentity' | 'isDemo'>, role: 'buyer' | 'seller'): string {
+  if (role === 'seller') return aliasFor(trade.buyerIdentity).name;
+  return trade.isDemo ? text().mytrades.demoSeller : aliasFor(trade.sellerIdentity).name;
+}
+
+/**
+ * How many trades between `me` and `other` ended with the coins delivered: released by the seller, or decided by the
+ * arbiter after a dispute. A trade the seller got back because the buyer never paid is not counted. Read from the
+ * person's own list (GET /api/trades?identity=, for that identity only), so it never shows anyone else's pairs.
+ */
+export function completedWith(trades: Trade[], me: string, other: string): number {
+  return trades.filter(
+    (t) =>
+      ((t.buyerIdentity === me && t.sellerIdentity === other) || (t.sellerIdentity === me && t.buyerIdentity === other)) &&
+      (t.status === 'Released' || t.status === 'ResolvedBuyer' || (t.status === 'ResolvedSeller' && t.disputedAt !== undefined)),
+  ).length;
+}
+
+/** "16 Nov, 13:40 · Demo seller", and how it ended when it did not simply complete. `other` names the other person. */
+export function historyNote(trade: Trade, role: 'buyer' | 'seller', other?: string): string {
   const at = endedAt(trade);
   const when = `${formatDayMonth(at)}, ${formatHourMinute(new Date(at * 1000))}`;
   const t = text().mytrades;
@@ -112,7 +132,7 @@ export function historyNote(trade: Trade, role: 'buyer' | 'seller'): string {
       }
       break;
   }
-  return how ? `${when} · ${how}` : when;
+  return [when, other, how].filter(Boolean).join(' · ');
 }
 
 export const isActive = (trade: Trade) => !isFinalState(trade.status);

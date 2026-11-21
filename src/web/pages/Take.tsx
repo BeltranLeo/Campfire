@@ -23,6 +23,7 @@ import { canDeposit, checkDeposit } from '../seller';
 import { spendableBch, tokenBalance } from '../coins';
 import { useWalletCoins } from '../walletCoins';
 import { useNow } from '../hooks/useNow';
+import { useCompletedWith } from '../hooks/useCompletedWith';
 import { usePoll } from '../hooks/usePoll';
 import {
   browserStore,
@@ -110,6 +111,7 @@ function TakeOffer({ offer }: { offer: Offer }) {
   const t = m.take;
 
   const reputation = usePoll(() => apiGet<Reputation>(`/api/identities/${offer.sellerIdentity}/reputation`), offer.sellerIdentity);
+  const withYou = useCompletedWith(offer.sellerIdentity);
   const demo = usePoll(() => (offer.isDemo ? apiGet<DemoInfo>('/api/demo') : Promise.resolve(null)), String(offer.isDemo));
 
   // --- Indicative quote, verified against the offer's oracle key ---
@@ -236,7 +238,7 @@ function TakeOffer({ offer }: { offer: Offer }) {
         range={formatRange(doc.min, doc.max, asset)}
         methods={doc.paymentMethods}
         window={formatPaymentWindow(doc.paymentWindowSec)}
-        party={t.sellerRecord(aliasFor(offer.sellerIdentity).name, rep ? rep.completedAsSeller : null)}
+        party={t.sellerRecord(aliasFor(offer.sellerIdentity).name, rep ? rep.completedAsSeller : null, withYou)}
         terms={doc.terms}
       />
 
@@ -399,6 +401,7 @@ function TakeBuyOffer({ offer }: { offer: Offer }) {
   const wallet = useWallet();
   const navigate = useNavigate();
   const reputation = usePoll(() => apiGet<Reputation>(`/api/identities/${offer.sellerIdentity}/reputation`), offer.sellerIdentity);
+  const withYou = useCompletedWith(offer.sellerIdentity);
   const m = useMessages();
   const t = m.take;
 
@@ -509,7 +512,7 @@ function TakeBuyOffer({ offer }: { offer: Offer }) {
         range={formatRange(doc.min, doc.max, asset)}
         methods={doc.paymentMethods}
         window={t.within(Math.round(doc.paymentWindowSec / 60))}
-        party={t.buyerRecord(aliasFor(offer.sellerIdentity).name, rep ? rep.completedAsBuyer : null)}
+        party={t.buyerRecord(aliasFor(offer.sellerIdentity).name, rep ? rep.completedAsBuyer : null, withYou)}
         terms={doc.terms}
       />
       {/* Invented copy: answering a buy offer makes you the one paid in fiat, so the risk of a reversed payment is yours. */}

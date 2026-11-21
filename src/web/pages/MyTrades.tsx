@@ -1,5 +1,4 @@
 import { Link, Navigate, useSearchParams } from 'react-router';
-import { aliasFor } from '../alias';
 import { ApiError, apiGet, type Trade } from '../api';
 import { assetInfo } from '../assets';
 import { Button } from '../components/Button';
@@ -10,7 +9,7 @@ import { useConfig } from '../config';
 import { formatAmount, formatFiatAmount } from '../format';
 import { useNow } from '../hooks/useNow';
 import { usePoll } from '../hooks/usePoll';
-import { historyNote, isActive, nextStep, rowTitle, sortActive, sortHistory } from '../mytrades';
+import { historyNote, isActive, nextStep, otherParty, rowTitle, sortActive, sortHistory } from '../mytrades';
 import { roleOf } from '../trade';
 import { useWallet } from '../wallet';
 import { useMessages } from '../lang';
@@ -150,7 +149,7 @@ function ActiveTab({ trades, identity }: { trades: Trade[]; identity: string }) 
     <section className="cf-card" data-flush>
       {rows.map(({ trade, next }) => {
         const role = sideOf(trade, identity);
-        const other = role === 'buyer' ? (trade.isDemo ? t.demoSeller : aliasFor(trade.sellerIdentity).name) : aliasFor(trade.buyerIdentity).name;
+        const other = otherParty(trade, role);
         return (
           <Link key={trade.id} className="s-item" to={`/trade/${trade.id}`}>
             <span className="s-cell">
@@ -197,7 +196,7 @@ function HistoryTab({ trades, identity }: { trades: Trade[]; identity: string })
           <Link key={trade.id} className="s-item" to={`/trade/${trade.id}`}>
             <span className="s-cell">
               <strong>{title(trade, role)}</strong>
-              <span className="cf-small cf-muted">{historyNote(trade, role)}</span>
+              <span className="cf-small cf-muted">{historyNote(trade, role, otherParty(trade, role))}</span>
             </span>
             <StatusPill state={trade.status} role={role} side={trade.side} />
           </Link>

@@ -184,6 +184,9 @@ const en = {
   seller: 'Seller',
   demoSeller: 'Demo seller ',
   completedAs: (role: 'buyer' | 'seller') => ` completed as ${role}`,
+  // Invented copy: the other person's name under the title, and how many trades the reader completed with them.
+  partyLabel: (role: 'buyer' | 'seller'): string => (role === 'buyer' ? 'Buyer:' : 'Seller:'),
+  withYou: (n: number) => (n === 0 ? 'first time' : `${n} with you`),
   since: (date: string) => ` · since ${date}`,
   countedByCampfire: 'Counted by Campfire. It cannot be verified on-chain and can be inflated with a second wallet.',
   // Loading and errors
@@ -365,6 +368,8 @@ const es: typeof en = {
   seller: 'Vendedor',
   demoSeller: 'Vendedor de demostración ',
   completedAs: (role) => ` completadas como ${role === 'buyer' ? 'comprador' : 'vendedor'}`,
+  partyLabel: (role) => (role === 'buyer' ? 'Comprador:' : 'Vendedor:'),
+  withYou: (n) => (n === 0 ? 'primera vez' : `${n} contigo`),
   since: (date) => ` · desde el ${date}`,
   countedByCampfire: 'Lo cuenta Campfire. No se puede verificar en la cadena y se puede inflar con una segunda billetera.',
   loading: 'Cargando la operación…',
