@@ -6,3 +6,5 @@ export * from './chatImage.js';
 export * from './escrow.js';
 export * from './fees.js';
 export * from './signin.js';
+export * from './marker.js';
+export * from './bcmr.js';

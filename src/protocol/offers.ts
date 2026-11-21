@@ -25,6 +25,9 @@ import {
 
 export const PROTOCOL_IDENTIFIER = 'CMPF';
 export const FORMAT_VERSION = 1;
+// On-chain format 2: the same offer JSON (still `v: 1`), with an NFT marker instead of a 1,000-sat one (section 3.4).
+export const FORMAT_VERSION_NFT = 2;
+export type OnChainFormatVersion = typeof FORMAT_VERSION | typeof FORMAT_VERSION_NFT;
 export const MESSAGE_TYPE_OFFER = 1;
 export const MARKER_SATOSHIS = 1000n;
 export const OP_RETURN_MAX_BYTES = 223;
@@ -76,7 +79,7 @@ export interface OfferDocument {
 }
 
 export interface OfferOnChainRecord {
-  version: 1;
+  version: OnChainFormatVersion;
   messageType: 1;
   arbiterPk: string;
   oraclePk: string | null;
@@ -203,6 +206,7 @@ export function encodeOfferOpReturn(params: {
   arbiterPk: Uint8Array | string;
   oraclePk?: Uint8Array | string | null;
   contentHash: Uint8Array | string;
+  version?: OnChainFormatVersion;
 }): Uint8Array {
   const arbiterHex = binToHex(toBytes(params.arbiterPk, 'arbiterPk'));
   if (!isCompressedPubkeyHex(arbiterHex)) {
@@ -231,7 +235,7 @@ export function encodeOfferOpReturn(params: {
 
   const pushes = [
     utf8ToBin(PROTOCOL_IDENTIFIER),
-    Uint8Array.from([FORMAT_VERSION]),
+    Uint8Array.from([params.version ?? FORMAT_VERSION]),
     Uint8Array.from([MESSAGE_TYPE_OFFER]),
     arbiterBytes,
     oracleBytes,
@@ -276,7 +280,7 @@ export function decodeOfferOpReturn(bytecode: Uint8Array | string): OfferOnChain
     throw new Error(`Unexpected protocol identifier: "${protocolId}"`);
   }
   const versionBytes = extractPushBytes(verInst);
-  if (versionBytes.length !== 1 || versionBytes[0] !== FORMAT_VERSION) {
+  if (versionBytes.length !== 1 || (versionBytes[0] !== FORMAT_VERSION && versionBytes[0] !== FORMAT_VERSION_NFT)) {
     throw new Error(`Unsupported on-chain format version`);
   }
   const typeBytes = extractPushBytes(typeInst);
@@ -305,7 +309,7 @@ export function decodeOfferOpReturn(bytecode: Uint8Array | string): OfferOnChain
   }
 
   return {
-    version: FORMAT_VERSION,
+    version: versionBytes[0] as OnChainFormatVersion,
     messageType: MESSAGE_TYPE_OFFER,
     arbiterPk: arbiterHex,
     oraclePk,
@@ -335,7 +339,8 @@ export function verifyOfferAgainstOpReturn(
   const document = parsed as OfferDocument;
   validateOfferDocument(document);
 
-  if (document.v !== onChain.version) {
+  // Both on-chain formats carry the version-1 JSON; format 2 changes only the marker.
+  if (document.v !== FORMAT_VERSION) {
     throw new Error('Offer JSON version does not match on-chain version');
   }
   if (document.arbiter.toLowerCase() !== onChain.arbiterPk) {

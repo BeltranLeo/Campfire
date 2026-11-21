@@ -31,6 +31,9 @@ import {
   buildCloseOfferTransaction,
   buildFundEscrowTransaction,
   buildPublishOfferTransaction,
+  buildPublishNftOfferTransaction,
+  buildCloseNftOfferTransaction,
+  offerMinter,
   buildReleaseRequest,
   computeTradeFees,
   createEscrowContract,
@@ -109,7 +112,7 @@ const oracleSk = sha256.hash(utf8ToBin('service-test-oracle'));
 const ADMIN_TOKEN = 'service-test-admin-token';
 const ADMIN = { authorization: `Bearer ${ADMIN_TOKEN}` };
 
-function setupTestContext(initialNow = 1_794_900_000) {
+function setupTestContext(initialNow = 1_794_900_000, extra: { offerCategory?: string } = {}) {
   let currentNow = initialNow;
   const provider = new MockNetworkProvider();
   provider.network = Network.MAINNET;
@@ -132,6 +135,7 @@ function setupTestContext(initialNow = 1_794_900_000) {
     oracle,
     arbiterPrivateKey: arbiterSk,
     nowSeconds: () => currentNow,
+    offerCategory: extra.offerCategory,
   });
   const api = createApiHandler({ service, oracle, adminToken: ADMIN_TOKEN });
 
@@ -1060,5 +1064,76 @@ describe('Fee computation', () => {
     expect(() => validateTradeFees({ ...base, fees: [{ role: 'arbiter', pkh: feePkh(arbiterPk), satoshis: '50001' }] })).toThrow(/above 5%/);
     expect(() => validateTradeFees({ ...base, fees: [{ role: 'arbiter', pkh: feePkh(arbiterPk), satoshis: '500' }] })).toThrow(/dust/);
     expect(() => validateTradeFees({ ...base, oraclePk: undefined, fees: [{ role: 'oracle', pkh: feePkh(oraclePk), satoshis: '2500' }] })).toThrow(/oracle/);
+  });
+});
+
+describe('format-2 offers with an NFT marker (section 3.4)', () => {
+  const CATEGORY = binToHex(sha256.hash(utf8ToBin('campfire-offer-category-test')));
+  const minting = (category: string) => ({ category, amount: 0n, nft: { capability: 'minting' as const, commitment: '' } });
+
+  async function publishNft(ctx: ReturnType<typeof setupTestContext>, category = CATEGORY, index = 0) {
+    const { data: reg } = await registerSignedIn(ctx.jsonReq, seller);
+    const cfg = await ctx.jsonReq('GET', '/api/config');
+    const offerDoc: OfferDocument = {
+      v: 1, side: 'sell', asset: BCH_ASSET, assetDecimals: BCH_DECIMALS, fiat: 'ARS',
+      price: { type: 'floating', pair: 'BCH/ARS', marginBps: 200 },
+      min: '100000', max: '1000000', paymentMethods: ['bank-transfer'], paymentWindowSec: 3600,
+      expiresAt: ctx.getNow() + 86_400, arbiter: cfg.data.arbiterPk, oracle: cfg.data.oraclePk,
+    };
+    const minterUtxo = ctx.provider.addUtxo(offerMinter(ctx.provider).tokenAddress, randomUtxo({ satoshis: 1000n, token: minting(category) }));
+    const addrMap = deriveWalletAddressMap({ receiveXpub: seller.receiveXpub, count: 5 });
+    const raw = ctx.provider.addUtxo(seller.receiveAddr(0), randomUtxo({ satoshis: 100_000n }));
+    const utxos = tagWalletUtxos([raw], addrMap).map((u) => ({ ...u, signer: new SignatureTemplate(seller.receivePriv(u.keyIndex)) }));
+    const markerAddress = pkhToCashAddress(derivePayoutPkhFromXpub(seller.receiveXpub, index), { tokenAware: true });
+    const pubTx = buildPublishNftOfferTransaction({
+      provider: ctx.provider, document: offerDoc, utxos, minterUtxo, markerAddress, changeAddress: seller.receiveAddr(0),
+    });
+    const res = await ctx.jsonReq<{ offer: StoredOffer }>('POST', '/api/offers', {
+      sellerIdentity: reg.identity, offerJson: pubTx.offerJson, offerTxHex: pubTx.hex, markerReceiveIndex: index,
+    });
+    return { res, sellerId: reg.identity as string, markerAddress, addrMap, cfg };
+  }
+
+  it('lists an offer whose marker NFT belongs to the configured category, and closes it when the NFT is burned', async () => {
+    const ctx = setupTestContext(undefined, { offerCategory: CATEGORY });
+    const { res, sellerId, markerAddress, addrMap, cfg } = await publishNft(ctx);
+    expect(cfg.data.offerCategory).toBe(CATEGORY);
+    expect(res.status).toBe(201);
+    expect(res.data.offer.onChain.version).toBe(2);
+    expect(res.data.offer.markerCategory).toBe(CATEGORY);
+    expect(res.data.offer.markerAddress).toBe(markerAddress);
+
+    const early = await ctx.jsonReq('POST', `/api/offers/${res.data.offer.offerTxid}/close`, { sellerIdentity: sellerId });
+    expect(early.status).toBe(400);
+    expect(early.data.error).toMatch(/still unspent/);
+
+    const [held] = (await ctx.provider.getUtxos(markerAddress)).filter((u) => u.token);
+    const [marker] = tagWalletUtxos([held], addrMap).map((u) => ({ ...u, signer: new SignatureTemplate(seller.receivePriv(u.keyIndex)) }));
+    const closeTx = buildCloseNftOfferTransaction({ provider: ctx.provider, markerUtxo: marker, destinationAddress: seller.receiveAddr(0), category: CATEGORY });
+    const closed = await ctx.jsonReq<{ offer: StoredOffer }>('POST', `/api/offers/${res.data.offer.offerTxid}/close`, { sellerIdentity: sellerId, closeTxHex: closeTx.hex });
+    expect(closed.status).toBe(200);
+    expect(closed.data.offer.status).toBe('Closed');
+  });
+
+  it('refuses a marker of another category', async () => {
+    const ctx = setupTestContext(undefined, { offerCategory: CATEGORY });
+    const { res } = await publishNft(ctx, '22'.repeat(32));
+    expect(res.status).toBe(400);
+    expect((res.data as any).error).toMatch(/Campfire offer category/);
+  });
+
+  it('refuses a marker that does not go to the identity address (receive/0)', async () => {
+    const ctx = setupTestContext(undefined, { offerCategory: CATEGORY });
+    const { res } = await publishNft(ctx, CATEGORY, 1);
+    expect(res.status).toBe(400);
+    expect((res.data as any).error).toMatch(/identity address/);
+  });
+
+  it('refuses format-2 offers while no category is configured', async () => {
+    const ctx = setupTestContext();
+    const { res, cfg } = await publishNft(ctx);
+    expect(cfg.data.offerCategory).toBeNull();
+    expect(res.status).toBe(400);
+    expect((res.data as any).error).toMatch(/does not accept NFT-marker offers/);
   });
 });

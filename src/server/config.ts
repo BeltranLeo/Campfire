@@ -66,6 +66,12 @@ export async function createAppFromEnv(
     errors.push('DATABASE_URL is required on Vercel: in-memory storage is lost between function instances');
   }
 
+  // Set once the offer category exists (scripts/offer-genesis.ts); until then offers keep the 1,000-sat marker.
+  const offerCategory = env.CAMPFIRE_OFFER_CATEGORY?.trim().toLowerCase() || undefined;
+  if (offerCategory && !/^[0-9a-f]{64}$/.test(offerCategory)) {
+    errors.push('CAMPFIRE_OFFER_CATEGORY must be a 64-character hexadecimal token category');
+  }
+
   const adminToken = env.ADMIN_TOKEN?.trim() || undefined;
   if (adminToken && adminToken.length < MIN_ADMIN_TOKEN_LENGTH) {
     errors.push(`ADMIN_TOKEN must be at least ${MIN_ADMIN_TOKEN_LENGTH} characters`);
@@ -96,6 +102,7 @@ export async function createAppFromEnv(
     oracle,
     arbiterPrivateKey: arbiterKey,
     demoSellerIdentity: demoWallet?.identity,
+    offerCategory,
   });
 
   let demo: DemoSeller | undefined;

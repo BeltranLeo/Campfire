@@ -99,8 +99,8 @@ const en = {
   arbiterNote: 'Decides disputes by choosing buyer or seller. It can never take the coins.',
   campfireOracle: 'Campfire oracle',
   oracleNote: 'Signs the market price each time someone takes the offer.',
-  markerNote: (marker: string, buying: boolean) =>
-    `The offer is a mainnet transaction with a ${marker} marker${buying ? ' on a fresh address of yours' : ''}. It comes back to you when you close the offer${buying ? '' : ', and the network fee is the only cost'}.`,
+  markerNote: (marker: string, buying: boolean, nft = false) =>
+    `The offer is a mainnet transaction with a ${marker} ${nft ? 'NFT marker on your wallet\'s main address' : `marker${buying ? ' on a fresh address of yours' : ''}`}. It comes back to you when you close the offer${buying ? '' : ', and the network fee is the only cost'}.`,
   // Published
   published: 'Your offer is published',
   realOffer: 'Real offer on mainnet',
@@ -132,6 +132,7 @@ const en = {
   noMarker: 'This offer has no marker to spend.',
   foreignMarker: "This offer's marker does not belong to the connected wallet. Connect the wallet that published it.",
   markerSpent: 'The marker of this offer is already spent. Reload the page to see its state.',
+  noMinter: 'Campfire cannot publish offers right now: the offer minter is not reachable. Try again in a moment.',
 };
 
 const es: typeof en = {
@@ -232,8 +233,8 @@ const es: typeof en = {
   arbiterNote: 'Resuelve las disputas eligiendo al comprador o al vendedor. Nunca puede quedarse con las monedas.',
   campfireOracle: 'Oráculo de Campfire',
   oracleNote: 'Firma el precio de mercado cada vez que alguien toma la oferta.',
-  markerNote: (marker, buying) =>
-    `La oferta es una transacción en mainnet con un marcador de ${marker}${buying ? ' en una dirección nueva tuya' : ''}. Vuelve a ti cuando cierras la oferta${buying ? '' : ', y la comisión de red es el único costo'}.`,
+  markerNote: (marker, buying, nft = false) =>
+    `La oferta es una transacción en mainnet con un marcador ${nft ? `NFT de ${marker} en la dirección principal de tu billetera` : `de ${marker}${buying ? ' en una dirección nueva tuya' : ''}`}. Vuelve a ti cuando cierras la oferta${buying ? '' : ', y la comisión de red es el único costo'}.`,
   published: 'Tu oferta está publicada',
   realOffer: 'Oferta real en mainnet',
   publishedBuy:
@@ -263,6 +264,7 @@ const es: typeof en = {
   noMarker: 'Esta oferta no tiene un marcador para gastar.',
   foreignMarker: 'El marcador de esta oferta no pertenece a la billetera conectada. Conecta la billetera que la publicó.',
   markerSpent: 'El marcador de esta oferta ya se gastó. Recarga la página para ver su estado.',
+  noMinter: 'Campfire no puede publicar ofertas ahora: no se encuentra el acuñador de ofertas. Prueba de nuevo en un momento.',
 };
 
 export const create = { en, es };

@@ -94,6 +94,7 @@ export function createApiHandler(deps: {
           arbiterPk: service.arbiterPublicKeyHex,
           oraclePk: service.oraclePublicKeyHex,
           pusdCategory: PUSD_CATEGORY,
+          offerCategory: service.offerCategory,
           bchDecimals: BCH_DECIMALS,
           pusdDecimals: PUSD_DECIMALS,
           demoSellerIdentity: service.demoSellerIdentity ?? null,

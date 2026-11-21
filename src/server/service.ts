@@ -14,8 +14,11 @@ import type { NetworkProvider, Utxo } from 'cashscript';
 import {
   BCH_ASSET,
   DEFAULT_FEE_RATES,
+  FORMAT_VERSION_NFT,
   MARKER_SATOSHIS,
   PUSD_CATEGORY,
+  markerCommitment,
+  IDENTITY_RECEIVE_INDEX,
   onlySimulatedPayment,
   VERDICT_BUYER,
   VERDICT_SELLER,
@@ -150,6 +153,11 @@ export interface OfferView extends Omit<StoredOffer, 'status'> {
 
 export class CampfireService {
   readonly arbiterPublicKeyHex: string;
+
+  /** The token category of format-2 offer markers, or null while the service accepts only format 1. */
+  get offerCategory(): string | null {
+    return this.options.offerCategory?.toLowerCase() ?? null;
+  }
   readonly sponsorshipLimits: SponsorshipLimits;
   private readonly arbiterPrivateKey: Uint8Array;
   // Key of the sign-in challenge MACs, derived from the arbiter key so every instance shares it without new config.
@@ -170,6 +178,8 @@ export class CampfireService {
       // Delay between escrow lookups after broadcasting a funding transaction (the indexer may lag the mempool).
       fundingLookupDelayMs?: number;
       sponsorshipLimits?: Partial<SponsorshipLimits>;
+      // The token category of format-2 offer markers (protocol section 3.4). Without it only format 1 is accepted.
+      offerCategory?: string;
     },
   ) {
     this.arbiterPrivateKey = toBytes(options.arbiterPrivateKey, 'arbiterPrivateKey');
@@ -389,6 +399,30 @@ export class CampfireService {
       throw new Error('Offer marker output does not belong to the seller receive path at the stated index');
     }
 
+    // Format 2: the marker is an NFT of the Campfire offer category tied to this offer (section 3.4). The minter
+    // covenant enforces the same rules on-chain; the service checks them again so that a marker of another category,
+    // or one minted for another offer, is never listed.
+    const nft = verified.onChain.version === FORMAT_VERSION_NFT;
+    if (nft) {
+      const category = this.options.offerCategory?.toLowerCase();
+      if (!category) {
+        throw new Error('This service does not accept NFT-marker offers yet');
+      }
+      const token = markerOut.token;
+      if (!token || binToHex(token.category) !== category || token.amount !== 0n || token.nft?.capability !== 'none') {
+        throw new Error('Offer marker output 1 must hold an immutable NFT of the Campfire offer category');
+      }
+      if (binToHex(token.nft.commitment) !== markerCommitment(verified.document.side, verified.contentHash)) {
+        throw new Error('Offer marker NFT commitment does not match the offer side and hash');
+      }
+      // Every NFT marker goes to the publisher's identity address, so that all of their offers are linked.
+      if (params.markerReceiveIndex !== IDENTITY_RECEIVE_INDEX) {
+        throw new Error('An NFT offer marker must go to the publisher identity address (receive/0)');
+      }
+    } else if (markerOut.token) {
+      throw new Error('A format-1 offer marker must not carry tokens');
+    }
+
     // Checked before broadcasting, so the publisher never pays for an offer the service then refuses to list.
     if (this.nowSeconds() >= verified.document.expiresAt) {
       throw new Error('Offer expiresAt is already in the past');
@@ -412,8 +446,9 @@ export class CampfireService {
       document: verified.document,
       onChain: verified.onChain,
       markerVout: 1,
-      markerAddress: pkhToCashAddress(markerPkhHex),
+      markerAddress: pkhToCashAddress(markerPkhHex, { tokenAware: nft }),
       markerReceiveIndex: params.markerReceiveIndex,
+      ...(nft ? { markerCategory: this.options.offerCategory!.toLowerCase() } : {}),
       status: 'Published',
       isDemo: this.isDemoTrade({ sellerIdentity: params.sellerIdentity }),
       ...(params.sponsored ? { sponsored: true } : {}),
