@@ -195,12 +195,12 @@ function QuickLinks({ activeCount, total }: { activeCount: number | null; total:
     <div className="s-quick3">
       <Link className="cf-quick" to="/offers?side=buy">
         <Icon name="buy" />
-        Buy BCH<small>With pesos or dollars</small>
+        Buy BCH<small>With your local currency</small>
       </Link>
       {/* Same place as "I want to sell" on the landing page: the buy offers, with "Or post your own offer" on top. */}
       <Link className="cf-quick" to="/offers?side=sell">
         <Icon name="sell" />
-        Sell BCH<small>For pesos or dollars</small>
+        Sell BCH<small>For your local currency</small>
       </Link>
       <Link className="cf-quick" to="/trades">
         <Icon name="trades" />

@@ -1,4 +1,4 @@
-// Turns an amount of money the person types ("10,000" pesos) into the coin amount an offer would give for it.
+// Turns an amount of money the person types ("10,000" in the offer's currency) into the coin amount an offer would give for it.
 // The trade itself is always made in base units of the coin; the fiat figure shown afterwards is computed back
 // from those units with the protocol's own rounding, so the screen never promises a number the trade won't have.
 // No DOM here; see test/fiatAmount.test.ts.

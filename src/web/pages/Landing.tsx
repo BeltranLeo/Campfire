@@ -42,7 +42,7 @@ export function Landing() {
           </Link>
           <Link className="cf-quick" to="/offers?side=sell">
             <Icon name="sell" />
-            I want to sell BCH<small>Get pesos or dollars for your coins</small>
+            I want to sell BCH<small>Get paid in your local currency</small>
           </Link>
           <p className="s-walletlink">
             {/* Welcome shows how to get a wallet, then connects it. */}

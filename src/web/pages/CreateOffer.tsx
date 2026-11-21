@@ -378,7 +378,7 @@ export function CreateOffer() {
                 <button type="button" className="cf-choice" aria-pressed={!buying} onClick={() => chooseSide('sell')}>
                   <span>
                     Sell {coin}
-                    <small>Buyers pay you in pesos or dollars</small>
+                    <small>Buyers pay you in the currency you choose</small>
                   </span>
                 </button>
                 <button type="button" className="cf-choice" aria-pressed={buying} onClick={() => chooseSide('buy')}>
