@@ -44,8 +44,23 @@ async function readJson<T = Record<string, unknown>>(req: Request): Promise<T> {
   return JSON.parse(text) as T;
 }
 
-// A trade read waits this long for the demo seller before it answers with the trade as it stands.
+// A trade read (or a take of a demo offer) waits this long for the demo seller before it answers with the trade as it
+// stands. The bot's step goes on after the answer; the page polls and shows it when it is done.
 export const DEMO_RECONCILE_WAIT_MS = 4000;
+
+// Waits for `work` at most `ms`. An error within that time is thrown; a later one is left to the work's own logging.
+async function settleWithin<T>(work: Promise<T>, ms: number): Promise<{ done: true; value: T } | { done: false }> {
+  work.catch(() => undefined);
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      work.then((value) => ({ done: true as const, value })),
+      new Promise<{ done: false }>((resolve) => (timer = setTimeout(() => resolve({ done: false }), ms))),
+    ]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
 
 export function createApiHandler(deps: {
   service: CampfireService;
@@ -56,9 +71,17 @@ export function createApiHandler(deps: {
   adminToken?: string;
   // How long a trade read waits for the demo seller to finish a step left behind (see GET /api/trades/:id).
   reconcileWaitMs?: number;
+  // Keeps the function alive until work that outlives the response is done (Vercel's waitUntil). Without it, a
+  // platform could freeze the bot halfway, holding its lock.
+  waitUntil?: (work: Promise<unknown>) => void;
 }) {
   const { service, oracle, demo, adminToken } = deps;
   const reconcileWaitMs = deps.reconcileWaitMs ?? DEMO_RECONCILE_WAIT_MS;
+  // Starts the bot's work and waits for it at most reconcileWaitMs; the rest runs after the answer.
+  const demoWork = <T>(work: Promise<T>) => {
+    deps.waitUntil?.(work.catch(() => undefined));
+    return settleWithin(work, reconcileWaitMs);
+  };
 
   const isAdmin = (req: Request): boolean => {
     if (!adminToken) return false;
@@ -363,8 +386,10 @@ export function createApiHandler(deps: {
               buyerSessionPk: body.buyerSessionPk,
             });
             if (isDemoOffer) {
-              // The bot accepts and funds a real escrow within this request.
-              trade = await demo.acceptAndFund(trade.id);
+              // The bot accepts and funds a real escrow. The answer waits a few seconds for it, not for the indexer:
+              // a refusal (no funds, too busy) still comes back here, and a deposit still on its way shows on the page.
+              const funded = await demoWork(demo.acceptAndFund(trade.id));
+              if (funded.done) trade = funded.value;
             }
           }
           return jsonResponse({ trade: tradeView(req, trade) }, 201);
@@ -380,12 +405,7 @@ export function createApiHandler(deps: {
         if (demo) {
           // The read waits a little for the bot, never longer: a deposit that keeps failing (or a slow network) must not
           // hold the page on "Loading" forever. Whatever the bot did not finish yet, a later read picks up.
-          let timer: ReturnType<typeof setTimeout> | undefined;
-          await Promise.race([
-            demo.reconcile(tradeMatch[1]),
-            new Promise<void>((resolve) => (timer = setTimeout(resolve, reconcileWaitMs))),
-          ]);
-          clearTimeout(timer);
+          await demoWork(demo.reconcile(tradeMatch[1]));
         }
         const trade = await service.getTrade(tradeMatch[1]);
         if (!trade) {

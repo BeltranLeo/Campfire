@@ -102,6 +102,7 @@ async function setupDemo(options?: {
   // before it, like an Electrum server that has not processed the transaction yet.
   indexerLagLookups?: number;
   reconcileWaitMs?: number;
+  waitUntil?: (work: Promise<unknown>) => void;
 }) {
   let currentNow = 1_794_900_000;
   const nowSeconds = () => currentNow;
@@ -166,7 +167,7 @@ async function setupDemo(options?: {
     indexPollMs: 0,
   });
   await demo.init();
-  const api = createApiHandler({ service, oracle, demo, adminToken: ADMIN_TOKEN, reconcileWaitMs: options?.reconcileWaitMs });
+  const api = createApiHandler({ service, oracle, demo, adminToken: ADMIN_TOKEN, reconcileWaitMs: options?.reconcileWaitMs, waitUntil: options?.waitUntil });
 
   provider.addUtxo(botWallet.receiveAddress(0), randomUtxo({ satoshis: options?.botSats ?? 500_000n }));
   if (options?.botPusd !== 0n) {
@@ -515,6 +516,26 @@ describe('Demo seller bot (protocol section 8)', () => {
     expect(reads.map((r) => r.data.trade.status)).toEqual(['Accepted', 'Accepted', 'Accepted']);
     // The three polls joined one retry instead of queuing three behind the lock.
     expect(sends).toBe(1);
+  });
+
+  it('answers a take within the wait and hands the unfinished deposit to waitUntil', async () => {
+    const kept: Promise<unknown>[] = [];
+    const ctx = await setupDemo({ reconcileWaitMs: 20, waitUntil: (work) => kept.push(work) });
+    // The network takes its time with the deposit.
+    let finishBroadcast: () => void = () => {};
+    const realSend = ctx.provider.sendRawTransaction.bind(ctx.provider);
+    ctx.provider.sendRawTransaction = (hex: string) =>
+      new Promise<void>((resolve) => (finishBroadcast = resolve)).then(() => realSend(hex));
+
+    const taken = await ctx.take(ctx.bchOffer.offerTxid, '20000');
+    expect(taken.status).toBe(201);
+    expect(taken.data.trade.status).not.toBe('Funded');
+    expect(kept).toHaveLength(1);
+
+    // Once the network answers, the work kept alive finishes the deposit.
+    finishBroadcast();
+    await Promise.all(kept);
+    expect((await ctx.service.getTrade(taken.data.trade.id))?.status).toBe('Funded');
   });
 
   it('returns the funds to the bot by arbiter verdict when the 5-minute payment window ends', async () => {

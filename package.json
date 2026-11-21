@@ -9,6 +9,7 @@
   },
   "dependencies": {
     "@bitauth/libauth": "3.1.0-next.8",
+    "@vercel/functions": "1.6.0",
     "@wizardconnect/core": "0.2.10",
     "@wizardconnect/dapp": "0.2.7",
     "cashscript": "0.14.0",

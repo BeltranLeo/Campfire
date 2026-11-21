@@ -49,6 +49,8 @@ export async function createAppFromEnv(
     provider?: NetworkProvider;
     priceFeed?: PriceFeedProvider;
     createStorage?: (databaseUrl: string) => StorageAdapter;
+    // The platform's way to finish work after the response (Vercel's waitUntil); see createApiHandler.
+    waitUntil?: (work: Promise<unknown>) => void;
   } = {},
 ): Promise<CampfireApp> {
   const errors: string[] = [];
@@ -117,7 +119,7 @@ export async function createAppFromEnv(
   }
 
   return {
-    handler: createApiHandler({ service, oracle, demo, adminToken }),
+    handler: createApiHandler({ service, oracle, demo, adminToken, waitUntil: deps.waitUntil }),
     service,
     storage,
     demo,
