@@ -1,0 +1,5 @@
+/* The few interface words that live in CSS, in Spanish. html[lang] is set by src/web/lang.ts. */
+html[lang="es"] .cf-details > summary::after,
+html[lang="es"] .tr-progress > summary::after { content: "Mostrar"; }
+html[lang="es"] .cf-details[open] > summary::after,
+html[lang="es"] .tr-progress[open] > summary::after { content: "Ocultar"; }

@@ -13,6 +13,7 @@ import { Icon, type IconName } from './Icon';
 import { HashLink } from './Provenance';
 import { Notice, Skeleton } from './States';
 import { NavBadge } from './Notifications';
+import { useMessages } from '../lang';
 
 // The WizardConnect button at the top right, in its four states (Shell-* screens):
 // disconnected, pairing, connecting and connected with its menu.
@@ -20,11 +21,12 @@ export function WalletButton() {
   const wallet = useWallet();
   const [menuOpen, setMenuOpen] = useState(false);
   const closeMenu = useCallback(() => setMenuOpen(false), []);
+  const connectLabel = useMessages().wallet.connect;
 
   if (wallet.status === 'disconnected') {
     return (
       <button type="button" className="cf-btn" onClick={wallet.connect}>
-        Connect wallet
+        {connectLabel}
       </button>
     );
   }

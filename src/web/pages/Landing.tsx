@@ -1,4 +1,3 @@
-import type { ReactNode } from 'react';
 import { Link } from 'react-router';
 import { apiGet, type Offer, type Trade } from '../api';
 import { assetInfo } from '../assets';
@@ -11,6 +10,7 @@ import { useConfig } from '../config';
 import { DSPROOF_WATCH_SEC } from '../dsproof';
 import { formatFiat, formatRange, fromBaseUnits, paymentMethodLabel } from '../format';
 import { usePoll } from '../hooks/usePoll';
+import { useMessages } from '../lang';
 import { isSimulatedOffer, loadQuotes, priceOf, unique } from '../offerData';
 
 // The front page (Landing-* screens): the two intentions and where to get a wallet, the demo, how a trade works
@@ -24,112 +24,83 @@ export function Landing() {
   const pairs = unique(latest.flatMap((o) => (o.document.price.type === 'floating' ? [o.document.price.pair] : [])));
   const quotes = usePoll(() => loadQuotes(pairs), pairs.join(','), pairs.length ? 30_000 : undefined);
   const demoOffer = offers.data?.find((o) => o.isDemo && o.document.asset === 'BCH') ?? offers.data?.find((o) => o.isDemo);
+  const t = useMessages().landing;
 
   return (
     <main className="s-main" data-site>
       <section className="s-hero">
         <div className="cf-stack">
-          <h1>Buy or sell Bitcoin Cash directly with another person</h1>
-          <p className="cf-muted s-herolead">
-            No exchange holds your money. A contract on the Bitcoin Cash network locks the seller’s coins until the payment
-            is done.
-          </p>
+          <h1>{t.title}</h1>
+          <p className="cf-muted s-herolead">{t.lead}</p>
         </div>
         <div className="s-intents">
           <Link className="cf-quick" to="/offers?side=buy">
             <Icon name="buy" />
-            I want to buy BCH<small>You don’t need any BCH to start</small>
+            {t.buy}
+            <small>{t.buyHint}</small>
           </Link>
           <Link className="cf-quick" to="/offers?side=sell">
             <Icon name="sell" />
-            I want to sell BCH<small>Get paid in your local currency</small>
+            {t.sell}
+            <small>{t.sellHint}</small>
           </Link>
           <p className="s-walletlink">
             {/* Welcome shows how to get a wallet, then connects it. */}
-            New to Bitcoin Cash? <Link to="/welcome">Get a free wallet in 2 minutes →</Link>
+            {t.newcomer} <Link to="/welcome">{t.getWallet}</Link>
           </p>
         </div>
       </section>
 
       {/* The demo is the safest way to try, so it comes right after the two intentions. */}
-      <SimBox tag="Simulated fiat" label="Try a trade without spending anything" bodyGap={3}>
-        <p>
-          A demo seller sends a few cents of real BCH to your wallet. The payment step is simulated: you send no money. It
-          takes about three minutes.
-        </p>
+      <SimBox tag={t.demoTag} label={t.demoLabel} bodyGap={3}>
+        <p>{t.demoBody}</p>
         <div>
-          <Button to={demoOffer ? `/offers/${demoOffer.offerTxid}` : '/offers'}>Try the demo trade</Button>
+          <Button to={demoOffer ? `/offers/${demoOffer.offerTxid}` : '/offers'}>{t.demoButton}</Button>
         </div>
       </SimBox>
 
       <section className="cf-stack">
-        <h2 className="cf-title">How it works</h2>
-        <ol className="s-howto">
-          <HowStep n={1} title="Pick an offer, or post your own">
-            Choose how much, and how you want to pay or get paid.
-          </HowStep>
-          <HowStep n={2} title="The seller’s coins get locked">
-            A contract holds them. They can only go to the buyer or back to the seller. Campfire cannot touch them.
-          </HowStep>
-          <HowStep n={3} title="Pay, then receive">
-            The buyer pays the seller directly. When the seller confirms, the coins go to the buyer’s wallet.
-          </HowStep>
-        </ol>
+        <h2 className="cf-title">{t.howTitle}</h2>
+        <HowSteps steps={t.how} />
         {/* The 0-conf explanation does not help a newcomer decide, so it is folded; its On-chain tag stays on the summary. */}
-        <Details summary="Why it’s safe and fast" tag={<ProvenanceTag kind="chain">0-conf with DSProofs</ProvenanceTag>}>
-          <p className="cf-muted">
-            On Bitcoin Cash a payment can be trusted seconds after it reaches the network, not ten minutes later. Campfire
-            relies on that for every trade, and checks it in your browser.
-          </p>
-          <ol className="s-howto">
-            <HowStep n={1} title="The deposit is seen in seconds">
-              When the seller locks the coins, the transaction reaches every node almost at once. It is not in a block yet:
-              that is zero confirmations, or 0-conf.
-            </HowStep>
-            <HowStep n={2} title="Double spends are caught">
-              If anyone tries to spend the same coins twice, Bitcoin Cash nodes broadcast a double-spend proof (DSProof)
-              within seconds. Your browser asks for one.
-            </HowStep>
-            <HowStep n={3} title="No proof, go ahead">
-              {`After ${DSPROOF_WATCH_SEC} quiet seconds the deposit is safe to act on, so you can pay. The coins you receive are usable right away too.`}
-            </HowStep>
-          </ol>
+        <Details summary={t.safeSummary} tag={<ProvenanceTag kind="chain">{t.safeTag}</ProvenanceTag>}>
+          <p className="cf-muted">{t.safeLead}</p>
+          <HowSteps steps={t.safe(DSPROOF_WATCH_SEC)} />
         </Details>
       </section>
 
       <section className="cf-card" data-flush>
         <div className="s-sechead">
-          <h2 className="cf-heading">Latest offers</h2>
-          <Link to="/offers">See all offers</Link>
+          <h2 className="cf-heading">{t.latest}</h2>
+          <Link to="/offers">{t.seeAll}</Link>
         </div>
         {offers.data ? (
           latest.map((offer) => {
             const doc = offer.document;
             const asset = assetInfo(doc.asset, doc.assetDecimals, config);
             // Say what the visitor does: a buy offer is where *you* sell.
-            const verb = doc.side === 'sell' ? 'Buy' : 'Sell';
-            const deal = doc.side === 'sell' ? `pay ${doc.fiat}` : `get ${doc.fiat}`;
+            const visitorBuys = doc.side === 'sell';
+            const deal = visitorBuys ? t.payFiat(doc.fiat) : t.getFiat(doc.fiat);
             const price = priceOf(offer, quotes.data?.byPair);
             return (
               <Link key={offer.offerTxid} className="s-item" to={`/offers/${offer.offerTxid}`}>
                 <span className="s-cell">
                   <span>
-                    <strong>
-                      You {verb.toLowerCase()} {asset.symbol}
-                    </strong>{' '}
+                    <strong>{visitorBuys ? t.youBuy(asset.symbol) : t.youSell(asset.symbol)}</strong>{' '}
                     · <span className="cf-num">{price === null ? deal : formatFiat(price, doc.fiat)}</span>
                   </span>
                   <span className="cf-small cf-muted">
-                    {formatRange(doc.min, doc.max, asset)} · {doc.paymentMethods.map(paymentMethodLabel).join(', ')}
+                    {formatRange(doc.min, doc.max, asset)} ·{' '}
+                    {doc.paymentMethods.map((m) => (m === 'simulated' ? t.simulatedPayment : paymentMethodLabel(m))).join(', ')}
                   </span>
                   {isSimulatedOffer(offer) && (
                     <span>
-                      <ProvenanceTag kind="sim">Simulated fiat</ProvenanceTag>
+                      <ProvenanceTag kind="sim">{t.demoTag}</ProvenanceTag>
                     </span>
                   )}
                 </span>
                 <span className="cf-btn" data-size="sm">
-                  {verb}
+                  {visitorBuys ? t.buyButton : t.sellButton}
                 </span>
               </Link>
             );
@@ -144,13 +115,15 @@ export function Landing() {
       <section className="cf-card" data-pad>
         <div className="cf-stack">
           <div className="cf-row" data-between>
-            <h2 className="cf-heading">Campfire so far</h2>
-            <ProvenanceTag kind="chain">Counted from mainnet</ProvenanceTag>
+            <h2 className="cf-heading">{t.statsTitle}</h2>
+            <ProvenanceTag kind="chain">{t.statsTag}</ProvenanceTag>
           </div>
           <Stats trades={trades.data} openOffers={offers.data?.length} />
           <p className="cf-small cf-subtle">
-            Every number comes from real transactions you can <Link to="/transparency">check yourself</Link>.
-            {trades.data && trades.data.some((t) => t.isDemo) && ' Most trades so far are demo trades, where the payment is simulated.'}
+            {t.proofBefore}
+            <Link to="/transparency">{t.proofLink}</Link>
+            {t.proofAfter}
+            {trades.data && trades.data.some((trade) => trade.isDemo) && t.mostlyDemo}
           </p>
         </div>
       </section>
@@ -158,15 +131,19 @@ export function Landing() {
   );
 }
 
-function HowStep({ n, title, children }: { n: number; title: string; children: ReactNode }) {
+function HowSteps({ steps }: { steps: { title: string; body: string }[] }) {
   return (
-    <li>
-      <i>{n}</i>
-      <span>
-        <strong>{title}</strong>
-        <span className="cf-small cf-muted">{children}</span>
-      </span>
-    </li>
+    <ol className="s-howto">
+      {steps.map((step, i) => (
+        <li key={step.title}>
+          <i>{i + 1}</i>
+          <span>
+            <strong>{step.title}</strong>
+            <span className="cf-small cf-muted">{step.body}</span>
+          </span>
+        </li>
+      ))}
+    </ol>
   );
 }
 
@@ -174,19 +151,20 @@ function Stats({ trades, openOffers }: { trades?: Trade[]; openOffers?: number }
   const completed = trades?.filter((t) => t.status === 'Released' || t.status === 'ResolvedBuyer');
   const sats = completed?.filter((t) => t.asset === 'BCH').reduce((sum, t) => sum + BigInt(t.amount), 0n);
   const value = (v: string | undefined) => (v === undefined ? <Skeleton width={64} height={28} /> : v);
+  const t = useMessages().landing;
   return (
     <div className="s-3">
       <div className="s-stat">
         <strong>{value(completed?.length.toString())}</strong>
-        <span className="cf-small cf-muted">{completed?.length === 1 ? 'trade completed' : 'trades completed'}</span>
+        <span className="cf-small cf-muted">{t.tradesCompleted(completed?.length ?? 0)}</span>
       </div>
       <div className="s-stat">
         <strong>{value(sats === undefined ? undefined : `${trimZeros(fromBaseUnits(sats, 8))} BCH`)}</strong>
-        <span className="cf-small cf-muted">traded through the contract</span>
+        <span className="cf-small cf-muted">{t.traded}</span>
       </div>
       <div className="s-stat">
         <strong>{value(openOffers?.toString())}</strong>
-        <span className="cf-small cf-muted">offers open now</span>
+        <span className="cf-small cf-muted">{t.openOffers}</span>
       </div>
     </div>
   );
