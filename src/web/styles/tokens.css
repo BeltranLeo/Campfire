@@ -68,6 +68,7 @@
   --noche-700: #1e3260;
   --noche-600: #33476f;
   --noche-niebla: #8a96b3;
+  --noche-bruma: #aab4cc;
   --noche-pizarra: #5b6785;
   --luz-blanco: #ffffff;
   --luz-marfil: #f8f7ec;
@@ -136,7 +137,8 @@
   --danger: var(--alerta-300);
   --danger-fill: var(--alerta-500);
   --danger-bg: rgba(214, 51, 79, 0.18);
-  --simulated: var(--noche-niebla);
+  /* Lighter than the muted text: the tag sits on glass, often inside a glass box, and must still read at 4.5:1. */
+  --simulated: var(--noche-bruma);
   --glass: rgba(255, 255, 255, 0.07);
   --glass-edge: rgba(255, 255, 255, 0.16);
   --shadow-tint: rgba(7, 18, 42, 0.55);
@@ -174,6 +176,7 @@
   --noche-700: #1e3260;
   --noche-600: #33476f;
   --noche-niebla: #8a96b3;
+  --noche-bruma: #aab4cc;
   --noche-pizarra: #5b6785;
   --luz-blanco: #ffffff;
   --luz-marfil: #f8f7ec;
@@ -244,7 +247,8 @@
   --danger: var(--alerta-300);
   --danger-fill: var(--alerta-500);
   --danger-bg: rgba(214, 51, 79, 0.18);
-  --simulated: var(--noche-niebla);
+  /* Lighter than the muted text: the tag sits on glass, often inside a glass box, and must still read at 4.5:1. */
+  --simulated: var(--noche-bruma);
   --glass: rgba(255, 255, 255, 0.07);
   --glass-edge: rgba(255, 255, 255, 0.16);
   --shadow-tint: rgba(7, 18, 42, 0.55);
@@ -282,6 +286,7 @@
   --noche-700: #1e3260;
   --noche-600: #33476f;
   --noche-niebla: #8a96b3;
+  --noche-bruma: #aab4cc;
   --noche-pizarra: #5b6785;
   --luz-blanco: #ffffff;
   --luz-marfil: #f8f7ec;

@@ -138,6 +138,8 @@
 .cf-field[data-invalid] > .cf-hint { color: var(--danger); }
 /* Fields take the muted text colour as their edge: the kit's border is too faint (under 3:1) to find a field by. */
 .cf-input, .cf-select, .cf-textarea { width: 100%; padding: var(--space-3); border-radius: var(--radius-md); border: 1px solid var(--text-muted); background: var(--surface); color: var(--text); font: 400 16px/20px var(--font-text); }
+/* The browser's default placeholder grey reads at 3.3:1 on the dark surface; the muted text passes in both themes. */
+.cf-input::placeholder, .cf-textarea::placeholder { color: var(--text-muted); opacity: 1; }
 .cf-input[data-mono] { font-family: var(--font-data); font-variant-numeric: tabular-nums; font-weight: 500; }
 .cf-field[data-invalid] .cf-input { border-color: var(--danger); }
 .cf-inputgroup { display: flex; align-items: stretch; border: 1px solid var(--text-muted); border-radius: var(--radius-md); background: var(--surface); overflow: hidden; }
