@@ -17,6 +17,7 @@ import { useConfig } from '../config';
 import { electrum } from '../electrum';
 import { formatAmount, formatClock, formatDateTime, formatFiatAmount, formatHourMinute } from '../format';
 import { usePoll } from '../hooks/usePoll';
+import { useMessages } from '../lang';
 import { checkEscrow, checkForArbiter, isFinal, newerTrade, signedPayoutPkh, signedTerms, type EscrowCheck } from '../trade';
 
 // The arbiter console. Two kinds of trade reach it:
@@ -68,6 +69,7 @@ function Console({ trade, onUpdate }: { trade: Trade; onUpdate: (t: Trade) => vo
   const fiat = formatFiatAmount(terms.fiatAmount, trade.fiat);
   const [chat, setChat] = useState<ArbiterChat>();
   const [chatError, setChatError] = useState<string | null>(null);
+  const t = useMessages().arbiter;
 
   const demo = trade.isDemo === true;
   // A resolution without a dispute is the payment window ending, which no arbiter decides.
@@ -79,9 +81,8 @@ function Console({ trade, onUpdate }: { trade: Trade; onUpdate: (t: Trade) => vo
     return (
       <ConsoleFrame trade={trade}>
         {/* The first line of the ended variant is invented; the design only has the "not in dispute" notice. */}
-        <Denied tradeId={trade.id} title={ended ? 'This trade has already ended' : 'This trade is not in dispute'}>
-          {demo ? 'The demo arbiter' : 'An arbiter'} can only decide a disputed trade. Its state is "{trade.status}".
-          {!ended && ' Open a dispute from the trade page first.'}
+        <Denied tradeId={trade.id} title={ended ? t.ended : t.notDisputed}>
+          {t.onlyDisputed(demo, trade.status, ended)}
         </Denied>
       </ConsoleFrame>
     );
@@ -91,8 +92,8 @@ function Console({ trade, onUpdate }: { trade: Trade; onUpdate: (t: Trade) => vo
     if (config && config.arbiterPk.toLowerCase() !== trade.arbiterPk.toLowerCase()) {
       return (
         <ConsoleFrame trade={trade}>
-          <Denied tradeId={trade.id} title="This offer names another arbiter">
-            Campfire's arbiter key cannot sign a verdict for this trade. The arbiter named in the offer decides it.
+          <Denied tradeId={trade.id} title={t.otherArbiter}>
+            {t.otherArbiterBody}
           </Denied>
         </ConsoleFrame>
       );
@@ -102,11 +103,8 @@ function Console({ trade, onUpdate }: { trade: Trade; onUpdate: (t: Trade) => vo
         <ConsoleFrame trade={trade}>
           <section className="cf-card" data-flush>
             <div className="cf-card__section cf-stack">
-              <h2 className="cf-heading">Enter the arbiter token</h2>
-              <p className="cf-muted">
-                This is a trade between two wallets. Only the arbiter named in its offer can decide it, and Campfire's arbiter key needs
-                the admin token.
-              </p>
+              <h2 className="cf-heading">{t.enterToken}</h2>
+              <p className="cf-muted">{t.tokenNeeded}</p>
               <ArbiterTokenForm />
             </div>
           </section>
@@ -142,38 +140,35 @@ function Console({ trade, onUpdate }: { trade: Trade; onUpdate: (t: Trade) => vo
 function ConsoleFrame({ trade, open, children }: { trade: Trade; open?: boolean; children: ReactNode }) {
   const demo = trade.isDemo === true;
   const token = useArbiterToken();
+  const t = useMessages().arbiter;
   return (
     <main className="s-main" data-narrow={!open || undefined}>
       <div className="s-pagehead">
         <Link className="s-back" to={`/trade/${trade.id}`}>
-          ← Trade
+          {t.backTrade}
         </Link>
-        <h1 className="cf-title">{demo ? 'Demo arbiter console' : 'Arbiter console'}</h1>
+        <h1 className="cf-title">{demo ? t.demoConsole : t.console}</h1>
         {open && (
           <div className="cf-row">
             <StatusPill state={trade.status} role="visitor" side={trade.side} />
-            {demo && <ProvenanceTag kind="sim">Simulated arbiter</ProvenanceTag>}
-            {trade.fundingTxid && <ProvenanceTag kind="chain">Real escrow on mainnet</ProvenanceTag>}
+            {demo && <ProvenanceTag kind="sim">{t.simulatedArbiter}</ProvenanceTag>}
+            {trade.fundingTxid && <ProvenanceTag kind="chain">{t.realEscrow}</ProvenanceTag>}
             {!demo && token && (
               // Invented copy.
               <Button size="sm" variant="ghost" onClick={() => setArbiterToken(null)}>
-                Forget token
+                {t.forgetToken}
               </Button>
             )}
           </div>
         )}
       </div>
       {open && demo && (
-        <SimBox tag="Simulated arbiter" label="You are playing the arbiter for this demo trade.">
-          <p className="cf-small">
-            On a real trade only the arbiter named in the offer sees this page. Here any visitor may decide a disputed trade against
-            the demo seller. Who decides is simulated. The verdict is signed with the real arbiter key and settles the real escrow on
-            mainnet.
-          </p>
+        <SimBox tag={t.simulatedArbiter} label={t.playing}>
+          <p className="cf-small">{t.playingBody}</p>
         </SimBox>
       )}
       {open && !demo && (
-        <p className="cf-muted">You are deciding this trade as its arbiter. The verdict is signed with Campfire's arbiter key and settles the escrow on mainnet.</p>
+        <p className="cf-muted">{t.deciding}</p>
       )}
       {children}
     </main>
@@ -181,6 +176,7 @@ function ConsoleFrame({ trade, open, children }: { trade: Trade; open?: boolean;
 }
 
 function Denied({ tradeId, title, children }: { tradeId: string; title: string; children: ReactNode }) {
+  const t = useMessages().arbiter;
   return (
     <section className="cf-card" data-flush>
       <div className="cf-card__section">
@@ -190,7 +186,7 @@ function Denied({ tradeId, title, children }: { tradeId: string; title: string; 
           </Notice>
           <div className="s-actions">
             <Button variant="primary" to={`/trade/${tradeId}`}>
-              Back to the trade
+              {t.backToTrade}
             </Button>
           </div>
         </div>
@@ -216,6 +212,7 @@ function DecisionCard(props: {
   // A verdict on a real trade moves real money and cannot be undone, so it asks once more (invented copy).
   const [pending, setPending] = useState<VerdictHex | null>(null);
   const [reason, setReason] = useState('');
+  const t = useMessages().arbiter;
 
   async function decide(verdict: VerdictHex) {
     setBusy(verdict);
@@ -235,7 +232,7 @@ function DecisionCard(props: {
       } catch {
         // Fall through to the original error.
       }
-      setError(err instanceof ApiError ? err.message : 'Something went wrong. Try again.');
+      setError(err instanceof ApiError ? err.message : t.somethingWrong);
     } finally {
       setBusy(null);
     }
@@ -248,54 +245,56 @@ function DecisionCard(props: {
   return (
     <section className="cf-card s-action" data-pad>
       <div className="cf-stack">
-        <span className="cf-label">Your decision</span>
-        <h2 className="cf-heading">Who should receive the {amount}?</h2>
+        <span className="cf-label">{t.yourDecision}</span>
+        <h2 className="cf-heading">{t.whoReceives(amount)}</h2>
         {pending ? (
           <div className="cf-well cf-stack" data-gap="3">
-            <strong>Decide for the {toBuyer ? 'buyer' : 'seller'}?</strong>
+            <strong>{t.confirmFor(toBuyer ? 'buyer' : 'seller')}</strong>
             <p className="cf-small">
-              This sends {amount} to{' '}
-              {payout ? <HashLink value={pkhToCashAddress(payout, { tokenAware: props.tokenAware })} kind="address" /> : `the ${toBuyer ? 'buyer' : 'seller'}`}{' '}
-              on mainnet. It cannot be undone.
+              {t.sendsBefore(amount)}
+              {payout ? (
+                <HashLink value={pkhToCashAddress(payout, { tokenAware: props.tokenAware })} kind="address" />
+              ) : (
+                t.theParty(toBuyer ? 'buyer' : 'seller')
+              )}
+              {t.sendsAfter}
             </p>
             <div className="cf-field">
-              <label htmlFor="verdict-reason">Reason (optional)</label>
+              <label htmlFor="verdict-reason">{t.reason}</label>
               <textarea id="verdict-reason" className="cf-textarea" rows={3} maxLength={500} value={reason} onChange={(e) => setReason(e.target.value)} />
-              <span className="cf-hint">Saved with the verdict.</span>
+              <span className="cf-hint">{t.reasonHint}</span>
             </div>
             <div className="s-actions">
               <Button variant="primary" busy={busy !== null} onClick={() => decide(pending)}>
-                Confirm verdict
+                {t.confirm}
               </Button>
               <Button variant="ghost" disabled={busy !== null} onClick={() => setPending(null)}>
-                Back
+                {t.back}
               </Button>
             </div>
           </div>
         ) : (
           <div className="s-verdict">
             <Button busy={busy === VERDICT_BUYER} disabled={busy !== null} onClick={() => choose(VERDICT_BUYER)}>
-              Decide for the buyer
-              <small>Pays {amount} to the buyer</small>
+              {t.forBuyer}
+              <small>{t.paysBuyer(amount)}</small>
             </Button>
             <Button busy={busy === VERDICT_SELLER} disabled={busy !== null} onClick={() => choose(VERDICT_SELLER)}>
-              Decide for the seller
-              <small>Returns {amount} to the seller</small>
+              {t.forSeller}
+              <small>{t.returnsSeller(amount)}</small>
             </Button>
           </div>
         )}
         {busy && (
           // Invented copy: the design shows no waiting state.
-          <p className="cf-small cf-muted">Signing the verdict and settling the escrow on-chain. This can take a few seconds.</p>
+          <p className="cf-small cf-muted">{t.signing}</p>
         )}
         {error && (
-          <Notice tone="danger" title="The verdict was not issued">
+          <Notice tone="danger" title={t.notIssued}>
             {error}
           </Notice>
         )}
-        <p className="cf-small cf-muted">
-          The verdict cannot be changed. The arbiter can only choose one of the two parties: no path of the contract pays anyone else.
-        </p>
+        <p className="cf-small cf-muted">{t.final}</p>
       </div>
     </section>
   );
@@ -304,49 +303,52 @@ function DecisionCard(props: {
 function DecidedCard({ trade, amount }: { trade: Trade; amount: string }) {
   const forBuyer = trade.status === 'ResolvedBuyer';
   const demo = trade.isDemo === true;
+  const t = useMessages().arbiter;
   return (
     <section className="cf-card" data-flush>
       <div className="cf-card__section">
         <div className="cf-stack">
           {/* The seller's wording is invented; the design only shows a verdict for the buyer. */}
-          <Notice tone="verified" title={forBuyer ? 'Decided for the buyer' : 'Decided for the seller'}>
-            {forBuyer ? `${amount} were paid to the buyer by the contract.` : `${amount} were returned to the seller by the contract.`}
+          <Notice tone="verified" title={t.decidedFor(forBuyer ? 'buyer' : 'seller')}>
+            {forBuyer ? t.paidBuyer(amount) : t.returnedSeller(amount)}
           </Notice>
           <dl className="cf-dl">
             {trade.settlementTxid && (
               <>
-                <dt>Arbitrate</dt>
+                <dt>{t.arbitrate}</dt>
                 <dd>
                   <HashLink value={trade.settlementTxid} kind="transaction" /> · <ProvenanceTag kind="chain" />
                 </dd>
               </>
             )}
-            <dt>Verdict</dt>
+            <dt>{t.verdict}</dt>
             <dd>
-              <span className="cf-mono">{trade.verdict}</span> ({forBuyer ? 'buyer' : 'seller'}), signed by arbiter{' '}
+              <span className="cf-mono">{trade.verdict}</span>
+              {t.verdictLine(forBuyer ? 'buyer' : 'seller')}
               <HashLink value={trade.arbiterPk} kind="plain" />
             </dd>
-            <dt>Decided by</dt>
+            <dt>{t.decidedBy}</dt>
             <dd>
               {demo ? (
                 <>
-                  <ProvenanceTag kind="sim">Simulated arbiter</ProvenanceTag> A demo visitor
+                  <ProvenanceTag kind="sim">{t.simulatedArbiter}</ProvenanceTag>
+                  {t.demoVisitor}
                 </>
               ) : (
                 // Invented copy.
-                "Campfire's arbiter key"
+                t.campfireKey
               )}
             </dd>
             {!demo && trade.verdictReason && (
               <>
-                <dt>Reason</dt>
+                <dt>{t.reasonLabel}</dt>
                 <dd>{trade.verdictReason}</dd>
               </>
             )}
           </dl>
           <div className="s-actions">
             <Button variant="primary" to={`/trade/${trade.id}`}>
-              Back to the trade
+              {t.backToTrade}
             </Button>
           </div>
         </div>
@@ -358,40 +360,39 @@ function DecidedCard({ trade, amount }: { trade: Trade; amount: string }) {
 // --- What the arbiter reads ---
 
 function DisputeCard({ trade }: { trade: Trade }) {
+  const t = useMessages().arbiter;
   return (
     <section className="cf-card" data-flush>
       <div className="cf-card__section">
         <h2 className="cf-heading" style={{ marginBottom: 'var(--space-3)' }}>
-          Dispute
+          {t.dispute}
         </h2>
         <dl className="cf-dl">
           {trade.disputedBy && (
             <>
-              <dt>Opened by</dt>
+              <dt>{t.openedBy}</dt>
               <dd>
-                {trade.disputedBy === 'seller' ? 'Seller' : 'Buyer'}
+                {t.party(trade.disputedBy)}
                 {trade.disputedAt !== undefined && `, ${formatHourMinute(new Date(trade.disputedAt * 1000))}`}
               </dd>
             </>
           )}
           {trade.disputeReason && (
             <>
-              <dt>Reason</dt>
+              <dt>{t.reasonLabel}</dt>
               <dd>{trade.disputeReason}</dd>
             </>
           )}
           {/* Whether the buyer said the payment was sent is the first thing an arbiter needs to know. */}
-          <dt>Payment marked as sent</dt>
-          <dd>
-            {trade.paidAt !== undefined
-              ? `Yes, by the buyer at ${formatHourMinute(new Date(trade.paidAt * 1000))}`
-              : 'No. The dispute was opened before the buyer marked the payment as sent.'}
+          <dt>{t.markedSent}</dt>
+          <dd>{trade.paidAt !== undefined ? t.markedYes(formatHourMinute(new Date(trade.paidAt * 1000))) : t.markedNo}
           </dd>
           {trade.isDemo && (
             <>
-              <dt>Fiat</dt>
+              <dt>{t.fiat}</dt>
               <dd>
-                <ProvenanceTag kind="sim">Simulated fiat</ProvenanceTag> No money was sent in this demo.
+                <ProvenanceTag kind="sim">{t.simulatedFiat}</ProvenanceTag>
+                {t.noMoney}
               </dd>
             </>
           )}
@@ -412,6 +413,7 @@ function ChatFeed(props: {
   const { id, token, onData, onError } = props;
   // What was decrypted so far: each poll asks only for newer messages (a receipt weighs hundreds of KB).
   const held = useRef<NonNullable<ArbiterChat['decrypted']>>([]);
+  const t = useMessages().arbiter;
   const feed = usePoll(
     () => {
       const since = sinceFor(held.current);
@@ -427,24 +429,27 @@ function ChatFeed(props: {
     POLL_MS,
   );
   useEffect(() => {
-    if (feed.error) onError(feed.error instanceof ApiError ? feed.error.message : 'The chat could not be loaded.');
-  }, [feed.error, onError]);
+    if (feed.error) onError(feed.error instanceof ApiError ? feed.error.message : t.chatError);
+  }, [feed.error, onError, t.chatError]);
   return null;
 }
 
 function ChatCard({ trade, chat, error }: { trade: Trade; chat: ArbiterChat | undefined; error: string | null }) {
   // Without a chat we could read (already decided, or not loaded yet) there is nothing honest to show.
+  const t = useMessages().arbiter;
   if (!chat && trade.status !== 'Disputed') return null;
   const messages = chat?.decrypted;
   let body: ReactNode;
   // Invented copy for the error.
-  if (!chat && error) body = <Notice tone="danger" title="The chat could not be read">{error}</Notice>;
+  if (!chat && error) body = <Notice tone="danger" title={t.chatUnreadable}>
+        {error}
+      </Notice>;
   else if (!chat) body = <Skeleton height={48} />;
   else if (!messages) {
     // Invented copy: the design only shows a chat the key was handed over for.
-    body = <p className="cf-small cf-muted">Nobody handed over the chat key, so the messages stay encrypted.</p>;
+    body = <p className="cf-small cf-muted">{t.noKey}</p>;
   } else if (messages.length === 0) {
-    body = <p className="cf-small cf-muted">There are no messages in this trade.</p>;
+    body = <p className="cf-small cf-muted">{t.noMessages}</p>;
   } else {
     body = (
       <div className="cf-chat">
@@ -452,10 +457,10 @@ function ChatCard({ trade, chat, error }: { trade: Trade; chat: ArbiterChat | un
           <div key={m.id} className="cf-msg">
             {/* The author is the role whose session key signed the message, not the identity the request named.
                 "Not signed" is invented copy: the design has no unsigned messages. */}
-            <strong>{m.senderRole === 'seller' ? 'Seller' : m.senderRole === 'buyer' ? 'Buyer' : 'Not signed'}</strong>{' '}
+            <strong>{t.sender(m.senderRole ?? null)}</strong>{' '}
             {m.plaintext === null ? (
               // Invented copy: the design has no message the shared key cannot open.
-              <em>This message does not decrypt with the key that was handed over.</em>
+              <em>{t.wrongKey}</em>
             ) : (
               <ChatPlaintext plaintext={m.plaintext} />
             )}
@@ -469,8 +474,8 @@ function ChatCard({ trade, chat, error }: { trade: Trade; chat: ArbiterChat | un
     <section className="cf-card" data-flush>
       <div className="cf-card__section">
         <div className="cf-row" data-between style={{ marginBottom: 'var(--space-3)' }}>
-          <h2 className="cf-heading">Chat, decrypted for the arbiter</h2>
-          {messages && trade.disputedBy && <span className="cf-small cf-muted">Key handed over by the {trade.disputedBy}</span>}
+          <h2 className="cf-heading">{t.chatTitle}</h2>
+          {messages && trade.disputedBy && <span className="cf-small cf-muted">{t.keyBy(trade.disputedBy)}</span>}
         </div>
         {body}
       </div>
@@ -499,12 +504,13 @@ function VerificationCard({ trade, amount, symbol }: { trade: Trade; amount: str
   const terms = signedTerms(trade);
   const quote = terms.quote;
   const margin = (terms.marginBps ?? 0) / 100;
+  const t = useMessages().arbiter;
 
   return (
     <section className="cf-card" data-flush>
       <div className="cf-card__section">
         <h2 className="cf-heading" style={{ marginBottom: 'var(--space-3)' }}>
-          Verification
+          {t.verification}
         </h2>
         <div className="cf-stack" data-gap="3">
           {!checks ? (
@@ -512,39 +518,39 @@ function VerificationCard({ trade, amount, symbol }: { trade: Trade; amount: str
           ) : (
             <>
               {checks.quote === 'none' && (
-                <p className="cf-small cf-muted">This offer has a fixed price, so there is no oracle quote to check.</p>
+                <p className="cf-small cf-muted">{t.fixedPrice}</p>
               )}
               {(checks.quote === 'valid' || checks.quote === 'signature-only') && quote && terms.oraclePk && (
                 <div className="s-check">
                   <span>
-                    <strong>Quote signature is valid.</strong> {quote.price} {trade.fiat}/{symbol} at{' '}
-                    {formatClock(new Date(quote.timestamp * 1000))}, signed by oracle <HashLink value={terms.oraclePk} kind="plain" />
-                    {checks.quote === 'valid' && ', the oracle named in the offer'}.
+                    <strong>{t.quoteValid}</strong> {quote.price} {trade.fiat}/{symbol} · {formatClock(new Date(quote.timestamp * 1000))}
+                    {t.signedByOracle}
+                    <HashLink value={terms.oraclePk} kind="plain" />
+                    {checks.quote === 'valid' && t.namedOracle}.
                   </span>
                 </div>
               )}
               {checks.quote === 'wrong-signature' && (
-                <Notice tone="danger" title="Quote signature is not valid">
-                  The oracle's signature does not match the price in the trade. Do not rely on this price.
+                <Notice tone="danger" title={t.quoteInvalid}>
+                  {t.quoteInvalidBody}
                 </Notice>
               )}
               {checks.quote === 'other-oracle' && (
-                <Notice tone="danger" title="The quote is signed by another oracle">
-                  The offer names a different oracle than the one that signed this quote.
+                <Notice tone="danger" title={t.otherOracle}>
+                  {t.otherOracleBody}
                 </Notice>
               )}
               {checks.fiat?.ok && (
                 <div className="s-check">
                   <span>
-                    <strong>Fiat amount matches.</strong> {amount} × {checks.fiat.price} {trade.fiat}/{symbol} × (1 + {margin}%) ={' '}
+                    <strong>{t.fiatMatches}</strong> {amount} × {checks.fiat.price} {trade.fiat}/{symbol} × (1 + {margin}%) ={' '}
                     {formatFiatAmount(terms.fiatAmount, trade.fiat)}.
                   </span>
                 </div>
               )}
               {checks.fiat && !checks.fiat.ok && (
-                <Notice tone="danger" title="Fiat amount does not match">
-                  Recomputed from the amount, price and margin it is {formatFiatAmount(checks.fiat.expected, trade.fiat)}, but the trade says{' '}
-                  {formatFiatAmount(terms.fiatAmount, trade.fiat)}.
+                <Notice tone="danger" title={t.fiatMismatch}>
+                  {t.fiatMismatchBody(formatFiatAmount(checks.fiat.expected, trade.fiat), formatFiatAmount(terms.fiatAmount, trade.fiat))}
                 </Notice>
               )}
             </>
@@ -557,14 +563,15 @@ function VerificationCard({ trade, amount, symbol }: { trade: Trade; amount: str
 }
 
 function EscrowVerification({ trade, escrow }: { trade: Trade; escrow: EscrowCheck | null | 'error' }) {
+  const t = useMessages().arbiter;
   if (escrow === null) return <Skeleton height={36} />;
   if (escrow === 'error') {
-    return <p className="cf-small cf-muted">This browser could not check the escrow on-chain right now. Reload the page to try again.</p>;
+    return <p className="cf-small cf-muted">{t.escrowError}</p>;
   }
   if (!escrow.termsMatch || !escrow.addressMatch) {
     return (
-      <Notice tone="danger" title="The escrow does not match the terms">
-        Rebuilt from the trade terms, the contract is not the one the service reports. Do not decide this trade.
+      <Notice tone="danger" title={t.escrowMismatch}>
+        {t.escrowMismatchBody}
       </Notice>
     );
   }
@@ -572,19 +579,19 @@ function EscrowVerification({ trade, escrow }: { trade: Trade; escrow: EscrowChe
     <>
       <div className="s-check">
         <span>
-          <strong>Escrow address matches the terms.</strong> Recomputed from the trade terms
-          {escrow.funding === 'match' ? ' and equal to the funded address' : ' and equal to the escrow address'}.
+          <strong>{t.escrowMatches}</strong>
+          {t.recomputed(escrow.funding === 'match')}
           {trade.fundingTxid && (
             <>
               {' '}
-              Funding <HashLink value={trade.fundingTxid} kind="transaction" />.
+              {t.funding} <HashLink value={trade.fundingTxid} kind="transaction" />.
             </>
           )}
         </span>
       </div>
       {escrow.funding === 'missing' && (
-        <Notice tone="attention" title="The deposit is not visible at the escrow address">
-          This browser did not find the funding coin there. The verdict can only be paid out if it exists.
+        <Notice tone="attention" title={t.depositMissing}>
+          {t.depositMissingBody}
         </Notice>
       )}
     </>
@@ -593,6 +600,7 @@ function EscrowVerification({ trade, escrow }: { trade: Trade; escrow: EscrowChe
 
 function TermsCard(props: { trade: Trade; amount: string; fiat: string; tokenAware: boolean }) {
   const { trade } = props;
+  const t = useMessages().arbiter;
   const expected = expectedEscrowFunding({ asset: trade.asset, amount: signedTerms(trade).amount });
   const holds = expected.token
     ? `${formatAmount(expected.satoshis, { symbol: 'BCH', decimals: 8, isBch: true })} + ${props.amount}`
@@ -605,36 +613,36 @@ function TermsCard(props: { trade: Trade; amount: string; fiat: string; tokenAwa
     <section className="cf-card" data-flush>
       <div className="cf-card__section">
         <h2 className="cf-heading" style={{ marginBottom: 'var(--space-3)' }}>
-          Trade terms
+          {t.terms}
         </h2>
         <dl className="cf-dl">
           {trade.tradeId && (
             <>
-              <dt>Trade ID</dt>
+              <dt>{t.tradeId}</dt>
               <dd>
                 <HashLink value={trade.tradeId} kind="plain" />
               </dd>
             </>
           )}
-          <dt>Amount</dt>
+          <dt>{t.amount}</dt>
           <dd>
             <span className="cf-mono">{props.amount}</span>
           </dd>
-          <dt>Fiat amount</dt>
+          <dt>{t.fiatAmount}</dt>
           <dd>
             <span className="cf-mono">{props.fiat}</span>
           </dd>
-          <dt>Buyer</dt>
+          <dt>{t.buyer}</dt>
           <dd>
             <HashLink value={trade.buyerIdentity} kind="plain" /> → {payout('buyer')}
           </dd>
-          <dt>Seller</dt>
+          <dt>{t.seller}</dt>
           <dd>
             <HashLink value={trade.sellerIdentity} kind="plain" /> → {payout('seller')}
           </dd>
           {trade.escrowAddress && (
             <>
-              <dt>Escrow</dt>
+              <dt>{t.escrow}</dt>
               <dd>
                 <HashLink value={trade.escrowAddress} kind="address" /> · <span className="cf-mono">{holds}</span>
               </dd>
@@ -642,7 +650,7 @@ function TermsCard(props: { trade: Trade; amount: string; fiat: string; tokenAwa
           )}
           {trade.refundTime && (
             <>
-              <dt>Refund time</dt>
+              <dt>{t.refundTime}</dt>
               <dd>{formatDateTime(trade.refundTime)}</dd>
             </>
           )}
@@ -655,10 +663,11 @@ function TermsCard(props: { trade: Trade; amount: string; fiat: string; tokenAwa
 // --- Loading and errors ---
 
 function ConsoleLoading() {
+  const t = useMessages().arbiter;
   return (
     <main className="s-main" data-narrow>
       <div className="s-pagehead" aria-busy="true">
-        <span className="cf-small cf-muted">Loading trade…</span>
+        <span className="cf-small cf-muted">{t.loading}</span>
         <Skeleton width="55%" height={30} />
         <Skeleton width="35%" height={24} />
       </div>
@@ -677,32 +686,34 @@ function ConsoleLoading() {
 
 function ConsoleError({ error, id, onRetry }: { error: unknown; id: string; onRetry: () => void }) {
   const notFound = error instanceof ApiError && error.status === 404;
+  const messages = useMessages();
+  const t = messages.arbiter;
   return (
     <main className="s-main" data-narrow>
       <div className="s-pagehead">
         <Link className="s-back" to="/offers">
-          ← Offers
+          {t.backOffers}
         </Link>
-        <h1 className="cf-title">Demo arbiter console</h1>
+        <h1 className="cf-title">{t.demoConsole}</h1>
       </div>
       <section className="cf-card" data-flush>
         <div className="cf-card__section">
           {notFound ? (
-            <EmptyState title="Trade not found" action={<Button to="/offers">Back to offers</Button>}>
-              No trade has the ID <span className="cf-mono">{id.length > 12 ? `${id.slice(0, 6)}…${id.slice(-4)}` : id}</span>.
+            <EmptyState title={t.notFound} action={<Button to="/offers">{t.backToOffers}</Button>}>
+              {t.noTradeWithId} <span className="cf-mono">{id.length > 12 ? `${id.slice(0, 6)}…${id.slice(-4)}` : id}</span>.
             </EmptyState>
           ) : (
             <div className="cf-stack">
-              <Notice tone="danger" title="We could not load this trade">
+              <Notice tone="danger" title={t.loadError}>
                 {error instanceof ApiError && error.status >= 400 && error.status < 500
                   ? error.message
-                  : 'The server did not answer. Your funds are not affected: the escrow lives on-chain, not on this server.'}
+                  : t.loadErrorBody}
               </Notice>
               <div className="s-actions">
                 <Button variant="primary" onClick={onRetry}>
-                  Try again
+                  {messages.common.tryAgain}
                 </Button>
-                <Button to="/offers">Back to offers</Button>
+                <Button to="/offers">{t.backToOffers}</Button>
               </div>
             </div>
           )}

@@ -17,6 +17,7 @@ import { home } from './i18n/home';
 import { about } from './i18n/about';
 import { transparency } from './i18n/transparency';
 import { roadmap } from './i18n/roadmap';
+import { arbiter } from './i18n/arbiter';
 
 export type Lang = 'en' | 'es';
 
@@ -120,6 +121,7 @@ const en = {
   about: about.en,
   transparency: transparency.en,
   roadmap: roadmap.en,
+  arbiter: arbiter.en,
   landing: {
     title: 'Buy or sell Bitcoin Cash directly with another person',
     lead: 'No exchange holds your money. A contract on the Bitcoin Cash network locks the seller’s coins until the payment is done.',
@@ -291,6 +293,7 @@ const es: Messages = {
   about: about.es,
   transparency: transparency.es,
   roadmap: roadmap.es,
+  arbiter: arbiter.es,
   landing: {
     title: 'Compra o vende Bitcoin Cash directamente con otra persona',
     lead: 'Ninguna plataforma guarda tu dinero. Un contrato en la red de Bitcoin Cash bloquea las monedas del vendedor hasta que se completa el pago.',

@@ -10,6 +10,7 @@ import { EmptyState, Notice, Skeleton } from '../components/States';
 import { useConfig } from '../config';
 import { formatAmount, formatDateTime, formatFiatAmount } from '../format';
 import { usePoll } from '../hooks/usePoll';
+import { useMessages } from '../lang';
 import { signedTerms } from '../trade';
 
 // Disputes waiting for a verdict (invented page: the design only has the demo console for one trade).
@@ -20,27 +21,25 @@ const REFRESH_MS = 10_000;
 
 export function ArbiterList() {
   const token = useArbiterToken();
+  const t = useMessages().arbiter;
   return (
     <main className="s-main" data-narrow>
       <div className="s-pagehead">
-        <h1 className="cf-title">Arbiter console</h1>
-        <p className="cf-muted">
-          Disputes between two wallets that name Campfire's arbiter key. Trades against the demo seller are decided by anyone, from their
-          own trade page.
-        </p>
+        <h1 className="cf-title">{t.console}</h1>
+        <p className="cf-muted">{t.listLead}</p>
       </div>
       {token ? (
         <>
           <Disputes />
           <section className="cf-card" data-flush>
             <div className="cf-card__section cf-stack">
-              <h2 className="cf-heading">Service fees</h2>
+              <h2 className="cf-heading">{t.serviceFees}</h2>
               <FeeRatesForm token={token} />
             </div>
           </section>
           <section className="cf-card" data-flush>
             <div className="cf-card__section cf-stack">
-              <h2 className="cf-heading">Service accounts</h2>
+              <h2 className="cf-heading">{t.serviceAccounts}</h2>
               <ServiceAccounts token={token} />
             </div>
           </section>
@@ -48,7 +47,7 @@ export function ArbiterList() {
       ) : (
         <section className="cf-card" data-flush>
           <div className="cf-card__section cf-stack">
-            <h2 className="cf-heading">Enter the arbiter token</h2>
+            <h2 className="cf-heading">{t.enterToken}</h2>
             <ArbiterTokenForm />
           </div>
         </section>
@@ -59,10 +58,12 @@ export function ArbiterList() {
 
 function Disputes() {
   const config = useConfig();
+  const messages = useMessages();
+  const t = messages.arbiter;
   const disputes = usePoll(
     () =>
       apiGet<{ trades: Trade[] }>('/api/trades').then((r) =>
-        r.trades.filter((t) => t.status === 'Disputed').sort((a, b) => (a.disputedAt ?? 0) - (b.disputedAt ?? 0)),
+        r.trades.filter((row) => row.status === 'Disputed').sort((a, b) => (a.disputedAt ?? 0) - (b.disputedAt ?? 0)),
       ),
     'disputes',
     REFRESH_MS,
@@ -71,16 +72,16 @@ function Disputes() {
   return (
     <div className="cf-stack">
       <div className="cf-row" data-between>
-        <h2 className="cf-heading">Waiting for a verdict</h2>
+        <h2 className="cf-heading">{t.waitingVerdict}</h2>
         <Button size="sm" variant="ghost" onClick={() => setArbiterToken(null)}>
-          Forget token
+          {t.forgetToken}
         </Button>
       </div>
       {disputes.error && !disputes.data ? (
-        <Notice tone="danger" title="The disputes could not be loaded">
-          Campfire did not answer. Try again in a moment.
+        <Notice tone="danger" title={t.disputesError}>
+          {t.disputesErrorBody}
           <div className="s-actions">
-            <Button onClick={disputes.reload}>Try again</Button>
+            <Button onClick={disputes.reload}>{messages.common.tryAgain}</Button>
           </div>
         </Notice>
       ) : !disputes.data ? (
@@ -88,10 +89,7 @@ function Disputes() {
       ) : disputes.data.length === 0 ? (
         <section className="cf-card" data-flush>
           <div className="cf-card__section">
-            <EmptyState title="No open disputes">
-              When a buyer or a seller opens one, it shows up here. The list refreshes every 10 seconds. The token is checked when you open a
-              trade.
-            </EmptyState>
+            <EmptyState title={t.noDisputes}>{t.noDisputesBody}</EmptyState>
           </div>
         </section>
       ) : (
@@ -105,21 +103,21 @@ function Disputes() {
                 <div className="cf-row" data-between>
                   <div className="cf-stack" data-gap="1">
                     <strong>
-                      {formatAmount(terms.amount, asset)} for {formatFiatAmount(terms.fiatAmount, trade.fiat)}
+                      {t.amountFor(formatAmount(terms.amount, asset), formatFiatAmount(terms.fiatAmount, trade.fiat))}
                     </strong>
                     <span className="cf-small cf-muted">
-                      Opened by the {trade.disputedBy ?? 'buyer or seller'}
+                      {t.openedByLine(trade.disputedBy)}
                       {trade.disputedAt !== undefined && `, ${formatDateTime(trade.disputedAt)}`}
                     </span>
                     {trade.disputeReason && <span className="cf-small">{trade.disputeReason}</span>}
                     <span className="cf-row">
-                      {trade.isDemo ? <ProvenanceTag kind="sim">Demo seller</ProvenanceTag> : <ProvenanceTag kind="chain">Between two wallets</ProvenanceTag>}
-                      {!ours && <span className="cf-small cf-subtle">Another arbiter decides this one</span>}
+                      {trade.isDemo ? <ProvenanceTag kind="sim">{t.demoSeller}</ProvenanceTag> : <ProvenanceTag kind="chain">{t.twoWallets}</ProvenanceTag>}
+                      {!ours && <span className="cf-small cf-subtle">{t.anotherDecides}</span>}
                     </span>
                   </div>
                   {ours && (
                     <Button variant="primary" to={`/trade/${trade.id}/arbiter`}>
-                      Review
+                      {t.review}
                     </Button>
                   )}
                 </div>
