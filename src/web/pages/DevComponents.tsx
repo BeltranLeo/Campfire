@@ -1,4 +1,4 @@
-// Development-only gallery of the base components, to check them against the design in both themes.
+// Development-only gallery of the base components, to check them against the design.
 // The route exists only on the dev server (see App.tsx); it is never part of the deployed app.
 
 import type { ReactNode } from 'react';
@@ -24,7 +24,7 @@ const STATES: TradeState[] = [
   'Dropped',
 ];
 const ROLES: TradeRole[] = ['buyer', 'seller', 'visitor'];
-const ICONS: IconName[] = ['home', 'offers', 'trades', 'chats', 'shield', 'buy', 'sell', 'help'];
+const ICONS: IconName[] = ['home', 'offers', 'trades', 'chats', 'shield', 'transparency', 'buy', 'sell', 'help'];
 
 // Sample values only for this page; they are not real transactions.
 const SAMPLE_TX = '4f1c9a0000000000000000000000000000000000000000000000000000e07b';

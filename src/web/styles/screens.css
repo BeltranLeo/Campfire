@@ -226,7 +226,7 @@
   .s-headerbar > .cf-nav:not([data-app]) { order: 3; flex-basis: 100%; margin: 0 calc(-1 * var(--space-2)); -webkit-mask: none; mask: none; }
   .cf-nav a { padding: var(--space-2); }
   .cf-header { padding-top: var(--space-2); padding-bottom: var(--space-2); }
-  .cf-logo > img[data-theme-only] { display: none !important; }
+  .cf-logo > img[data-wordmark] { display: none !important; }
   .cf-logo > img[data-symbol] { display: block; height: 28px; }
   .cf-footer { padding: var(--space-4); }
   .s-footer { gap: var(--space-3) var(--space-4); }

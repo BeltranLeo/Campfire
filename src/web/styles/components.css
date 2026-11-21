@@ -14,17 +14,18 @@
 /* Paragraphs never end on a lone word on a narrow screen. */
 .cf p { text-wrap: pretty; }
 
-/* Icons (Phosphor Bold) drawn by CSS: a mask over currentColor, so they take the colour of their meaning. */
+/* Icons drawn by CSS: a mask over currentColor, so they take the colour of their meaning. line-*.svg are Aye's
+   line icons (see Icon.tsx); the others are Phosphor Bold, for ideas her icon system does not cover yet. */
 :root {
   --cf-i-info: url("../icons/info.svg");
-  --cf-i-warning: url("../icons/warning.svg");
+  --cf-i-warning: url("../icons/line-alert.svg");
   --cf-i-x-circle: url("../icons/x-circle.svg");
-  --cf-i-check-circle: url("../icons/check-circle.svg");
+  --cf-i-check-circle: url("../icons/line-check.svg");
   --cf-i-check: url("../icons/check.svg");
-  --cf-i-clock: url("../icons/clock.svg");
-  --cf-i-scales: url("../icons/scales.svg");
-  --cf-i-wallet: url("../icons/wallet.svg");
-  --cf-i-out: url("../icons/arrow-square-out.svg");
+  --cf-i-clock: url("../icons/line-clock.svg");
+  --cf-i-scales: url("../icons/line-arbiter.svg");
+  --cf-i-wallet: url("../icons/line-wallet.svg");
+  --cf-i-out: url("../icons/line-out.svg");
   --cf-i-question: url("../icons/question.svg");
 }
 
@@ -218,9 +219,6 @@
 
 /* ---------- Shell: hackathon banner, header, footer ---------- */
 .cf-banner { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-1) var(--space-3); padding: var(--space-2) var(--space-4); background: var(--noche-900); color: var(--luz-perla); font-size: 13px; line-height: 18px; }
-/* Dark in both themes: an inverted (pearl) strip glares above a night-blue page. In dark it sits a step deeper than the page. */
-[data-theme="dark"] .cf-banner { background: var(--noche-950); }
-[data-theme="dark"] .cf-banner:last-of-type { border-bottom: 1px solid var(--border); }
 .cf-banner strong { font-weight: 600; }
 .cf-banner a { color: var(--luz-perla); }
 .cf-banner__links { display: flex; flex-wrap: wrap; gap: 2px var(--space-3); }
@@ -228,12 +226,9 @@
 /* On a computer the header stays on top while the page scrolls under its glass, so the wallet is always at hand.
    On a phone it scrolls away: it is two rows tall there, and the tab bar does the navigating. */
 @media (min-width: 720px) { .cf-header { position: sticky; top: 0; z-index: 20; } }
-/* The logo is always a file, never the word set in a font: the colour version on light, colour symbol and white word on dark. */
+/* The logo is always a file, never the word set in a font: colour symbol and white word, for the night-blue header. */
 .cf-logo { display: inline-flex; align-items: center; flex: none; }
 .cf-logo > img { display: block; height: 28px; width: auto; }
-.cf-logo > img[data-theme-only="dark"] { display: none; }
-[data-theme="dark"] .cf-logo > img[data-theme-only="light"] { display: none; }
-[data-theme="dark"] .cf-logo > img[data-theme-only="dark"] { display: block; }
 .cf-nav { display: flex; gap: var(--space-1); }
 .cf-nav a { padding: var(--space-2) var(--space-3); border-radius: var(--radius-md); color: var(--text-muted); text-decoration: none; font-weight: 600; font-size: 14px; line-height: 20px; white-space: nowrap; }
 .cf-nav a:hover { color: var(--text); }

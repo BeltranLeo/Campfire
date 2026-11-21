@@ -118,7 +118,7 @@ export function About() {
           <small>{t.tryDemoNote}</small>
         </Link>
         <Link className="cf-quick" to="/transparency">
-          <Icon name="shield" />
+          <Icon name="transparency" />
           {t.transparency}
           <small>{t.transparencyNote}</small>
         </Link>

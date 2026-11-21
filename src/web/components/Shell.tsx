@@ -4,11 +4,9 @@ import { BANNER_LINKS, PROTOCOL_SPEC_URL, REPO_URL, VOTING_ADDRESS } from '../li
 import { setLang, useLang, useMessages } from '../lang';
 import type { Lang, Messages } from '../messages';
 import { alertsOn, askToNotify, canAskToNotify, setAlertsOn } from '../alerts';
-import { getThemePref, setThemePref, type ThemePref } from '../theme';
 import { useWalletCoinsSync } from '../walletCoins';
 import { useWallet } from '../wallet';
 import logoDark from '../logos/logo-dark.svg';
-import logoLight from '../logos/logo-light.png';
 import logoSymbol from '../logos/symbol-64.png';
 import { AdvancedSwitch } from './AdvancedSwitch';
 import { CopyButton } from './CopyButton';
@@ -44,10 +42,9 @@ export function Shell() {
       <Banner />
       <header className="cf-header">
         <div className="s-headerbar">
-          {/* The logo is a file, never the word set in a font. CSS shows the one that matches the theme. */}
+          {/* The logo is a file, never the word set in a font: the version for the night-blue header. */}
           <Link className="cf-logo" to="/" aria-label={t.logo}>
-            <img src={logoLight} alt="" data-theme-only="light" />
-            <img src={logoDark} alt="" data-theme-only="dark" />
+            <img src={logoDark} alt="" data-wordmark />
             {/* On a phone only the symbol shows, so the logo, the nav and the wallet button share one row. */}
             <img src={logoSymbol} alt="" data-symbol />
           </Link>
@@ -135,44 +132,12 @@ function Footer() {
             technical-details switch is here too, so a visitor without a wallet (a judge, say) sees it right away and
             can open every technical detail at once. */}
         <div className="s-footsettings">
-          <ThemeSwitch />
           <LangSwitch />
           <AlertsSwitch />
           <AdvancedSwitch compact />
         </div>
       </div>
     </footer>
-  );
-}
-
-// Icons only, to keep the row short; the label goes to screen readers and to the tooltip.
-const THEME_OPTIONS: { value: ThemePref; label: keyof Messages['footer']; icon: IconName }[] = [
-  { value: 'system', label: 'themeSystem', icon: 'monitor' },
-  { value: 'light', label: 'themeLight', icon: 'sun' },
-  { value: 'dark', label: 'themeDark', icon: 'moon' },
-];
-
-function ThemeSwitch() {
-  const [pref, setPref] = useState(getThemePref);
-  const t = useMessages().footer;
-  return (
-    <div className="cf-seg" role="group" aria-label={t.theme}>
-      {THEME_OPTIONS.map((option) => (
-        <button
-          key={option.value}
-          type="button"
-          aria-pressed={pref === option.value}
-          aria-label={t[option.label]}
-          title={t[option.label]}
-          onClick={() => {
-            setThemePref(option.value);
-            setPref(option.value);
-          }}
-        >
-          <Icon name={option.icon} />
-        </button>
-      ))}
-    </div>
   );
 }
 

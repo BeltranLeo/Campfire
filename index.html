@@ -21,18 +21,6 @@
     <meta property="og:locale:alternate" content="es_LA" />
     <meta name="twitter:card" content="summary_large_image" />
     <link rel="icon" type="image/png" href="/src/web/logos/symbol-64.png" />
-    <script>
-      // Set the theme before the first paint so a dark-mode visitor never sees a light flash.
-      // Must match src/web/theme.ts: localStorage.theme is 'light', 'dark' or absent (follow the system).
-      (function () {
-        var stored = null;
-        try {
-          stored = localStorage.getItem('theme');
-        } catch (e) {}
-        var dark = stored === 'dark' || (stored !== 'light' && window.matchMedia('(prefers-color-scheme: dark)').matches);
-        document.documentElement.setAttribute('data-theme', dark ? 'dark' : 'light');
-      })();
-    </script>
   </head>
   <body>
     <div id="root" class="cf s-screen"></div>
