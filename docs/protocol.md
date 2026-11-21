@@ -310,7 +310,9 @@ The minter must be input 0, so a transaction cannot carry two minters, and no ou
 | 0 | A minter UTXO (unlocked by the covenant's `mint()`, no signature) |
 | 1… | The publisher's plain BCH coins, which pay the marker and the fee |
 
-The genesis transaction (section 3.5) creates several minter UTXOs, each numbered by a one-byte commitment, and clients pick one at random, so two publishers rarely spend the same one at the same time. A publication that loses that race is rejected by the network, and publishing again picks a minter at random.
+**Minter lanes.** Each publication spends a minter UTXO and creates a new one, so a minter is a lane that carries one publication at a time. The next publication can follow at once, without waiting for a block, because it spends the new UTXO while it is still unconfirmed. What collides is two publications built at the same moment from the same UTXO: both spend the same outpoint, the network keeps the first, and the second is rejected and has to be built and signed again. The genesis transaction (section 3.5) therefore creates four lanes, each a minter UTXO numbered by a one-byte commitment (`00` to `03`), and clients pick one at random. Two publishers who build at the same moment then share a lane one time in four, and a rejected publication is published again from a lane picked anew.
+
+The number of lanes is fixed for this category. A minting NFT could mint more minting NFTs, but the covenant forbids it (output 2 returns the same minter and no other output may hold tokens), so nobody can add lanes, and nobody can remove one either: the covenant always returns it. More lanes would take a new version of the covenant with a function that splits a minter in two.
 
 **WizardConnect.** The wallet signs only its own inputs (`inputPaths` starts at index 1); the minter's unlocking bytecode is complete before the wallet sees the transaction. This is the same request format as the escrow deposit, which already spends token outputs.
 
@@ -335,6 +337,8 @@ The offer category publishes a Bitcoin Cash Metadata Registry, so wallets show a
 | 1…N | Minting NFTs at the minter covenant (N = 4 by default) |
 | N+1 | BCMR publication |
 | N+2 | Change (optional) |
+
+**On mainnet.** Category `dfe5f513117cd41512a2230be4e8dd4a6659b5e3ed41a8e6813be7a32ef60096`, created by genesis transaction [`696cd711…ecede9`](https://blockchair.com/bitcoin-cash/transaction/696cd7114e0f6c0a5bf529d27eeb8e40512f923626e6204bcadf1ac1a7ecede9). Its registry is `public/.well-known/bitcoin-cash-metadata-registry.json`, SHA-256 `8fc5f9ae0bba2687967b0b93e2eba0ffe8ec2a44e5b47f6f42932b10f90f7269`.
 
 `scripts/offer-genesis.ts` builds this transaction, writes the registry file before broadcasting, and prints the category for `CAMPFIRE_OFFER_CATEGORY`. The registry's bytes must not change after the genesis: wallets compare their hash with the publication. Changing the metadata means a new publication that spends the identity output.
 

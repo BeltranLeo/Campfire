@@ -8,7 +8,8 @@
 // the same address so that one exists, and asks you to run it again. Keep the identity output (output 0 of the
 // genesis transaction) unspent: whoever spends it moves the registry's authority.
 
-import { writeFileSync } from 'node:fs';
+import { mkdirSync, writeFileSync } from 'node:fs';
+import { dirname } from 'node:path';
 import { binToHex, hash160, secp256k1 } from '@bitauth/libauth';
 import { ElectrumNetworkProvider, SignatureTemplate, TransactionBuilder, type Network } from 'cashscript';
 import {
@@ -67,6 +68,7 @@ if (!broadcast) {
   process.exit(0);
 }
 // The registry is written before broadcasting, so the published hash always has its file.
+mkdirSync(dirname(`public${REGISTRY_PATH}`), { recursive: true });
 writeFileSync(`public${REGISTRY_PATH}`, registry);
 const txid = await provider.sendRawTransaction(genesis.hex);
 console.log(`Broadcast ${txid}`);

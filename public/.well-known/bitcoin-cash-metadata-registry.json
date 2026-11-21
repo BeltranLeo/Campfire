@@ -1,0 +1,73 @@
+{
+  "$schema": "https://cashtokens.org/bcmr-v2.schema.json",
+  "version": {
+    "major": 1,
+    "minor": 0,
+    "patch": 0
+  },
+  "latestRevision": "2026-11-21T05:46:44.028Z",
+  "registryIdentity": {
+    "name": "Campfire",
+    "description": "Non-custodial peer-to-peer exchange of Bitcoin Cash and PUSD for cash, with an on-chain escrow.",
+    "uris": {
+      "icon": "https://campfire.cash/bcmr/campfire-offer.png",
+      "web": "https://campfire.cash/",
+      "source": "https://github.com/BeltranLeo/Campfire"
+    }
+  },
+  "identities": {
+    "dfe5f513117cd41512a2230be4e8dd4a6659b5e3ed41a8e6813be7a32ef60096": {
+      "2026-11-21T05:46:44.028Z": {
+        "name": "Campfire offer",
+        "description": "A ticket for an offer on Campfire, the non-custodial P2P exchange for Bitcoin Cash. The offer is open while this NFT exists; burning it closes the offer.",
+        "token": {
+          "category": "dfe5f513117cd41512a2230be4e8dd4a6659b5e3ed41a8e6813be7a32ef60096",
+          "symbol": "CAMPFIRE",
+          "decimals": 0,
+          "nfts": {
+            "description": "Each NFT marks one offer. Its commitment holds the side of the offer and the SHA-256 hash of the offer document.",
+            "fields": {
+              "offerHash": {
+                "name": "Offer hash",
+                "description": "SHA-256 of the offer document, which is also the digest of its IPFS CID.",
+                "encoding": {
+                  "type": "hex"
+                }
+              }
+            },
+            "parse": {
+              "bytecode": "00cf517f7c6b6b",
+              "types": {
+                "01": {
+                  "name": "Sell offer",
+                  "description": "The holder sells coins for cash. Burn this NFT to close the offer.",
+                  "fields": [
+                    "offerHash"
+                  ],
+                  "uris": {
+                    "icon": "https://campfire.cash/bcmr/campfire-offer.png"
+                  }
+                },
+                "02": {
+                  "name": "Buy offer",
+                  "description": "The holder buys coins with cash. Burn this NFT to close the offer.",
+                  "fields": [
+                    "offerHash"
+                  ],
+                  "uris": {
+                    "icon": "https://campfire.cash/bcmr/campfire-offer.png"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "uris": {
+          "icon": "https://campfire.cash/bcmr/campfire-offer.png",
+          "web": "https://campfire.cash/",
+          "source": "https://github.com/BeltranLeo/Campfire"
+        }
+      }
+    }
+  }
+}
