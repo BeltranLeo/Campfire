@@ -7,9 +7,11 @@ const en = {
   backTransparency: '← Transparency',
   realEscrow: 'Real escrow on mainnet',
   nothingOnChain: 'Nothing on-chain yet',
+  nothingWentOnChain: 'Nothing went on-chain',
   simulatedPayment: 'Simulated fiat payment',
   progress: 'Progress',
   allDone: (n: number) => `All ${n} steps done`,
+  endedWith: (outcome: string) => `Ended · ${outcome}`,
   stepOf: (i: number, n: number, title: string) => `Step ${i} of ${n}: ${title}`,
   disputeReasons: [
     'The seller did not release after I paid',
@@ -90,6 +92,8 @@ const en = {
   checkingLockBody: (seconds: number) =>
     `Bitcoin Cash nodes publish a double-spend proof (DSProof) within seconds if anyone tries to spend these coins twice. Ready in about ${seconds} s.`,
   safe: 'Safe at 0-conf',
+  confirmedInBlock: 'Confirmed in a block',
+  confirmedInBlockBody: 'The locked coins are in a block, so they can no longer be spent twice.',
   safeBody: (seconds: number) =>
     `The locked coins reached the network and no double-spend attempt was seen in ${seconds} seconds. On Bitcoin Cash you can rely on it now, without waiting for a block.`,
   doubleSpend: 'Double-spend attempt detected',
@@ -147,10 +151,29 @@ const en = {
   seeAllPaths: 'See all contract paths',
   // Visitors
   visitor: 'You are viewing this trade as a visitor.',
-  visitorBody: 'Payment details and chat are visible only to the buyer and the seller. Everything on-chain is public and linked below.',
+  visitorBody: 'Payment details and chat are visible only to the buyer and the seller. Everything on-chain is public and linked on this page.',
   visitorPublicBody:
-    'Who traded, the fiat amount, the payment details and the chat are visible only to the buyer, the seller and, in a dispute, the arbiter. Everything on-chain is public and linked below.',
+    'Who traded, the fiat amount, the payment details and the chat are visible only to the buyer, the seller and, in a dispute, the arbiter. Everything on-chain is public and linked on this page.',
   settlement: 'Settlement',
+  // Invented copy: a visitor's title for a trade that has ended says what happened, since the public view has no fiat.
+  visitorTitle: (status: string, amount: string): string | null => {
+    switch (status) {
+      case 'Released':
+        return `${amount} released to the buyer`;
+      case 'ResolvedBuyer':
+        return `${amount} released to the buyer by the arbiter`;
+      case 'ResolvedSeller':
+        return `${amount} returned to the seller by the arbiter`;
+      case 'Cancelled':
+        return `${amount} returned to the seller: the buyer cancelled`;
+      case 'Refunded':
+        return `${amount} refunded to the seller`;
+      case 'Dropped':
+        return `A trade for ${amount} that never started`;
+      default:
+        return null;
+    }
+  },
   // On-chain details
   forChecking: 'For checking the trade yourself: the contract address, the transactions, the price quote and the other person.',
   escrow: 'Escrow contract',
@@ -172,6 +195,7 @@ const en = {
   checkFunding: (holds: string) => `The deposit holds exactly ${holds}.`,
   checkDs: (clock: string) => `No double-spend proof for the deposit (checked at ${clock}).`,
   checkDsUncovered: 'Double-spend proofs cannot cover this deposit: it spends a coin from a contract.',
+  checkConfirmed: 'The deposit is confirmed in a block.',
   terms: 'Trade terms',
   price: 'Price',
   floating: (margin: string) => `Floating, ${margin}.`,
@@ -198,7 +222,7 @@ const en = {
   trade: 'Trade',
   notFound: 'Trade not found',
   noTradeWithId: 'No trade has the ID',
-  checkLink: 'Check the link, or find your trades in the wallet menu.',
+  checkLink: 'Check the link. If it is your trade, connect your wallet and open Trades in the menu.',
   loadError: 'We could not load this trade',
   loadErrorBody: 'The server did not answer. Your funds are not affected: the escrow lives on-chain, not on this server.',
 };
@@ -209,9 +233,11 @@ const es: typeof en = {
   backTransparency: '← Transparencia',
   realEscrow: 'Garantía real en mainnet',
   nothingOnChain: 'Todavía nada en la cadena',
+  nothingWentOnChain: 'Nada llegó a la cadena',
   simulatedPayment: 'Pago simulado',
   progress: 'Progreso',
   allDone: (n) => `Los ${n} pasos están completos`,
+  endedWith: (outcome) => `Terminó · ${outcome}`,
   stepOf: (i, n, title) => `Paso ${i} de ${n}: ${title}`,
   disputeReasons: [
     'El vendedor no liberó después de que pagué',
@@ -283,6 +309,8 @@ const es: typeof en = {
   checkingLockBody: (seconds) =>
     `Si alguien intenta gastar estas monedas dos veces, los nodos de Bitcoin Cash publican una prueba de doble gasto (DSProof) en segundos. Listo en unos ${seconds} s.`,
   safe: 'Seguro con 0-conf',
+  confirmedInBlock: 'Confirmado en un bloque',
+  confirmedInBlockBody: 'Las monedas bloqueadas ya están en un bloque, así que no se pueden gastar dos veces.',
   safeBody: (seconds) =>
     `Las monedas bloqueadas llegaron a la red y no se vio ningún intento de doble gasto en ${seconds} segundos. En Bitcoin Cash ya puedes confiar en eso, sin esperar un bloque.`,
   doubleSpend: 'Se detectó un intento de doble gasto',
@@ -336,10 +364,28 @@ const es: typeof en = {
   refund: 'Reembolso',
   seeAllPaths: 'Ver todos los caminos del contrato',
   visitor: 'Estás viendo esta operación como visitante.',
-  visitorBody: 'Los datos de pago y el chat solo los ven el comprador y el vendedor. Todo lo que está en la cadena es público y está enlazado abajo.',
+  visitorBody: 'Los datos de pago y el chat solo los ven el comprador y el vendedor. Todo lo que está en la cadena es público y está enlazado en esta página.',
   visitorPublicBody:
-    'Quiénes operan, el monto en fíat, los datos de pago y el chat solo los ven el comprador, el vendedor y, si hay una disputa, el árbitro. Todo lo que está en la cadena es público y está enlazado abajo.',
+    'Quiénes operan, el monto en fíat, los datos de pago y el chat solo los ven el comprador, el vendedor y, si hay una disputa, el árbitro. Todo lo que está en la cadena es público y está enlazado en esta página.',
   settlement: 'Cierre',
+  visitorTitle: (status, amount) => {
+    switch (status) {
+      case 'Released':
+        return `${amount} liberados al comprador`;
+      case 'ResolvedBuyer':
+        return `${amount} liberados al comprador por el árbitro`;
+      case 'ResolvedSeller':
+        return `${amount} devueltos al vendedor por el árbitro`;
+      case 'Cancelled':
+        return `${amount} devueltos al vendedor: el comprador canceló`;
+      case 'Refunded':
+        return `${amount} reembolsados al vendedor`;
+      case 'Dropped':
+        return `Una operación por ${amount} que no llegó a empezar`;
+      default:
+        return null;
+    }
+  },
   forChecking: 'Para que revises la operación por tu cuenta: la dirección del contrato, las transacciones, la cotización y la otra persona.',
   escrow: 'Contrato de garantía',
   notCreated: 'Todavía no se creó',
@@ -360,6 +406,7 @@ const es: typeof en = {
   checkFunding: (holds) => `El depósito contiene exactamente ${holds}.`,
   checkDs: (clock) => `No hay prueba de doble gasto para el depósito (revisado a las ${clock}).`,
   checkDsUncovered: 'Las pruebas de doble gasto no pueden cubrir este depósito: gasta una moneda de un contrato.',
+  checkConfirmed: 'El depósito está confirmado en un bloque.',
   terms: 'Condiciones de la operación',
   price: 'Precio',
   floating: (margin) => `Variable, ${margin}.`,
@@ -384,7 +431,7 @@ const es: typeof en = {
   trade: 'Operación',
   notFound: 'No se encontró la operación',
   noTradeWithId: 'Ninguna operación tiene el ID',
-  checkLink: 'Revisa el enlace, o busca tus operaciones en el menú de la billetera.',
+  checkLink: 'Revisa el enlace. Si es tu operación, conecta tu billetera y abre Operaciones en el menú.',
   loadError: 'No pudimos cargar esta operación',
   loadErrorBody: 'El servidor no respondió. Tus fondos no se ven afectados: la garantía vive en la cadena, no en este servidor.',
 };

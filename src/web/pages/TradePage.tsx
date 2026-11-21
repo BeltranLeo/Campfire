@@ -33,6 +33,7 @@ import {
   paymentMethodLabel,
 } from '../format';
 import { useCompletedWith } from '../hooks/useCompletedWith';
+import { useConfirmations } from '../hooks/useConfirmations';
 import { otherParty } from '../mytrades';
 import { usePoll } from '../hooks/usePoll';
 import { useTradeAction } from '../hooks/useTradeAction';
@@ -147,8 +148,12 @@ function TradeView({ trade, role, onUpdate, reload }: { trade: Trade; role: Role
     // Re-check when the deposit or the state changes, or on a retry; not on every poll.
   }, [trade.tradeId, trade.fundingTxid, trade.status, receiveXpub, attempt]);
 
-  // A deposit still in the mempool is watched for double-spend proofs until it is in a block.
-  const zeroConf = (trade.status === 'Funded' || trade.status === 'Paid') && (trade.fundingConfirmations ?? 0) === 0;
+  // The deposit's confirmations come from the chain, not from the trade record: the server stores 0 when it sees the
+  // deposit and never follows it into a block. Until the chain answers the count is unknown and shown nowhere.
+  const confirmations = useConfirmations(trade.fundingTxid, !isFinal(trade));
+  const onChain: Trade = { ...trade, fundingConfirmations: confirmations };
+  // A deposit still in the mempool (or not looked up yet) is watched for double-spend proofs until it is in a block.
+  const zeroConf = (trade.status === 'Funded' || trade.status === 'Paid') && (confirmations ?? 0) === 0;
   const ds = useDoubleSpendWatch(trade.fundingTxid, trade.fundedAt, zeroConf);
 
   return (
@@ -168,13 +173,16 @@ function TradeView({ trade, role, onUpdate, reload }: { trade: Trade; role: Role
               {t.backTransparency}
             </Link>
           )}
-          <h1 className="cf-title">{trade.public ? amount : tradeTitle(trade.status, view, amount, fiat)}</h1>
+          <h1 className="cf-title">
+            {(view === 'visitor' && isFinal(trade) && t.visitorTitle(trade.status, amount)) ||
+              (trade.public ? amount : tradeTitle(trade.status, view, amount, fiat))}
+          </h1>
           <div className="cf-row">
             <StatusPill state={trade.status} role={view} side={trade.side} />
             {trade.fundingTxid ? (
               <ProvenanceTag kind="chain">{t.realEscrow}</ProvenanceTag>
             ) : (
-              <ProvenanceTag kind="offchain">{t.nothingOnChain}</ProvenanceTag>
+              <ProvenanceTag kind="offchain">{isFinal(trade) ? t.nothingWentOnChain : t.nothingOnChain}</ProvenanceTag>
             )}
             {trade.isDemo && <ProvenanceTag kind="sim">{t.simulatedPayment}</ProvenanceTag>}
           </div>
@@ -185,7 +193,7 @@ function TradeView({ trade, role, onUpdate, reload }: { trade: Trade; role: Role
           isFinal(trade) ? (
             <BuyerResult trade={trade} amount={amount} payout={payout} />
           ) : (
-            <BuyerAction trade={trade} amount={amount} fiat={fiat} check={check} ds={ds} onUpdate={onUpdate} reload={reload} />
+            <BuyerAction trade={onChain} amount={amount} fiat={fiat} check={check} ds={ds} onUpdate={onUpdate} reload={reload} />
           )
         ) : view === 'seller' ? (
           isFinal(trade) ? (
@@ -197,11 +205,12 @@ function TradeView({ trade, role, onUpdate, reload }: { trade: Trade; role: Role
           <VisitorCard trade={trade} />
         )}
 
-        <ProgressCard steps={timeline(trade, view, amount)} />
+        {/* A visitor to an ended trade came to read its story, so it starts open for them. */}
+        <ProgressCard steps={timeline(onChain, view, amount)} final={isFinal(trade)} open={view === 'visitor' && isFinal(trade)} />
 
         {(view === 'buyer' || view === 'seller') && <TradeChat trade={trade} role={view} />}
 
-        <OnChainDetails trade={trade} asset={asset} amount={amount} fiat={fiat} payout={payout} check={check} ds={ds} view={view} />
+        <OnChainDetails trade={onChain} asset={asset} amount={amount} fiat={fiat} payout={payout} check={check} ds={ds} view={view} />
       </div>
     </main>
   );
@@ -234,17 +243,20 @@ function PartyLine({ trade, view }: { trade: Trade; view: 'buyer' | 'seller' }) 
 
 // The timeline folds behind one line that names the step the trade is on, so the action card above and the rest of
 // the page fit on a phone's screen. The action card already says what to do now; the full story is one tap away.
-function ProgressCard({ steps }: { steps: Step[] }) {
+// A trade that has ended names its outcome (the last step) instead: counting steps would call a dispute the buyer won
+// "step 3 of 5" after the payment step it skipped, and a cancelled trade "all steps done".
+function ProgressCard({ steps, final, open }: { steps: Step[]; final: boolean; open: boolean }) {
   const at = steps.findIndex((step) => step.state === 'current' || step.state === 'failed');
   const index = at >= 0 ? at : steps.length - 1;
   const allDone = at < 0 && steps.every((step) => step.state === 'done');
   const t = useMessages().tradePage;
+  const outcome = steps[steps.length - 1]?.title ?? '';
   return (
-    <details className="cf-card tr-progress" data-flush>
+    <details className="cf-card tr-progress" data-flush open={open || undefined}>
       <summary className="cf-card__section">
         <h2 className="cf-heading">{t.progress}</h2>
         <span className="cf-small cf-muted tr-progress__now">
-          {allDone ? t.allDone(steps.length) : t.stepOf(index + 1, steps.length, steps[index]?.title ?? '')}
+          {final ? t.endedWith(outcome) : allDone ? t.allDone(steps.length) : t.stepOf(index + 1, steps.length, steps[index]?.title ?? '')}
         </span>
       </summary>
       <div className="cf-card__section">
@@ -382,18 +394,41 @@ function BuyerAction(props: {
       </div>
     </Details>
   );
-  // In a dispute the cancel button stays in plain sight.
-  const cancelButton = (
-    <Button
-      variant="danger"
-      signs={t.cancelSigns}
-      busy={busy === 'cancel'}
-      disabled={busy !== null && busy !== 'cancel'}
-      onClick={cancelTrade}
-    >
-      {t.cancelTrade}
-    </Button>
-  );
+  // In a dispute the cancel button stays in plain sight. Once the payment was marked, cancelling would lose the money
+  // already sent, so it asks once more, the same way it does in the Paid state.
+  const cancelButton =
+    trade.paidAt !== undefined && confirmingCancel ? (
+      <div className="cf-well cf-stack" data-gap="3">
+        <strong>{t.confirmCancelTitle(props.fiat)}</strong>
+        <p className="cf-small">{t.confirmCancelBody}</p>
+        <div className="s-actions">
+          <Button
+            variant="danger"
+            signs={t.cancelSigns}
+            busy={busy === 'cancel'}
+            disabled={busy !== null && busy !== 'cancel'}
+            onClick={() => cancelTrade().finally(() => setConfirmingCancel(false))}
+          >
+            {t.confirmCancel}
+          </Button>
+          <Button variant="ghost" disabled={busy !== null} onClick={() => setConfirmingCancel(false)}>
+            {t.goBack}
+          </Button>
+        </div>
+      </div>
+    ) : (
+      <div className="s-actions">
+        <Button
+          variant="danger"
+          signs={t.cancelSigns}
+          busy={busy === 'cancel'}
+          disabled={busy !== null && busy !== 'cancel'}
+          onClick={trade.paidAt !== undefined ? () => setConfirmingCancel(true) : cancelTrade}
+        >
+          {t.cancelTrade}
+        </Button>
+      </div>
+    );
 
   switch (trade.status) {
     case 'Requested':
@@ -462,7 +497,7 @@ function BuyerAction(props: {
           }
         >
           <EscrowCheckNotice check={props.check} />
-          <ZeroConfNotice ds={props.ds} isDemo={trade.isDemo === true} />
+          <ZeroConfNotice ds={props.ds} isDemo={trade.isDemo === true} confirmed={(trade.fundingConfirmations ?? 0) > 0} />
           <PaymentDetails trade={trade} fiat={props.fiat} />
           {failure}
           {confirmingPaid ? (
@@ -529,7 +564,7 @@ function BuyerAction(props: {
             </SimBox>
           )}
           {failure}
-          <div className="s-actions">{cancelButton}</div>
+          {cancelButton}
         </ActionCard>
       );
     }
@@ -626,8 +661,18 @@ function BuyRequest(props: { trade: Trade; amount: string; fiat: string; onUpdat
 
 // The deposit at zero confirmations (Bitcoin Cash 0-conf): watched for a double-spend proof for a few
 // seconds, then safe to act on. Without the check the page falls back to asking for one confirmation.
-function ZeroConfNotice({ ds, isDemo }: { ds: DoubleSpendState; isDemo: boolean }) {
+function ZeroConfNotice({ ds, isDemo, confirmed }: { ds: DoubleSpendState; isDemo: boolean; confirmed: boolean }) {
   const t = useMessages().tradePage;
+  // Once the deposit is in a block the double-spend watch stops; the buyer still gets the quiet good-news line.
+  if (confirmed && ds.phase !== 'proof') {
+    return (
+      <div className="cf-notice tr-safe" data-tone="verified">
+        <div>
+          <strong>{t.confirmedInBlock}.</strong> {t.confirmedInBlockBody}
+        </div>
+      </div>
+    );
+  }
   switch (ds.phase) {
     case 'watching':
       return (
@@ -919,35 +964,48 @@ function BuyerResult({ trade, amount, payout }: { trade: Trade; amount: string; 
   );
 }
 
+// A visitor to an ended trade (often someone checking the project) came for the proof, so it leads: the two
+// transactions that locked and settled the coins, each linked to the explorer. What a visitor cannot see is one line
+// under it. While the trade is open there is no proof to show yet, so the notice stays in front.
 function VisitorCard({ trade }: { trade: Trade }) {
-  const ended = trade.completedAt ?? trade.verdictIssuedAt;
+  const ended = trade.completedAt ?? trade.verdictIssuedAt ?? trade.updatedAt;
   const t = useMessages().tradePage;
+  const hidden = trade.public ? t.visitorPublicBody : t.visitorBody;
+  if (!isFinal(trade)) {
+    return (
+      <section className="cf-card" data-flush>
+        <div className="cf-card__section">
+          <Notice title={t.visitor}>{hidden}</Notice>
+        </div>
+      </section>
+    );
+  }
   return (
     <section className="cf-card" data-flush>
-      <div className="cf-card__section">
-        <div className="cf-stack">
-          <Notice title={t.visitor}>
-            {trade.public ? t.visitorPublicBody : t.visitorBody}
-          </Notice>
-          {isFinal(trade) && (
-            <dl className="cf-dl">
-              {trade.settlementTxid && (
-                <>
-                  <dt>{trade.status === 'Released' ? t.release : t.settlement}</dt>
-                  <dd>
-                    <HashLink value={trade.settlementTxid} kind="transaction" /> · <ProvenanceTag kind="chain" />
-                  </dd>
-                </>
-              )}
-              {ended && (
-                <>
-                  <dt>{trade.status === 'Released' ? t.completedAt : t.ended}</dt>
-                  <dd>{formatDateTime(ended)}</dd>
-                </>
-              )}
-            </dl>
+      <div className="cf-card__section cf-stack">
+        <dl className="cf-dl">
+          {trade.fundingTxid && (
+            <>
+              <dt>{t.deposit}</dt>
+              <dd>
+                <HashLink value={trade.fundingTxid} kind="transaction" /> · <ProvenanceTag kind="chain" />
+              </dd>
+            </>
           )}
-        </div>
+          {trade.settlementTxid && (
+            <>
+              <dt>{trade.status === 'Released' ? t.release : t.settlement}</dt>
+              <dd>
+                <HashLink value={trade.settlementTxid} kind="transaction" /> · <ProvenanceTag kind="chain" />
+              </dd>
+            </>
+          )}
+          <dt>{trade.status === 'Released' ? t.completedAt : t.ended}</dt>
+          <dd>{formatDateTime(ended)}</dd>
+        </dl>
+        <p className="cf-small cf-muted">
+          {t.visitor} {hidden}
+        </p>
       </div>
     </section>
   );
@@ -1036,7 +1094,8 @@ function OnChainDetails(props: {
                   </dd>
                 </>
               )}
-              {trade.refundTime && (
+              {/* Once the trade has ended the escrow is empty, so there is nothing left to recover. */}
+              {trade.refundTime && !isFinal(trade) && (
                 <>
                   <dt>{t.refundPath}</dt>
                   <dd>
@@ -1056,6 +1115,7 @@ function OnChainDetails(props: {
                 {check.payoutIsMine && <span className="s-check">{t.checkPayout}</span>}
                 {check.funding === 'match' && <span className="s-check">{t.checkFunding(holds)}</span>}
                 {props.ds.phase === 'clear' && <span className="s-check">{t.checkDs(formatClock(props.ds.checkedAt))}</span>}
+                {(trade.fundingConfirmations ?? 0) > 0 && <span className="s-check">{t.checkConfirmed}</span>}
                 {props.ds.phase === 'uncovered' && (
                   <span className="s-check" data-tone="attention">
                     {t.checkDsUncovered}

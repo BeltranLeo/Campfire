@@ -92,6 +92,7 @@ const en = {
     resolvedSeller: 'Resolved for seller',
     returned: 'Returned to seller',
     cancelled: 'Cancelled',
+    neverStarted: 'Never started',
   },
   // The action card, the timeline and the dispute form
   turnYou: 'Your turn',
@@ -195,6 +196,7 @@ const es: typeof en = {
     resolvedSeller: 'Resuelta a favor del vendedor',
     returned: 'Devuelta al vendedor',
     cancelled: 'Cancelada',
+    neverStarted: 'No llegó a empezar',
   },
   turnYou: 'Tu turno',
   turnOther: 'En espera',
