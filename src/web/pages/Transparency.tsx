@@ -13,6 +13,7 @@ import { usePoll } from '../hooks/usePoll';
 import { REPO_URL } from '../links';
 import { CONTRACT_PATHS } from '../proof';
 import { useWallet } from '../wallet';
+import { useMessages } from '../lang';
 
 // Transparency (Transparency-* screens): one real transaction per contract path, what the demo simulates,
 // recent trades and the contract's keys. Paths that have not run on mainnet yet say so.
@@ -28,45 +29,46 @@ export function Transparency() {
   );
   const recent = [...(trades.data ?? [])].sort((a, b) => b.updatedAt - a.updatedAt).slice(0, 20);
   const ran = CONTRACT_PATHS.filter((p) => p.txid).length;
+  const messages = useMessages();
+  const t = messages.transparency;
 
   return (
     <main className="s-main" data-site>
       <div className="s-pagehead">
-        <h1 className="cf-display">Transparency</h1>
+        <h1 className="cf-display">{t.title}</h1>
         <p className="cf-muted" style={{ maxWidth: 640 }}>
-          {ran === CONTRACT_PATHS.length
-            ? 'Every path of the escrow contract has run on mainnet.'
-            : `${ran} of ${CONTRACT_PATHS.length} paths of the escrow contract have run on mainnet so far; the others say so.`}{' '}
-          Each row links to the real transaction. What the demo simulates is listed below, and nothing else is.
+          {ran === CONTRACT_PATHS.length ? t.allRan : t.someRan(ran, CONTRACT_PATHS.length)} {t.leadAfter}
         </p>
       </div>
 
       <section className="cf-card" data-flush>
         <div className="s-sechead">
-          <h2 className="cf-heading">Contract paths on mainnet</h2>
+          <h2 className="cf-heading">{t.pathsTitle}</h2>
           <ProvenanceTag kind="chain" />
         </div>
         <div className="s-tablewrap">
           <table className="cf-table s-stacktable">
             <thead>
               <tr>
-                <th>Path</th>
-                <th>What it does</th>
-                <th>Who authorises it</th>
-                <th>Transaction</th>
-                <th>Date</th>
+                <th>{t.path}</th>
+                <th>{t.whatItDoes}</th>
+                <th>{t.whoAuthorises}</th>
+                <th>{t.transaction}</th>
+                <th>{t.date}</th>
               </tr>
             </thead>
             <tbody>
               {CONTRACT_PATHS.map((p) => (
                 <tr key={p.path}>
-                  <td data-label="Path">
+                  <td data-label={t.path}>
                     <strong className="cf-mono">{p.path}</strong>
                   </td>
-                  <td data-label="What it does">{p.what}</td>
-                  <td data-label="Who authorises it">{p.who}</td>
-                  <td data-label="Transaction">{p.txid ? <HashLink value={p.txid} kind="transaction" /> : <span className="cf-muted">Not run on mainnet yet</span>}</td>
-                  <td data-label="Date" className="cf-muted">{p.at ? formatDate(p.at) : '—'}</td>
+                  <td data-label={t.whatItDoes}>{t.what[p.path] ?? p.what}</td>
+                  <td data-label={t.whoAuthorises}>{t.who[p.path] ?? p.who}</td>
+                  <td data-label={t.transaction}>
+                    {p.txid ? <HashLink value={p.txid} kind="transaction" /> : <span className="cf-muted">{t.notRun}</span>}
+                  </td>
+                  <td data-label={t.date} className="cf-muted">{p.at ? formatDate(p.at) : '—'}</td>
                 </tr>
               ))}
             </tbody>
@@ -74,27 +76,27 @@ export function Transparency() {
         </div>
       </section>
 
-      <SimBox label="What is simulated in the demo" bodyGap={2}>
+      <SimBox label={t.simulatedTitle} bodyGap={2}>
         <p className="cf-small">
-          <strong>Fiat payment.</strong> The demo seller's payment details are placeholders. No money moves when you mark a
-          demo trade as paid.
+          <strong>{t.simFiat}</strong>
+          {t.simFiatBody}
         </p>
         <p className="cf-small">
-          <strong>Who the arbiter is.</strong> In the demo console a visitor decides the dispute. The verdict is still signed
-          with the real arbiter key and settled on-chain.
+          <strong>{t.simArbiter}</strong>
+          {t.simArbiterBody}
         </p>
       </SimBox>
 
       <section className="cf-card" data-flush>
         <div className="s-sechead">
-          <h2 className="cf-heading">Recent trades</h2>
+          <h2 className="cf-heading">{t.recent}</h2>
           {identity && (
-            <div className="cf-seg" role="group" aria-label="Whose trades">
+            <div className="cf-seg" role="group" aria-label={t.whose}>
               <button type="button" aria-pressed={!mine} onClick={() => setMine(false)}>
-                All
+                {t.all}
               </button>
               <button type="button" aria-pressed={mine} onClick={() => setMine(true)}>
-                Mine
+                {t.mine}
               </button>
             </div>
           )}
@@ -107,60 +109,62 @@ export function Transparency() {
           </div>
         ) : trades.error && !trades.data ? (
           <div className="cf-card__section cf-stack">
-            <Notice tone="danger" title="We could not load the trades">
+            <Notice tone="danger" title={t.loadError}>
               {trades.error instanceof ApiError && trades.error.status < 500 && trades.error.status >= 400
                 ? trades.error.message
-                : 'The server did not answer. The contract paths above are on-chain and do not depend on it.'}
+                : t.loadErrorBody}
             </Notice>
             <div className="s-actions">
               <Button variant="primary" onClick={trades.reload}>
-                Try again
+                {messages.common.tryAgain}
               </Button>
             </div>
           </div>
         ) : recent.length === 0 ? (
-          <EmptyState title="No trades yet" action={<Button to="/offers">Browse offers</Button>}>
-            {mine ? 'Trades you take or sell show up here.' : 'Trades show up here as soon as someone takes an offer.'}
+          <EmptyState title={t.noTrades} action={<Button to="/offers">{t.browseOffers}</Button>}>
+            {mine ? t.noTradesMine : t.noTradesAll}
           </EmptyState>
         ) : (
           <div className="s-tablewrap">
             <table className="cf-table s-stacktable">
               <thead>
                 <tr>
-                  <th>Trade</th>
-                  <th>Amount</th>
-                  <th>State</th>
-                  <th>Settlement</th>
-                  <th>Fiat</th>
-                  <th>Updated</th>
+                  <th>{t.trade}</th>
+                  <th>{t.amount}</th>
+                  <th>{t.state}</th>
+                  <th>{t.settlement}</th>
+                  <th>{t.fiat}</th>
+                  <th>{t.updated}</th>
                 </tr>
               </thead>
               <tbody>
-                {recent.map((t) => (
-                  <tr key={t.id}>
-                    <td data-label="Trade">
-                      <Link to={`/trade/${t.id}`} className="cf-mono">
-                        {`${t.id.slice(0, 6)}…${t.id.slice(-4)}`}
+                {recent.map((row) => (
+                  <tr key={row.id}>
+                    <td data-label={t.trade}>
+                      <Link to={`/trade/${row.id}`} className="cf-mono">
+                        {`${row.id.slice(0, 6)}…${row.id.slice(-4)}`}
                       </Link>
                     </td>
-                    <td data-label="Amount" className="cf-mono">{formatAmount(t.amount, assetInfo(t.asset, t.assetDecimals, config))}</td>
-                    <td data-label="State">
-                      <StatusPill state={t.status} role="visitor" side={t.side} />
+                    <td data-label={t.amount} className="cf-mono">
+                      {formatAmount(row.amount, assetInfo(row.asset, row.assetDecimals, config))}
                     </td>
-                    <td data-label="Settlement">
-                      {t.settlementTxid ? (
-                        <HashLink value={t.settlementTxid} kind="transaction" />
-                      ) : t.fundingTxid && t.escrowAddress ? (
+                    <td data-label={t.state}>
+                      <StatusPill state={row.status} role="visitor" side={row.side} />
+                    </td>
+                    <td data-label={t.settlement}>
+                      {row.settlementTxid ? (
+                        <HashLink value={row.settlementTxid} kind="transaction" />
+                      ) : row.fundingTxid && row.escrowAddress ? (
                         <>
-                          <span className="cf-muted">Locked at</span> <HashLink value={t.escrowAddress} kind="address" />
+                          <span className="cf-muted">{t.lockedAt}</span> <HashLink value={row.escrowAddress} kind="address" />
                         </>
                       ) : (
-                        <span className="cf-muted">Nothing on-chain yet</span>
+                        <span className="cf-muted">{t.nothingOnChain}</span>
                       )}
                     </td>
-                    <td data-label="Fiat">{t.isDemo && <ProvenanceTag kind="sim">Simulated fiat</ProvenanceTag>}</td>
-                    <td data-label="Updated" className="cf-muted">
-                      {formatDayMonth(t.updatedAt)}, {formatHourMinute(new Date(t.updatedAt * 1000))}
+                    <td data-label={t.fiat}>{row.isDemo && <ProvenanceTag kind="sim">{t.simulatedFiat}</ProvenanceTag>}</td>
+                    <td data-label={t.updated} className="cf-muted">
+                      {formatDayMonth(row.updatedAt)}, {formatHourMinute(new Date(row.updatedAt * 1000))}
                     </td>
                   </tr>
                 ))}
@@ -173,26 +177,26 @@ export function Transparency() {
       <section className="cf-card" data-flush>
         <div className="cf-card__section">
           <div className="cf-row" data-between style={{ marginBottom: 'var(--space-3)' }}>
-            <h2 className="cf-heading">The contract</h2>
+            <h2 className="cf-heading">{t.contract}</h2>
             <ProvenanceTag kind="chain" />
           </div>
           <dl className="cf-dl">
-            <dt>Source</dt>
+            <dt>{t.source}</dt>
             <dd>
               <a href={`${REPO_URL}/blob/master/contracts/CampfireEscrow.cash`}>contracts/CampfireEscrow.cash</a>, CashScript 0.14,
               P2SH32
             </dd>
             {config && (
               <>
-                <dt>Arbiter key</dt>
+                <dt>{t.arbiterKey}</dt>
                 <dd>
                   <HashLink value={config.arbiterPk} kind="plain" /> <CopyButton value={config.arbiterPk} />
                 </dd>
-                <dt>Oracle key</dt>
+                <dt>{t.oracleKey}</dt>
                 <dd>
                   <HashLink value={config.oraclePk} kind="plain" /> <CopyButton value={config.oraclePk} />
                 </dd>
-                <dt>PUSD category</dt>
+                <dt>{t.pusdCategory}</dt>
                 <dd>
                   <HashLink value={config.pusdCategory} kind="plain" /> <CopyButton value={config.pusdCategory} />
                 </dd>

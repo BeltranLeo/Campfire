@@ -14,6 +14,9 @@ import { create } from './i18n/create';
 import { chats } from './i18n/chats';
 import { mytrades } from './i18n/mytrades';
 import { home } from './i18n/home';
+import { about } from './i18n/about';
+import { transparency } from './i18n/transparency';
+import { roadmap } from './i18n/roadmap';
 
 export type Lang = 'en' | 'es';
 
@@ -114,6 +117,9 @@ const en = {
   chats: chats.en,
   mytrades: mytrades.en,
   home: home.en,
+  about: about.en,
+  transparency: transparency.en,
+  roadmap: roadmap.en,
   landing: {
     title: 'Buy or sell Bitcoin Cash directly with another person',
     lead: 'No exchange holds your money. A contract on the Bitcoin Cash network locks the seller’s coins until the payment is done.',
@@ -282,6 +288,9 @@ const es: Messages = {
   chats: chats.es,
   mytrades: mytrades.es,
   home: home.es,
+  about: about.es,
+  transparency: transparency.es,
+  roadmap: roadmap.es,
   landing: {
     title: 'Compra o vende Bitcoin Cash directamente con otra persona',
     lead: 'Ninguna plataforma guarda tu dinero. Un contrato en la red de Bitcoin Cash bloquea las monedas del vendedor hasta que se completa el pago.',
