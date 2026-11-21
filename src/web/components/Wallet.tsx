@@ -32,14 +32,26 @@ export function WalletButton() {
   if (wallet.status !== 'connected' || !wallet.identity) {
     return (
       <>
-        <button type="button" className="cf-btn" aria-busy="true">
-          {wallet.status === 'pairing' ? 'Pairing…' : wallet.signing ? 'Approve in your wallet…' : 'Connecting…'}
+        <button type="button" className="cf-btn" aria-busy={!wallet.signInFailed}>
+          {wallet.status === 'pairing'
+            ? 'Pairing…'
+            : wallet.signing
+              ? 'Approve in your wallet…'
+              : wallet.signInFailed
+                ? 'Sign-in needed'
+                : 'Connecting…'}
         </button>
         {/* A portal, because the header's backdrop-filter makes it the containing block of any fixed
             descendant: inside it the overlay shrinks to the header's height and the dialog cannot be reached. */}
         {wallet.pairing &&
           createPortal(
             <PairingDialog uri={wallet.pairing.uri} qrUri={wallet.pairing.qrUri} onClose={wallet.disconnect} />,
+            document.body,
+          )}
+        {wallet.status === 'connecting' &&
+          (wallet.signing || wallet.signInFailed) &&
+          createPortal(
+            <SignInDialog failed={!wallet.signing && wallet.signInFailed} onRetry={wallet.retrySignIn} onCancel={wallet.disconnect} />,
             document.body,
           )}
       </>
@@ -310,6 +322,84 @@ function PairingDialog({ uri, qrUri, onClose }: { uri: string; qrUri: string; on
           Connecting is your only sign-in. Campfire sees public keys, never private keys, and the wallet asks you
           before every transaction.
         </p>
+      </div>
+    </div>
+  );
+}
+
+// After pairing, the service asks the wallet to sign a challenge that proves the keys are this person's. Without this
+// dialog the page only showed a skeleton and the header button, and people did not know their wallet was waiting.
+// The wallet shows the request as a transaction to sign, so the text says why it is safe: the coin it spends does not
+// exist, so it can never be broadcast, costs nothing and moves no funds.
+function SignInDialog({ failed, onRetry, onCancel }: { failed: boolean; onRetry: () => void; onCancel: () => void }) {
+  const titleId = useId();
+  const dialogRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    dialogRef.current?.focus();
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') onCancel();
+    };
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  }, [onCancel]);
+
+  const steps = ['Open your wallet app', 'Review the Campfire sign-in request', 'Approve it, then come back here'];
+
+  // Not closed by a click outside: one stray tap would cancel a sign-in the wallet may already be showing.
+  return (
+    <div className="s-overlay" data-modal>
+      <div className="s-dialog" role="dialog" aria-modal="true" aria-labelledby={titleId} tabIndex={-1} ref={dialogRef}>
+        <div className="cf-stack" data-gap="1">
+          <span className="cf-label">Sign in</span>
+          <h2 className="cf-heading" id={titleId} style={{ margin: 0 }}>
+            {failed ? 'Your wallet did not approve the sign-in' : 'Approve the sign-in in your wallet'}
+          </h2>
+        </div>
+        {failed ? (
+          <Notice tone="attention">
+            The request was declined or timed out. Ask again and approve it in your wallet, or cancel to disconnect.
+          </Notice>
+        ) : (
+          <p className="cf-small cf-muted">
+            Your wallet is paired. To finish, it asks you to sign once, which proves the wallet is yours so nobody else
+            can trade under your name.
+          </p>
+        )}
+        {!failed && (
+          // flex: none, because .pr-steps grows to fill the pairing dialog's row and here it sits in a column.
+          <ol className="pr-steps" style={{ flex: 'none' }}>
+            {steps.map((step, i) => (
+              <li key={step} className="pr-step">
+                <span className="pr-dot" aria-hidden="true">
+                  {i + 1}
+                </span>{' '}
+                <span>{step}</span>
+              </li>
+            ))}
+          </ol>
+        )}
+        <div className="cf-well cf-stack" data-gap="1">
+          <strong className="cf-small">Free, and moves no funds</strong>
+          <span className="cf-small cf-muted">
+            Your wallet may show it as a transaction. It spends a coin that does not exist, so it can never be broadcast
+            and nothing leaves your wallet.
+          </span>
+        </div>
+        {failed ? (
+          <button type="button" className="cf-btn" data-variant="primary" data-block onClick={onRetry}>
+            Ask my wallet again
+          </button>
+        ) : (
+          <div className="cf-row">
+            <Skeleton width={10} height={10} style={{ borderRadius: '50%' }} />
+            <span className="cf-small cf-muted">Waiting for your approval…</span>
+          </div>
+        )}
+        <button type="button" className="cf-btn" data-variant="ghost" data-block onClick={onCancel}>
+          Cancel and disconnect
+        </button>
+        <p className="cf-small cf-subtle">You sign once on this browser. Later visits reuse it.</p>
       </div>
     </div>
   );

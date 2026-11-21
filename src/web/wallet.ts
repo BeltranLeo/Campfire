@@ -48,6 +48,14 @@ export class WalletDeclined extends Error {
 }
 
 /** Which key signs which input: the input's position, the wallet path (`defi` for contracts) and the key index. */
+/** The wallet refused, failed or did not answer the sign-in request. */
+class SignInDeclined extends Error {
+  constructor() {
+    super('The wallet did not sign the sign-in request');
+    this.name = 'SignInDeclined';
+  }
+}
+
 export type SigningPath = [number, 'receive' | 'change' | 'defi', number];
 
 export type WalletStatus = 'disconnected' | 'pairing' | 'connecting' | 'connected';
@@ -70,6 +78,8 @@ export interface WalletState {
   activeTrades: number | null;
   /** A signature request is out and the wallet has not answered yet. */
   signing: boolean;
+  /** The wallet refused or ignored the sign-in signature; the pairing stays open so it can be asked again. */
+  signInFailed: boolean;
   error: { title: string; message: string } | null;
 }
 
@@ -82,6 +92,7 @@ const INITIAL: WalletState = {
   reputation: null,
   activeTrades: null,
   signing: false,
+  signInFailed: false,
   error: null,
 };
 
@@ -162,6 +173,12 @@ class WalletController {
     this.set(INITIAL);
   }
 
+  /** Asks the wallet again for the sign-in signature after it refused or did not answer. */
+  retrySignIn() {
+    if (!this.manager || !this.state.signInFailed) return;
+    void this.register();
+  }
+
   /** Reloads the count of unfinished trades (for the wallet menu and the Trades badge). */
   async refreshActiveTrades() {
     const identity = this.state.identity;
@@ -209,7 +226,7 @@ class WalletController {
       nonce: challenge.nonce,
       defiPubkey: derivePubkeyFromXpub(xpubs.defi, 0),
     });
-    this.set({ signing: true });
+    this.set({ signing: true, signInFailed: false });
     try {
       const response = await manager.signTransaction(
         { transaction: request as unknown as SignTransactionRequest['transaction'], inputPaths },
@@ -218,7 +235,7 @@ class WalletController {
       if (response.error || !response.signedTransaction) throw new Error(response.error ?? 'No signature');
       return { expiresAt: challenge.expiresAt, salt: challenge.salt, signedTransaction: response.signedTransaction };
     } catch {
-      throw new ApiError(401, 'Your wallet did not confirm the sign-in. Connect again and approve the request in your wallet.');
+      throw new SignInDeclined();
     } finally {
       this.set({ signing: false });
     }
@@ -329,6 +346,7 @@ class WalletController {
       this.registeredDefi = defi;
       this.set({
         status: 'connected',
+        signInFailed: false,
         identity: result.identity,
         xpubs,
         reputation: result.reputation,
@@ -338,6 +356,11 @@ class WalletController {
       void this.refreshActiveTrades();
     } catch (err) {
       if (this.manager !== manager) return;
+      // A refused or unanswered signature keeps the pairing open: the sign-in dialog offers to ask again or cancel.
+      if (err instanceof SignInDeclined) {
+        this.set({ signInFailed: true });
+        return;
+      }
       // The pairing stays stored, so reloading the page tries again without a new QR code.
       this.close();
       this.set({
@@ -363,6 +386,7 @@ export const startWallet = () => controller.restore();
 const actions = {
   connect: () => controller.connect(),
   disconnect: () => controller.disconnect(),
+  retrySignIn: () => controller.retrySignIn(),
   refreshActiveTrades: () => controller.refreshActiveTrades(),
   sign: (request: Record<string, unknown>, inputPaths: SigningPath[]) => controller.sign(request, inputPaths),
 };
