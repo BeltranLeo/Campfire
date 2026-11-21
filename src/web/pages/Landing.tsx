@@ -59,6 +59,19 @@ export function Landing() {
         </div>
       </SimBox>
 
+      {/* What sets Campfire apart, one plain sentence each. Every card is true today. */}
+      <section className="cf-stack">
+        <h2 className="cf-title">{t.whyTitle}</h2>
+        <div className="s-3">
+          {t.why.map((item) => (
+            <div key={item.title} className="cf-card cf-stack" data-pad data-gap="1">
+              <strong>{item.title}</strong>
+              <span className="cf-small cf-muted">{item.body}</span>
+            </div>
+          ))}
+        </div>
+      </section>
+
       <section className="cf-stack">
         <h2 className="cf-title">{t.howTitle}</h2>
         <HowSteps steps={t.how} />

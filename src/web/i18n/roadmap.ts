@@ -25,6 +25,10 @@ const en = {
           title: 'Split verdicts',
           body: 'Today the arbiter can only give all the coins to one side. A split would fit disputes where both are partly right.',
         },
+        {
+          title: 'An open offer index',
+          body: 'Every offer is already on the chain, but today Campfire’s service keeps the list. A public indexer would rebuild it from the chain, so any app can show the same offers.',
+        },
       ],
     },
     {
@@ -41,6 +45,10 @@ const en = {
         {
           title: 'Choose your own name',
           body: 'A name you pick, signed by your wallet and unique across Campfire, instead of the one made from your identity.',
+        },
+        {
+          title: 'Portable identity',
+          body: 'Your identity and your reputation as a CashTokens NFT in your wallet, which any app built on the protocol can read. Offers already go to your wallet’s main address, so the path is ready.',
         },
       ],
     },
@@ -101,6 +109,10 @@ const es: typeof en = {
           title: 'Decisiones repartidas',
           body: 'Hoy el árbitro solo puede darle todas las monedas a una de las partes. Repartirlas serviría en disputas donde los dos tienen parte de razón.',
         },
+        {
+          title: 'Un índice abierto de ofertas',
+          body: 'Cada oferta ya está en la cadena, pero hoy la lista la lleva el servicio de Campfire. Un indexador público la reconstruiría desde la cadena, para que cualquier aplicación muestre las mismas ofertas.',
+        },
       ],
     },
     {
@@ -117,6 +129,10 @@ const es: typeof en = {
         {
           title: 'Elige tu propio nombre',
           body: 'Un nombre que eliges tú, firmado por tu billetera y único en Campfire, en lugar del que sale de tu identidad.',
+        },
+        {
+          title: 'Identidad portable',
+          body: 'Tu identidad y tu reputación como un NFT de CashTokens en tu billetera, que cualquier aplicación hecha sobre el protocolo pueda leer. Las ofertas ya van a la dirección principal de tu billetera, así que el camino está listo.',
         },
       ],
     },

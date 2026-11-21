@@ -753,7 +753,7 @@ function OfferDetails(props: {
             props.party === 'seller' ? t.fixedBySeller : t.fixedByBuyer
           ) : doc.oracle ? (
             <>
-              {t.oracle} <HashLink value={doc.oracle} kind="plain" />
+              <Term word="oracle">{t.oracle}</Term> <HashLink value={doc.oracle} kind="plain" />
               {props.quote && t.signedAt(formatClock(new Date(props.quote.timestamp * 1000)))}
             </>
           ) : (

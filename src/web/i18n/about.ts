@@ -12,7 +12,7 @@ const en = {
   steps: [
     {
       title: 'The seller publishes an offer',
-      body: 'The offer says what is sold, the price (fixed, or the market price plus a margin), the range, how to pay and who the arbiter is. It is written on the Bitcoin Cash chain, so anyone can list it.',
+      body: 'The offer says what is sold, the price (fixed, or the market price plus a margin), the range, how to pay and who the arbiter is. It is written on the Bitcoin Cash chain with a CashTokens NFT that marks it as open, so anyone can check it. The NFT is minted by a contract with no key, only for an offer that matches it.',
     },
     {
       title: 'A buyer takes it',
@@ -45,7 +45,7 @@ const en = {
   everyPathAfter: '.',
   wrongTitle: 'If something goes wrong',
   wrongBody:
-    'Each offer names an arbiter, and the buyer accepts it when taking the offer. In this demo, Campfire is the arbiter. The arbiter only steps in if one of the two opens a dispute, and can only choose between them: it signs a decision, never a transaction, and can never keep the coins.',
+    'Each offer names an arbiter, and the buyer accepts it when taking the offer. Today Campfire is the arbiter, but the protocol lets an offer name any arbiter and any price oracle by its key. The arbiter only steps in if one of the two opens a dispute, and can only choose between them: it signs a decision, never a transaction, and can never keep the coins.',
   wrongAuto:
     'If the buyer does not mark the trade as paid before the payment window ends, the arbiter returns the coins to the seller automatically.',
   zeroConfTitle: 'No waiting for blocks',
@@ -59,6 +59,7 @@ const en = {
     'Connecting a wallet is the only sign-in. There are no accounts, passwords or e-mail addresses.',
     'Each trade uses a new key and a new address of your wallet, so trades are not linked on-chain.',
     'Payment details are encrypted in the browser and revealed only to the other person in the trade.',
+    'The chat is end-to-end encrypted and every message is signed by its author. Campfire stores only ciphertext. The arbiter can read it only if one of you opens a dispute. It stays open for seven days after the trade ends.',
     'Campfire can link the trades of one wallet, because it counts the reputation. That count is not on-chain and can be inflated with a second wallet.',
   ] as string[],
   realTitle: 'What is real and what is simulated',
@@ -69,6 +70,10 @@ const en = {
   questions: 'Questions',
   faq: [
     { q: 'Do I need BCH to buy?', a: 'No. The seller locks the coins first. You only need a wallet to receive them.' },
+    {
+      q: 'What does it cost?',
+      a: 'Nothing for the buyer. The seller pays the network fee and a small fee to the arbiter and, at market price, to the price oracle: 0.5% each today. The fees are shown before anything is locked, and Campfire pays the fee to publish a buy offer.',
+    },
     {
       q: 'Who holds the coins during a trade?',
       a: 'A contract on the Bitcoin Cash network. It can only pay the buyer or return the coins to the seller. Campfire cannot move them.',
@@ -108,7 +113,7 @@ const es: typeof en = {
   steps: [
     {
       title: 'El vendedor publica una oferta',
-      body: 'La oferta dice qué se vende, el precio (fijo, o el de mercado más un margen), el rango, cómo pagar y quién es el árbitro. Se escribe en la cadena de Bitcoin Cash, así que cualquiera puede listarla.',
+      body: 'La oferta dice qué se vende, el precio (fijo, o el de mercado más un margen), el rango, cómo pagar y quién es el árbitro. Se escribe en la cadena de Bitcoin Cash con un NFT de CashTokens que la marca como abierta, así que cualquiera puede comprobarla. El NFT lo acuña un contrato sin clave, solo para una oferta que coincide con él.',
     },
     {
       title: 'Un comprador la toma',
@@ -141,7 +146,7 @@ const es: typeof en = {
   everyPathAfter: '.',
   wrongTitle: 'Si algo sale mal',
   wrongBody:
-    'Cada oferta nombra un árbitro, y el comprador lo acepta al tomar la oferta. En esta demostración, el árbitro es Campfire. El árbitro solo interviene si uno de los dos abre una disputa, y solo puede elegir entre ellos: firma una decisión, nunca una transacción, y nunca puede quedarse con las monedas.',
+    'Cada oferta nombra un árbitro, y el comprador lo acepta al tomar la oferta. Hoy el árbitro es Campfire, pero el protocolo permite que una oferta nombre a cualquier árbitro y a cualquier oráculo de precios por su clave. El árbitro solo interviene si uno de los dos abre una disputa, y solo puede elegir entre ellos: firma una decisión, nunca una transacción, y nunca puede quedarse con las monedas.',
   wrongAuto:
     'Si el comprador no marca la operación como pagada antes de que termine el plazo de pago, el árbitro le devuelve las monedas al vendedor automáticamente.',
   zeroConfTitle: 'Sin esperar bloques',
@@ -155,6 +160,7 @@ const es: typeof en = {
     'Conectar una billetera es el único inicio de sesión. No hay cuentas, contraseñas ni correos electrónicos.',
     'Cada operación usa una clave nueva y una dirección nueva de tu billetera, así que las operaciones no quedan vinculadas en la cadena.',
     'Los datos de pago se cifran en el navegador y solo se le revelan a la otra persona de la operación.',
+    'El chat está cifrado de punta a punta y cada mensaje lo firma su autor. Campfire solo guarda texto cifrado. El árbitro puede leerlo solo si uno de los dos abre una disputa. Sigue abierto siete días después de que termina la operación.',
     'Campfire puede vincular las operaciones de una billetera, porque cuenta la reputación. Ese número no está en la cadena y se puede inflar con una segunda billetera.',
   ],
   realTitle: 'Qué es real y qué es simulado',
@@ -166,6 +172,10 @@ const es: typeof en = {
   questions: 'Preguntas',
   faq: [
     { q: '¿Necesito BCH para comprar?', a: 'No. Primero el vendedor bloquea las monedas. Solo necesitas una billetera para recibirlas.' },
+    {
+      q: '¿Cuánto cuesta?',
+      a: 'Nada para el comprador. El vendedor paga la comisión de la red y una pequeña tarifa al árbitro y, con precio de mercado, al oráculo de precios: hoy, 0,5 % cada una. Las tarifas se muestran antes de bloquear nada, y Campfire paga la comisión para publicar una oferta de compra.',
+    },
     {
       q: '¿Quién tiene las monedas durante una operación?',
       a: 'Un contrato en la red de Bitcoin Cash. Solo puede pagarle al comprador o devolverle las monedas al vendedor. Campfire no puede moverlas.',

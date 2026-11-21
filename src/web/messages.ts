@@ -136,6 +136,7 @@ const en = {
     glossary: {
       arbiter: 'A neutral person who decides only if there is a dispute. They can choose who gets the BCH, but can never take it.',
       'on-chain': 'Written on the Bitcoin Cash network, where anyone can check it. Campfire cannot change it.',
+      oracle: 'A service that signs the market price when a trade starts, so neither side can change it later. The offer names which one.',
     },
   },
   offers: offers.en,
@@ -165,7 +166,7 @@ const en = {
   roadmap: roadmap.en,
   arbiter: arbiter.en,
   landing: {
-    title: 'Buy or sell Bitcoin Cash directly with another person',
+    title: 'Buy or sell Bitcoin Cash and PUSD directly with another person',
     lead: 'No exchange holds your money. A contract on the Bitcoin Cash network locks the seller’s coins until the payment is done.',
     buy: 'I want to buy BCH',
     buyHint: 'You don’t need any BCH to start',
@@ -178,6 +179,33 @@ const en = {
     demoBody:
       'A demo seller sends a few cents of real BCH to your wallet. The payment step is simulated: you send no money. It takes about three minutes.',
     demoButton: 'Try the demo trade',
+    whyTitle: 'Why Campfire',
+    why: [
+      {
+        title: 'Nobody else can touch the coins',
+        body: 'A contract locks the seller’s coins. They can only go to the buyer or back to the seller.',
+      },
+      {
+        title: 'Start with no BCH',
+        body: 'Taking an offer is free. You can even post a buy offer with just a wallet: Campfire pays the fee to publish it.',
+      },
+      {
+        title: 'Your keys stay in your wallet',
+        body: 'Connect Selene or Paytaca with WizardConnect. Campfire sees public keys only, and you sign every transaction.',
+      },
+      {
+        title: 'Private by design',
+        body: 'Payment details and the chat are end-to-end encrypted. The arbiter can read the chat only if one of you opens a dispute.',
+      },
+      {
+        title: 'Offers live on Bitcoin Cash',
+        body: 'Each offer is published on the chain with a CashTokens NFT. A contract with no key mints it, one per offer and only if it matches the offer’s terms, so anyone can check it.',
+      },
+      {
+        title: 'Choose your arbiter',
+        body: 'Every offer names its arbiter and its price oracle. The protocol is open, so anyone can run one.',
+      },
+    ] as { title: string; body: string }[],
     howTitle: 'How it works',
     how: [
       { title: 'Pick an offer, or post your own', body: 'Choose how much, and how you want to pay or get paid.' },
@@ -348,6 +376,7 @@ const es: Messages = {
     glossary: {
       arbiter: 'Una persona neutral que decide solo si hay una disputa. Puede elegir quién recibe los BCH, pero nunca quedárselos.',
       'on-chain': 'Escrito en la red de Bitcoin Cash, donde cualquiera puede comprobarlo. Campfire no puede cambiarlo.',
+      oracle: 'Un servicio que firma el precio de mercado al empezar la operación, para que ninguna de las partes pueda cambiarlo después. La oferta dice cuál.',
     },
   },
   offers: offers.es,
@@ -378,7 +407,7 @@ const es: Messages = {
   roadmap: roadmap.es,
   arbiter: arbiter.es,
   landing: {
-    title: 'Compra o vende Bitcoin Cash directamente con otra persona',
+    title: 'Compra o vende Bitcoin Cash y PUSD directamente con otra persona',
     lead: 'Ninguna plataforma guarda tu dinero. Un contrato en la red de Bitcoin Cash bloquea las monedas del vendedor hasta que se completa el pago.',
     buy: 'Quiero comprar BCH',
     buyHint: 'No necesitas tener BCH para empezar',
@@ -391,6 +420,33 @@ const es: Messages = {
     demoBody:
       'Un vendedor de demostración envía unos centavos de BCH real a tu billetera. El pago es simulado: no envías dinero. Toma unos tres minutos.',
     demoButton: 'Probar la operación de demostración',
+    whyTitle: 'Por qué Campfire',
+    why: [
+      {
+        title: 'Nadie más puede tocar las monedas',
+        body: 'Un contrato bloquea las monedas del vendedor. Solo pueden ir al comprador o volver al vendedor.',
+      },
+      {
+        title: 'Empieza sin BCH',
+        body: 'Tomar una oferta es gratis. Hasta puedes publicar una oferta de compra solo con una billetera: Campfire paga la comisión para publicarla.',
+      },
+      {
+        title: 'Tus claves quedan en tu billetera',
+        body: 'Conecta Selene o Paytaca con WizardConnect. Campfire solo ve claves públicas, y tú firmas cada transacción.',
+      },
+      {
+        title: 'Privado desde el diseño',
+        body: 'Los datos de pago y el chat están cifrados de punta a punta. El árbitro puede leer el chat solo si uno de los dos abre una disputa.',
+      },
+      {
+        title: 'Las ofertas viven en Bitcoin Cash',
+        body: 'Cada oferta se publica en la cadena con un NFT de CashTokens. Lo acuña un contrato sin clave, uno por oferta y solo si coincide con sus condiciones, así que cualquiera puede comprobarla.',
+      },
+      {
+        title: 'Elige tu árbitro',
+        body: 'Cada oferta nombra a su árbitro y a su oráculo de precios. El protocolo es abierto, así que cualquiera puede ofrecerse como uno.',
+      },
+    ],
     howTitle: 'Cómo funciona',
     how: [
       { title: 'Elige una oferta o publica la tuya', body: 'Elige cuánto, y cómo quieres pagar o cobrar.' },
