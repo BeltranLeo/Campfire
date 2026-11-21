@@ -392,7 +392,8 @@ function BuyerAction(props: {
             <Button
               variant="primary"
               busy={busy === 'paid'}
-              disabled={props.ds.phase === 'proof' || (busy !== null && busy !== 'paid')}
+              // Also held while the deposit is still being watched: a double spend shows within those seconds.
+              disabled={props.ds.phase === 'proof' || props.ds.phase === 'watching' || (busy !== null && busy !== 'paid')}
               onClick={markPaid}
               note={t.noSignatureNeeded}
             >
@@ -545,6 +546,12 @@ function ZeroConfNotice({ ds, isDemo }: { ds: DoubleSpendState; isDemo: boolean 
       return (
         <Notice tone="verified" title={t.safe}>
           {t.safeBody(DSPROOF_WATCH_SEC)}
+        </Notice>
+      );
+    case 'uncovered':
+      return (
+        <Notice tone="attention" title={t.uncovered}>
+          {t.uncoveredBody}
         </Notice>
       );
     case 'proof':
@@ -941,6 +948,11 @@ function OnChainDetails(props: {
                 {check.payoutIsMine && <span className="s-check">{t.checkPayout}</span>}
                 {check.funding === 'match' && <span className="s-check">{t.checkFunding(holds)}</span>}
                 {props.ds.phase === 'clear' && <span className="s-check">{t.checkDs(formatClock(props.ds.checkedAt))}</span>}
+                {props.ds.phase === 'uncovered' && (
+                  <span className="s-check" data-tone="attention">
+                    {t.checkDsUncovered}
+                  </span>
+                )}
               </div>
             )}
           </div>

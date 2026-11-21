@@ -40,6 +40,8 @@
 .s-verdict small { font: 400 13px/18px var(--font-text); color: var(--text-muted); }
 .s-check { display: flex; gap: var(--space-2); align-items: flex-start; font-size: 13px; line-height: 18px; }
 .s-check::before { content: ""; flex: none; width: 18px; height: 18px; background: var(--verified); -webkit-mask: var(--cf-i-check-circle) center/contain no-repeat; mask: var(--cf-i-check-circle) center/contain no-repeat; }
+/* A check that found a risk: the deposit spends coins no DSProof can cover. */
+.s-check[data-tone="attention"]::before { background: var(--attention); -webkit-mask-image: var(--cf-i-warning); mask-image: var(--cf-i-warning); }
 .s-tablewrap { overflow-x: auto; }
 .s-req { display: flex; gap: var(--space-4); align-items: center; justify-content: space-between; flex-wrap: wrap; padding: var(--space-4); border-top: 1px solid var(--border); }
 .s-req:first-of-type { border-top: 0; }

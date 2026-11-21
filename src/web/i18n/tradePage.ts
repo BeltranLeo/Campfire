@@ -86,6 +86,9 @@ const en = {
   noDsCheck: 'Could not check for double spends',
   noDsCheckDemo: 'With real money, wait for 1 confirmation before you pay. In this demo no money is sent, so you can continue.',
   noDsCheckReal: 'Wait for 1 confirmation before you pay.',
+  uncovered: 'Not covered by double-spend proofs',
+  uncoveredBody:
+    'Some of the locked coins come from a contract, not from a plain address (or from an unconfirmed transaction that spent one). Double-spend proofs do not cover those coins, so the network would not warn you of a double spend. You can still go on at 0-conf; after 1 confirmation the risk is gone.',
   // The escrow check
   checkingDeposit: 'Checking the deposit on-chain…',
   checkFailed: 'This browser could not check the deposit on-chain right now. It will retry.',
@@ -153,6 +156,7 @@ const en = {
   checkPayout: 'The contract pays the buyer at an address of your wallet.',
   checkFunding: (holds: string) => `The deposit holds exactly ${holds}.`,
   checkDs: (clock: string) => `No double-spend proof for the deposit (checked at ${clock}).`,
+  checkDsUncovered: 'Double-spend proofs cannot cover this deposit: it spends a coin from a contract.',
   terms: 'Trade terms',
   price: 'Price',
   floating: (margin: string) => `Floating, ${margin}.`,
@@ -257,6 +261,9 @@ const es: typeof en = {
   noDsCheck: 'No se pudo revisar si hay dobles gastos',
   noDsCheckDemo: 'Con dinero real, espera 1 confirmación antes de pagar. En esta demostración no se envía dinero, así que puedes seguir.',
   noDsCheckReal: 'Espera 1 confirmación antes de pagar.',
+  uncovered: 'Sin protección de pruebas de doble gasto',
+  uncoveredBody:
+    'Parte de las monedas bloqueadas sale de un contrato y no de una dirección común (o de una transacción sin confirmar que gastó una). Las pruebas de doble gasto no cubren esas monedas, así que la red no te avisaría de un doble gasto. Puedes seguir con 0-conf; tras 1 confirmación el riesgo desaparece.',
   checkingDeposit: 'Revisando el depósito en la cadena…',
   checkFailed: 'Este navegador no pudo revisar el depósito en la cadena en este momento. Lo volverá a intentar.',
   mismatch: 'La garantía no coincide con las condiciones de la operación',
@@ -319,6 +326,7 @@ const es: typeof en = {
   checkPayout: 'El contrato le paga al comprador en una dirección de tu billetera.',
   checkFunding: (holds) => `El depósito contiene exactamente ${holds}.`,
   checkDs: (clock) => `No hay prueba de doble gasto para el depósito (revisado a las ${clock}).`,
+  checkDsUncovered: 'Las pruebas de doble gasto no pueden cubrir este depósito: gasta una moneda de un contrato.',
   terms: 'Condiciones de la operación',
   price: 'Precio',
   floating: (margin) => `Variable, ${margin}.`,
