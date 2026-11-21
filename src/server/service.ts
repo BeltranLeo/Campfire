@@ -83,8 +83,15 @@ const FEE_RATES_SETTING = 'feeRates';
 export const MARKER_RECHECK_SEC = 60;
 /** A marker this new is not looked for yet: the indexer may not list the publication transaction at once. */
 export const MARKER_GRACE_SEC = 120;
+/** At most this many transactions of a marker address are read to find the one that spent the marker. */
+export const MARKER_SPENDER_LOOKUPS = 25;
+/** At most this many closed offers without a closing txid are looked up in one marker check. */
+export const MARKER_BACKFILL_PER_SWEEP = 5;
 /** How long a listing waits for those lookups; slower ones finish in the background and count on the next listing. */
 const MARKER_CHECK_BUDGET_MS = 3000;
+
+/** A provider that can list an address's history (Electrum can; the offline test provider cannot). */
+type WithHistory = { performRequest: (method: string, ...params: unknown[]) => Promise<unknown> };
 
 // What the service pays for when it publishes a buy offer on the buyer's behalf (section 2.2). A fresh wallet is
 // a new identity, so the limit per identity is easy to get around; the daily limit across everyone is the one that bounds what the service can spend.
@@ -169,6 +176,7 @@ export class CampfireService {
   // When each open offer's marker was last found unspent, so listings do not ask the network every time.
   private readonly markerCheckedAt = new Map<string, number>();
   private markerSweep: Promise<void> | null = null;
+  private readonly spenderLookedUp = new Set<string>();
 
   constructor(
     private readonly options: {
@@ -517,17 +525,22 @@ export class CampfireService {
 
     let closeTxid: string | undefined;
     if (params.closeTxHex) {
+      // A transaction that spends the marker closes the offer once the network takes it, so its txid is recorded
+      // right away: the indexer may list the spent marker only seconds later.
+      if (!this.spendsMarker(params.closeTxHex, offer)) {
+        throw new Error('Close transaction does not spend the offer marker');
+      }
       closeTxid = await this.options.provider.sendRawTransaction(params.closeTxHex);
-    }
-
-    // Verify on-chain that the marker UTXO is no longer unspent.
-    const utxos = await this.options.provider.getUtxos(offer.markerAddress);
-
-    const markerStillUnspent = utxos.some(
-      (u) => u.txid === offer.offerTxid && u.vout === offer.markerVout,
-    );
-    if (markerStillUnspent) {
-      throw new Error('Offer marker output is still unspent on-chain');
+    } else {
+      // Without a transaction, verify on-chain that the marker UTXO is no longer unspent.
+      const utxos = await this.options.provider.getUtxos(offer.markerAddress);
+      const markerStillUnspent = utxos.some(
+        (u) => u.txid === offer.offerTxid && u.vout === offer.markerVout,
+      );
+      if (markerStillUnspent) {
+        throw new Error('Offer marker output is still unspent on-chain');
+      }
+      closeTxid = await this.findMarkerSpender(offer);
     }
 
     offer.status = 'Closed';
@@ -535,6 +548,40 @@ export class CampfireService {
     offer.updatedAt = this.nowSeconds();
     await this.options.storage.saveOffer(offer);
     return this.toOfferView(offer);
+  }
+
+  private spendsMarker(txHex: string, offer: Pick<StoredOffer, 'offerTxid' | 'markerVout'>): boolean {
+    try {
+      return decodeTransactionUnsafe(hexToBin(txHex)).inputs.some(
+        (i) => binToHex(i.outpointTransactionHash) === offer.offerTxid && i.outpointIndex === offer.markerVout,
+      );
+    } catch {
+      return false;
+    }
+  }
+
+  /**
+   * The txid of the transaction that spent the offer's marker, read from the marker address's history; undefined
+   * when the provider keeps no history or the lookup fails. Only the transactions after the offer's are read, the
+   * newest first, at most MARKER_SPENDER_LOOKUPS of them.
+   */
+  private async findMarkerSpender(offer: Pick<StoredOffer, 'offerTxid' | 'markerAddress' | 'markerVout'>): Promise<string | undefined> {
+    const provider = this.options.provider as NetworkProvider & Partial<WithHistory>;
+    if (typeof provider.performRequest !== 'function') return undefined;
+    try {
+      const history = await provider.performRequest('blockchain.address.get_history', offer.markerAddress);
+      if (!Array.isArray(history)) return undefined;
+      const txids = (history as { tx_hash?: unknown }[])
+        .map((h) => h.tx_hash)
+        .filter((h): h is string => typeof h === 'string');
+      const after = txids.slice(txids.indexOf(offer.offerTxid) + 1).reverse().slice(0, MARKER_SPENDER_LOOKUPS);
+      for (const txid of after) {
+        if (this.spendsMarker(await provider.getRawTransaction(txid), offer)) return txid;
+      }
+    } catch {
+      // A missing link is better than a failed close.
+    }
+    return undefined;
   }
 
   async getOffer(offerTxid: string): Promise<OfferView | null> {
@@ -574,7 +621,17 @@ export class CampfireService {
   /** Records as closed the offers whose marker is gone, among those not looked at for a while. */
   private async closeOffersWithSpentMarkers(): Promise<void> {
     const now = this.nowSeconds();
-    const due = (await this.options.storage.listOffers()).filter(
+    const offers = await this.options.storage.listOffers();
+    // Offers closed before their closing txid was recorded get it filled in, each tried once per process.
+    const unlinked = offers
+      .filter((o) => o.status === 'Closed' && o.markerAddress && !o.closeTxid && !this.spenderLookedUp.has(o.offerTxid))
+      .slice(0, MARKER_BACKFILL_PER_SWEEP);
+    for (const offer of unlinked) {
+      this.spenderLookedUp.add(offer.offerTxid);
+      const closeTxid = await this.findMarkerSpender(offer);
+      if (closeTxid) await this.options.storage.saveOffer({ ...offer, closeTxid });
+    }
+    const due = offers.filter(
       (o) =>
         o.status !== 'Closed' &&
         o.markerAddress &&
@@ -591,6 +648,7 @@ export class CampfireService {
       }
       this.markerCheckedAt.delete(offer.offerTxid);
       offer.status = 'Closed';
+      offer.closeTxid = await this.findMarkerSpender(offer);
       offer.updatedAt = now;
       await this.options.storage.saveOffer(offer);
     }
