@@ -292,7 +292,9 @@ The offer is open while that exact output (`offerTxid`, output 1) is unspent, no
 - `receive/0` is the address that many wallets show for receiving payments, so whoever paid the publisher there can tell which offers are theirs.
 - The seller's escrow deposit is paid with coins already in their wallet, and coins from the identity address can fund it, because that is where many wallets keep their balance. How well a deposit is kept apart from the identity depends on the seller's own coin habits (address reuse, coin control), which no web page can guarantee. What Campfire does guarantee is that the coins a trade pays out always go to a fresh address of the recipient.
 
-A next version may make the identity an NFT of its own, minted once by the covenant and spent and returned in every publication, so that a publisher could move it to another wallet without losing their history.
+This address is not the Campfire identity of section 1, which is the hash of the `defi` key; it only gathers the wallet's offers. A marker NFT proves nothing on its own: the minter lets anyone mint one to any address, and once moved it no longer marks an open offer. Whether an offer is open is known from the service's record and the unspent marker output, not from holding the NFT.
+
+**Future work: a portable identity.** An identity and its reputation belong to one wallet: a new seed starts from zero. Two designs are open. An identity NFT, minted once by the covenant and spent and returned in every publication, could move to another wallet, but it could also be sold along with its reputation. A signed hand-over, in which the old identity's `defi/0` key signs the new identity's key, moves the history once and cannot be traded. The two can also be combined: an identity NFT whose reputation follows only a signed hand-over.
 
 **Who mints.** Only a minting NFT can create NFTs of a category, so Campfire keeps its minting NFTs in a covenant, `CampfireOfferMinter` (`contracts/CampfireOfferMinter.cash`), which has no key and no owner. Anyone may spend a minter UTXO to publish one offer, and the contract then requires:
 

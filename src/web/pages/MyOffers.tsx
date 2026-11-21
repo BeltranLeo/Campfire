@@ -234,6 +234,10 @@ function OfferList({ identity, offers, trades }: { identity: string; offers: Pol
                   </span>
                 )}
                 {offer.sponsored && <span className="cf-small cf-subtle">{t.feePaid}</span>}
+                {/* An NFT marker closes the offer on any spend, and a wallet shows it like any other token. */}
+                {offer.markerCategory && offer.status !== 'Closed' && (
+                  <span className="cf-small cf-subtle">{t.markerWarning}</span>
+                )}
                 {offer.status === 'Expired' && (
                   <span className="cf-small cf-subtle">{t.expiredNote(buying, formatBch(1000n))}</span>
                 )}

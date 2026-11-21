@@ -24,6 +24,7 @@ const en = {
   publicationTx: 'Publication transaction',
   closingTx: 'Closing transaction',
   feePaid: 'Publishing fee paid by Campfire',
+  markerWarning: 'A Campfire NFT in your wallet marks this offer. Moving or spending it closes the offer.',
   expiredNote: (buying: boolean, marker: string) =>
     `It no longer shows to ${buying ? 'sellers' : 'buyers'}. Close it to get the ${marker} marker back.`,
   closeOffer: 'Close offer',
@@ -53,6 +54,7 @@ const es: typeof en = {
   publicationTx: 'Transacción de publicación',
   closingTx: 'Transacción de cierre',
   feePaid: 'Campfire pagó la comisión de publicación',
+  markerWarning: 'Un NFT de Campfire en tu billetera marca esta oferta. Si lo mueves o lo gastas, la oferta se cierra.',
   expiredNote: (buying, marker) =>
     `Ya no se les muestra a los ${buying ? 'vendedores' : 'compradores'}. Ciérrala para recuperar el marcador de ${marker}.`,
   closeOffer: 'Cerrar la oferta',
