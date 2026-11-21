@@ -15,6 +15,17 @@ html, body { margin: 0; min-height: 100%; background: var(--bg); }
 .s-dialog:focus { outline: none; }
 .s-walletanchor { position: relative; }
 .s-walletanchor > .s-menu { position: absolute; right: 0; top: calc(100% + var(--space-2)); z-index: 20; width: min(320px, calc(100vw - 2 * var(--space-4))); }
+/* Wallet menu: identity in one row, then the balance as the largest thing in it. */
+.s-menu__id { display: flex; align-items: center; gap: var(--space-3); }
+.s-menu__who { display: flex; flex-direction: column; min-width: 0; gap: 2px; }
+.s-menu__who > .s-term > strong { font: 600 16px/22px var(--font-display); }
+/* The name's "?" bubble spans the menu instead of the name, so it never runs off the screen's right edge. */
+.s-menu .s-term > details { position: static; }
+.s-menu .s-term__text { left: var(--space-4); right: var(--space-4); top: 64px; width: auto; }
+.s-menu__balance { display: flex; flex-direction: column; gap: 2px; padding: var(--space-3) var(--space-4); }
+.s-menu__bch { font: 700 28px/34px var(--font-display); font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+.s-menu__links { gap: var(--space-4); font-size: 14px; line-height: 20px; }
+.s-menu__pusd { font: 500 15px/20px var(--font-text); font-variant-numeric: tabular-nums; }
 /* The sticky bottom bar must stay above content that sets its own stacking (the timeline dots). */
 .cf-bottomnav { z-index: 10; }
 .s-walleterror { width: 100%; max-width: var(--layout-site-max-width); margin: 0 auto; padding: var(--space-4) var(--space-6) 0; }

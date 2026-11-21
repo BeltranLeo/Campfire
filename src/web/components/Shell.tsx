@@ -12,21 +12,18 @@ import { CopyButton } from './CopyButton';
 import { NavBadge, NotificationsProvider } from './Notifications';
 import { BottomNav, WalletButton, WalletError } from './Wallet';
 
-// Visitors without a wallet see the public pages; the logo leads back to the landing page at "/".
-const PUBLIC_NAV = [
+// One nav with and without a wallet, so connecting only adds the `app` pages and a judge keeps How it works and
+// Transparency while trading. Without a wallet the logo leads to the landing page at "/"; with one, "/" is Home.
+// Trades counts the trades waiting for this person, Chats the unread messages (components/Notifications.tsx).
+// Below 720px, with a wallet, this nav is hidden: BottomNav takes over and the wallet menu links the two site pages.
+const NAV: { to: string; label: string; app?: boolean }[] = [
+  { to: '/', label: 'Home', app: true },
   { to: '/offers', label: 'Offers' },
+  { to: '/trades', label: 'Trades', app: true },
+  { to: '/chats', label: 'Chats', app: true },
   // The page is About, but a newcomer looks for how it works.
   { to: '/about', label: 'How it works' },
   { to: '/transparency', label: 'Transparency' },
-];
-
-// With a wallet, "/" becomes Home. Below 720px this nav is hidden and BottomNav takes over. Trades counts the trades
-// waiting for this person, Chats the unread messages (components/Notifications.tsx).
-const APP_NAV = [
-  { to: '/', label: 'Home' },
-  { to: '/offers', label: 'Offers' },
-  { to: '/trades', label: 'Trades' },
-  { to: '/chats', label: 'Chats' },
 ];
 
 export function Shell() {
@@ -34,7 +31,7 @@ export function Shell() {
   const connected = wallet.status === 'connected';
   // One read of the wallet's coins feeds the balance in the header and the pages that need the coins.
   useWalletCoinsSync();
-  const nav = connected ? APP_NAV : PUBLIC_NAV;
+  const nav = NAV.filter((item) => connected || !item.app);
 
   // The provider is always there, so connecting or disconnecting never remounts the page; it is idle without a wallet.
   return (

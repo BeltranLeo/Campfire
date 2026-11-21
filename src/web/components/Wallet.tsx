@@ -12,7 +12,6 @@ import { CopyButton } from './CopyButton';
 import { Icon, type IconName } from './Icon';
 import { HashLink } from './Provenance';
 import { Notice, Skeleton } from './States';
-import { AdvancedSwitch } from './AdvancedSwitch';
 import { NavBadge } from './Notifications';
 
 // The WizardConnect button at the top right, in its four states (Shell-* screens):
@@ -95,18 +94,19 @@ function PillBalance() {
   );
 }
 
+// The balance leads the menu: it is what people open it for. The explanation of where it comes from stays on Home.
 function MenuBalance() {
   const { bch, pusd, failed } = useBalanceText();
   const progress = describeProgress(useWalletCoins().progress);
   return (
-    <div className="cf-stack" data-gap="1">
-      <span className="cf-label">Your wallet</span>
+    <div className="cf-well s-menu__balance">
+      <span className="cf-label">Balance</span>
       {bch === null ? (
         failed ? (
           <>
-            <strong className="cf-muted">— BCH</strong>
-            <span className="cf-small cf-muted">We could not read your balance from the network. Trading still works.</span>
-            <span>
+            <strong className="s-menu__bch cf-muted">— BCH</strong>
+            <span className="cf-small cf-muted">
+              Could not read it. Trading still works.{' '}
               <button type="button" className="cf-copy" onClick={() => void refreshWalletCoins()}>
                 Try again
               </button>
@@ -114,15 +114,14 @@ function MenuBalance() {
           </>
         ) : (
           <>
-            <Skeleton width={120} height={18} />
+            <Skeleton width={160} height={28} />
             {progress && <span className="cf-small cf-subtle">{progress}</span>}
           </>
         )
       ) : (
         <>
-          <strong>{bch} BCH</strong>
-          {pusd !== null && <span className="cf-small cf-muted">{pusd} PUSD</span>}
-          <span className="cf-small cf-subtle">Read from the network with your wallet's public key. Campfire never sees your private keys.</span>
+          <strong className="s-menu__bch">{bch} BCH</strong>
+          {pusd !== null && <span className="s-menu__pusd">{pusd} PUSD</span>}
         </>
       )}
     </div>
@@ -153,52 +152,58 @@ function WalletMenu({ onClose }: { onClose: () => void }) {
   const rep = wallet.reputation;
   const alias = aliasFor(wallet.identity);
 
+  // Order: who you are (one row), what you hold, your record, your trades. Explanations fold behind a "?" or live on
+  // About. How it works and Transparency are in the header nav (and here on a phone), the technical-details switch in the footer.
   return (
     <div className="s-menu" role="menu" ref={ref}>
-      <div className="cf-stack" data-gap="1">
-        <span className="cf-label">You appear as</span>
-        <span className="cf-row" data-nowrap>
-          <span className="o-avatar" aria-hidden="true">
-            {alias.initials}
+      <div className="s-menu__id">
+        <span className="o-avatar" aria-hidden="true">
+          {alias.initials}
+        </span>
+        <span className="s-menu__who">
+          <span className="s-term">
+            <strong>{alias.name}</strong>
+            <details>
+              <summary aria-label="Where does this name come from?">?</summary>
+              <span className="s-term__text">
+                The name others see on your offers and trades. It comes from your wallet, so it never changes and nobody
+                can pick it.
+              </span>
+            </details>
           </span>
-          <strong>{alias.name}</strong>
-        </span>
-        <span className="cf-small cf-subtle">
-          This is the name other people see on your offers and trades. It comes from your wallet, so it is the same every
-          time and nobody can pick it.
-        </span>
-      </div>
-      <div className="cf-stack" data-gap="1">
-        <span className="cf-label">Your fingerprint</span>
-        <span className="cf-row" data-nowrap>
-          <HashLink value={wallet.identity} kind="plain" />
-          <CopyButton value={wallet.identity} />
+          <span className="cf-row" data-nowrap>
+            <HashLink value={wallet.identity} kind="plain" />
+            <CopyButton value={wallet.identity} />
+          </span>
         </span>
       </div>
       <MenuBalance />
       {rep && (
         <div className="cf-stack" data-gap="1">
-          <span className="cf-small">
-            <strong>{rep.completedAsBuyer}</strong> completed as buyer · <strong>{rep.completedAsSeller}</strong> as seller
-            {rep.firstCompletedAt !== null && ` · since ${formatDate(rep.firstCompletedAt)}`}
-          </span>
-          <span className="cf-small cf-subtle">
-            Counted by Campfire. It cannot be verified on-chain and can be inflated with a second wallet.
-          </span>
+          {rep.completedAsBuyer + rep.completedAsSeller > 0 ? (
+            <span className="cf-small">
+              <strong>{rep.completedAsBuyer}</strong> bought · <strong>{rep.completedAsSeller}</strong> sold
+              {rep.firstCompletedAt !== null && ` · since ${formatDate(rep.firstCompletedAt)}`}
+            </span>
+          ) : (
+            <span className="cf-small">No trades yet</span>
+          )}
+          {/* The count is not on-chain, so it must never read as proof (About explains how it can be inflated). */}
+          <span className="cf-small cf-subtle">Counted by Campfire, not verifiable on-chain.</span>
         </div>
       )}
       <Link className="cf-btn" data-block to="/trades" onClick={onClose}>
         {wallet.activeTrades ? `My trades · ${wallet.activeTrades} active` : 'My trades'}
       </Link>
-      <div className="cf-stack" data-gap="1">
+      {/* On a phone the header nav gives way to the balance and BottomNav, so these two pages are linked here. */}
+      <div className="s-mobileonly s-menu__links">
         <Link to="/about" onClick={onClose}>
-          About
+          How it works
         </Link>
         <Link to="/transparency" onClick={onClose}>
           Transparency
         </Link>
       </div>
-      <AdvancedSwitch />
       <button type="button" className="cf-btn" data-variant="ghost" data-block onClick={wallet.disconnect}>
         Disconnect
       </button>

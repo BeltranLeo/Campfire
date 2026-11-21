@@ -1,7 +1,7 @@
 import { setAdvanced, useAdvanced } from '../advanced';
 
-// The switch for technical details, in the wallet menu and in the footer (where a visitor without a wallet, such as
-// a judge, also finds it). A real checkbox with role="switch", so keyboards and screen readers get it for free.
+// The switch for technical details, in the footer, where a visitor without a wallet (a judge, say) finds it too.
+// A real checkbox with role="switch", so keyboards and screen readers get it for free.
 export function AdvancedSwitch({ compact }: { compact?: boolean }) {
   const on = useAdvanced();
   return (
