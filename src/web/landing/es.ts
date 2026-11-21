@@ -43,7 +43,7 @@ export const ES_TEXT: Record<string, string> = {
   'See offers': 'Ver ofertas',
   'No account, no password': 'Sin cuenta ni contraseña',
   "You don't need BCH to buy": 'No necesitas BCH para comprar',
-  'Every step checkable on-chain': 'Cada paso, comprobable en la cadena',
+  'Offers and coins checkable on-chain': 'Ofertas y monedas, comprobables en la cadena',
   'Locked in the contract': 'Bloqueado en el contrato',
   'Example trade': 'Operación de ejemplo',
   'To the buyer, when the seller releases': 'Al comprador, cuando el vendedor libera',
@@ -115,14 +115,14 @@ export const ES_TEXT: Record<string, string> = {
   'Every possible ending is written in the code.': 'Cada final posible está escrito en el código.',
   'Release → buyer': 'Liberar → comprador',
   'The seller signs. The normal ending.': 'Firma el vendedor. El final normal.',
-  'Refund → seller': 'Reembolso → vendedor',
+  'Cancel → seller': 'Cancelar → vendedor',
   "The buyer signs. For when they won't pay.": 'Firma el comprador. Para cuando no va a pagar.',
   Arbitrate: 'Arbitraje',
   "The arbiter's verdict pays the buyer or the seller. Nobody else.":
     'La decisión del árbitro le paga al comprador o al vendedor. A nadie más.',
-  'Reclaim after 14 days': 'Recuperar después de 14 días',
-  'If everyone else disappears, the seller takes the coins back alone.':
-    'Si todos los demás desaparecen, el vendedor recupera las monedas por su cuenta.',
+  'Refund after 14 days': 'Reembolso después de 14 días',
+  'If nothing else happened, the coins go back to the seller. No signature needed.':
+    'Si no pasó nada más, las monedas vuelven al vendedor. No hace falta ninguna firma.',
   'Technical details': 'Detalles técnicos',
   'CashScript contract': 'Contrato en CashScript',
   ', one per trade, with exactly these four spending paths.':
@@ -138,7 +138,8 @@ export const ES_TEXT: Record<string, string> = {
   'revealed in the browser only to the other person in the trade.':
     'se revelan en el navegador solo a la otra persona de la operación.',
   'Transparency page:': 'Página de Transparencia:',
-  'every contract exit, with its transaction.': 'cada salida de un contrato, con su transacción.',
+  'every contract exit, with its transaction once it has run on mainnet.':
+    'cada salida de un contrato, con su transacción cuando ya se ejecutó en la red principal.',
   'Has BCH': 'Tiene BCH',
   'Has fiat money': 'Tiene dinero fíat',
   Contract: 'Contrato',
@@ -146,7 +147,7 @@ export const ES_TEXT: Record<string, string> = {
   'BCH network': 'Red de BCH',
   'Verifies every move': 'Verifica cada movimiento',
   Arbiter: 'Árbitro',
-  'Only in a dispute': 'Solo en una disputa',
+  'Disputes and time-outs': 'Disputas y plazos vencidos',
 
   // Want to try a trade?
   'Want to try a trade?': '¿Quieres probar una operación?',
@@ -182,16 +183,16 @@ export const ES_TEXT: Record<string, string> = {
     'El precio se mantiene mientras corre el reloj. Si no aceptas, la solicitud se descarta.',
   'The contract holds them': 'El contrato las guarda',
   'Lock the coins in the contract.': 'Bloquea las monedas en el contrato.',
-  'Sign once in your wallet. You have about 60 minutes to lock.':
-    'Firma una vez en tu billetera. Tienes unos 60 minutos para bloquear.',
+  'Sign once in your wallet. You have up to 30 minutes to lock.':
+    'Firma una vez en tu billetera. Tienes hasta 30 minutos para bloquear.',
   'A contract made only for this trade holds the coins. It can pay the buyer or return them to you.':
     'Un contrato hecho solo para esta operación guarda las monedas. Puede pagarle al comprador o devolvértelas.',
   'Someone else is working': 'Otra persona está trabajando',
   'Wait for the payment.': 'Espera el pago.',
   'Nothing. The buyer pays you outside Campfire, within the time you set.':
     'Nada. El comprador te paga fuera de Campfire, dentro del plazo que fijaste.',
-  "If the buyer doesn't pay in time, the trade is cancelled and the coins come back to you.":
-    'Si el comprador no paga a tiempo, la operación se cancela y las monedas vuelven a ti.',
+  "If the buyer doesn't pay in time, the arbiter sends the coins back to you automatically.":
+    'Si el comprador no paga a tiempo, el árbitro te devuelve las monedas automáticamente.',
   'Check before you act': 'Comprueba antes de actuar',
   'Check your bank app, then release.': 'Revisa la aplicación de tu banco y después libera.',
   'Confirm the exact amount in your own bank app — not a screenshot. Then release.':
@@ -221,8 +222,8 @@ export const ES_TEXT: Record<string, string> = {
   'Pay and mark as paid.': 'Paga y marca como pagado.',
   "Send the money with the seller's method before the clock runs out, then tap Mark as paid.":
     'Envía el dinero con el medio del vendedor antes de que se acabe el tiempo y después toca «Marcar como pagado».',
-  'The seller sets the time to pay. If it runs out, the trade is cancelled and the coins go back.':
-    'El vendedor fija el plazo para pagar. Si se acaba, la operación se cancela y las monedas vuelven.',
+  'The seller sets the time to pay. If it runs out before you mark as paid, the arbiter sends the coins back to the seller.':
+    'El vendedor fija el plazo para pagar. Si se acaba antes de que marques el pago, el árbitro le devuelve las monedas al vendedor.',
   'The seller releases.': 'El vendedor libera.',
   'Wait while the seller checks their bank app.': 'Espera mientras el vendedor revisa la aplicación de su banco.',
   'When the seller signs, the contract pays the BCH to your wallet.':
@@ -244,8 +245,8 @@ export const ES_TEXT: Record<string, string> = {
   'Payment app': 'Aplicación de pagos',
   'Publish offer': 'Publicar oferta',
   'Simulated wallet': 'Billetera simulada',
-  'In the real app, your Bitcoin Cash wallet opens here and asks you to approve. It only asks when coins move.':
-    'En la aplicación real, aquí se abre tu billetera de Bitcoin Cash y te pide que apruebes. Solo lo pide cuando se mueven monedas.',
+  'In the real app, your Bitcoin Cash wallet opens here and asks you to approve. Once you are signed in, it only asks when coins move.':
+    'En la aplicación real, aquí se abre tu billetera de Bitcoin Cash y te pide que apruebes. Una vez que iniciaste sesión, solo lo pide cuando se mueven monedas.',
   Approve: 'Aprobar',
   Back: 'Volver',
   'Your offer is live': 'Tu oferta está publicada',
@@ -313,8 +314,9 @@ export const ES_TEXT: Record<string, string> = {
   'Now try selling': 'Ahora prueba vender',
   'Start again': 'Empezar de nuevo',
   'Time ran out': 'Se acabó el tiempo',
-  'Trade cancelled': 'Operación cancelada',
-  'The coins go back to the seller. Nobody loses anything.': 'Las monedas vuelven al vendedor. Nadie pierde nada.',
+  'Coins back to the seller': 'Monedas de vuelta al vendedor',
+  'The arbiter returns them automatically. Nobody loses anything.':
+    'El árbitro se las devuelve automáticamente. Nadie pierde nada.',
   'Or: open a dispute': 'O bien: abrir una disputa',
   'If something else went wrong, either side can open a dispute. An arbiter decides who gets the coins.':
     'Si salió mal otra cosa, cualquiera de los dos puede abrir una disputa. Un árbitro decide quién recibe las monedas.',
@@ -340,14 +342,14 @@ export const ES_TEXT: Record<string, string> = {
   'A contract on the Bitcoin Cash network. It can only pay the buyer or return the coins to the seller. Campfire cannot move them.':
     'Un contrato en la red de Bitcoin Cash. Solo puede pagarle al comprador o devolverle las monedas al vendedor. Campfire no puede moverlas.',
   "What if the buyer doesn't pay in time?": '¿Y si el comprador no paga a tiempo?',
-  'The seller sets the time to pay. If it runs out, the trade is cancelled and the coins go back to the seller. Either side can also open a dispute.':
-    'El vendedor fija el plazo para pagar. Si se acaba, la operación se cancela y las monedas vuelven al vendedor. Cualquiera de los dos también puede abrir una disputa.',
+  'The seller sets the time to pay. If it runs out before the buyer marks the trade as paid, the arbiter automatically sends the coins back to the seller. Either side can also open a dispute.':
+    'El vendedor fija el plazo para pagar. Si se acaba antes de que el comprador marque la operación como pagada, el árbitro le devuelve automáticamente las monedas al vendedor. Cualquiera de los dos también puede abrir una disputa.',
   'What if the other person disappears?': '¿Y si la otra persona desaparece?',
   'Either of you can open a dispute, and an arbiter named in the offer decides who gets the coins. The arbiter can never keep them. And if everyone disappears, after 14 days the seller can take the coins back alone.':
     'Cualquiera de los dos puede abrir una disputa, y un árbitro indicado en la oferta decide quién recibe las monedas. El árbitro nunca puede quedárselas. Y si todos desaparecen, después de 14 días el vendedor puede recuperar las monedas por su cuenta.',
   'When does my wallet ask me to sign?': '¿Cuándo me pide firmar mi billetera?',
-  'Only when coins move: publishing a sell offer, locking coins, releasing them, or cancelling. Buttons that open your wallet say so.':
-    'Solo cuando se mueven monedas: al publicar una oferta de venta, bloquear monedas, liberarlas o cancelar. Los botones que abren tu billetera lo dicen.',
+  'Once to sign in, the first time you connect in a browser: it is free and moves no funds. After that, only when coins move: publishing a sell offer, locking coins, releasing them, or cancelling. Buttons that open your wallet say so.':
+    'Una vez para iniciar sesión, la primera vez que conectas en un navegador: es gratis y no mueve fondos. Después, solo cuando se mueven monedas: al publicar una oferta de venta, bloquear monedas, liberarlas o cancelar. Los botones que abren tu billetera lo indican.',
   'How much does it cost?': '¿Cuánto cuesta?',
   'Nothing for the buyer. The seller pays the network fee and a small fee to the arbiter and, at market price, to the price oracle: 0.5% each today. The fees are shown before anything is locked, and Campfire pays the fee to publish a buy offer.':
     'Nada para el comprador. El vendedor paga la comisión de la red y una pequeña tarifa al árbitro y, con precio de mercado, al oráculo de precios: hoy, 0,5 % cada una. Las tarifas se muestran antes de bloquear nada, y Campfire paga la comisión para publicar una oferta de compra.',
@@ -360,8 +362,8 @@ export const ES_TEXT: Record<string, string> = {
 
   // Closing
   'Clear trades. Connected people.': 'Operaciones claras. Personas conectadas.',
-  'Try a whole trade with real Bitcoin Cash and a real contract on mainnet. Only the other person, a demo bot, and the bank payment are simulated.':
-    'Prueba una operación completa con Bitcoin Cash real y un contrato real en la red principal. Solo son simulados la otra persona, un bot de demostración, y el pago bancario.',
+  'Try a whole trade with real Bitcoin Cash and a real contract on mainnet. Only two things are simulated: the other side, played by a demo bot, and the bank payment.':
+    'Prueba una operación completa con Bitcoin Cash real y un contrato real en la red principal. Solo hay dos cosas simuladas: la otra parte, que es un bot de demostración, y el pago bancario.',
 };
 
 // Texts the simulated phone builds with numbers in them.

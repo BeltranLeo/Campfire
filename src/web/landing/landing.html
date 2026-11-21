@@ -56,7 +56,7 @@
         <a class="btn btn-primary" href="#closing" data-to="demo">Try the demo trade <span class="arrow" aria-hidden="true">→</span></a>
         <a class="btn btn-ghost" href="#/offers" data-to="/offers">See offers</a>
       </div>
-      <div class="hero-proof rv d4"><span>No account, no password</span><span>You don't need BCH to buy</span><span>Every step checkable on-chain</span></div>
+      <div class="hero-proof rv d4"><span>No account, no password</span><span>You don't need BCH to buy</span><span>Offers and coins checkable on-chain</span></div>
     </div>
     <div class="stage" aria-hidden="true">
       <div class="ribbon"><img src="{{TEXTURE}}" alt=""></div>
@@ -185,9 +185,9 @@
           <h3>Every possible ending is written in the code.</h3>
           <ul class="exit-list" id="exitList">
             <li data-exit="release" style="--c:var(--green-500)"><div><b>Release → buyer</b>The seller signs. The normal ending.</div></li>
-            <li data-exit="refund" style="--c:var(--blue-300)"><div><b>Refund → seller</b>The buyer signs. For when they won't pay.</div></li>
+            <li data-exit="refund" style="--c:var(--blue-300)"><div><b>Cancel → seller</b>The buyer signs. For when they won't pay.</div></li>
             <li data-exit="arbitrate" style="--c:var(--violet-300)"><div><b>Arbitrate</b>The arbiter's verdict pays the buyer or the seller. Nobody else.</div></li>
-            <li data-exit="reclaim" style="--c:var(--mist)"><div><b>Reclaim after 14 days</b>If everyone else disappears, the seller takes the coins back alone.</div></li>
+            <li data-exit="reclaim" style="--c:var(--mist)"><div><b>Refund after 14 days</b>If nothing else happened, the coins go back to the seller. No signature needed.</div></li>
           </ul>
           <details class="tech">
             <summary>Technical details</summary>
@@ -196,7 +196,7 @@
               <li><b>0-conf with DSProofs:</b> after 5 quiet seconds without a double-spend proof, the deposit is safe to act on.</li>
               <li><b>New keys per trade:</b> each trade uses a fresh address of your wallet, so trades aren't linked on-chain.</li>
               <li><b>Encrypted payment details:</b> revealed in the browser only to the other person in the trade.</li>
-              <li><b>Transparency page:</b> every contract exit, with its transaction.</li>
+              <li><b>Transparency page:</b> every contract exit, with its transaction once it has run on mainnet.</li>
             </ul>
           </details>
         </div>
@@ -217,7 +217,7 @@
           <div class="node glass n-buyer" data-s="1" style="left:85%;top:50%"><span class="emb ember"><svg class="ic"><use href="#i-buyer"/></svg></span><b>Buyer</b><small>Has fiat money</small></div>
           <div class="node glass contract" data-s="2" style="left:50%;top:50%"><span class="emb lg blue"><svg class="ic"><use href="#i-contract"/></svg></span><b>Contract</b><small style="color:var(--blue-300)">Holds the coins</small></div>
           <div class="node glass" data-s="3" style="left:50%;top:86%"><span class="emb green"><svg class="ic"><use href="#i-network"/></svg></span><b>BCH network</b><small style="color:var(--green-500)">Verifies every move</small></div>
-          <div class="node glass n-arb" data-s="4" style="left:50%;top:14%"><span class="emb violet"><svg class="ic"><use href="#i-arbiter"/></svg></span><b>Arbiter</b><small style="color:var(--violet-300)">Only in a dispute</small></div>
+          <div class="node glass n-arb" data-s="4" style="left:50%;top:14%"><span class="emb violet"><svg class="ic"><use href="#i-arbiter"/></svg></span><b>Arbiter</b><small style="color:var(--violet-300)">Disputes and time-outs</small></div>
           <span class="map-coin" id="mapCoin"></span>
         </div>
       </div>
@@ -274,9 +274,9 @@
       <details data-cat="start"><summary>Do I need to create an account?</summary><div class="ans">No. Connecting your wallet is the only sign-in. There are no accounts, passwords or e-mail addresses.</div></details>
       <details data-cat="start"><summary>How do I pay or get paid?</summary><div class="ans">Each offer lists the payment methods the seller accepts — for example a bank transfer or cash in person. The payment happens outside Campfire, directly between the two of you.</div></details>
       <details data-cat="safety"><summary>Who holds the coins during a trade?</summary><div class="ans">A contract on the Bitcoin Cash network. It can only pay the buyer or return the coins to the seller. Campfire cannot move them.</div></details>
-      <details data-cat="safety"><summary>What if the buyer doesn't pay in time?</summary><div class="ans">The seller sets the time to pay. If it runs out, the trade is cancelled and the coins go back to the seller. Either side can also open a dispute.</div></details>
+      <details data-cat="safety"><summary>What if the buyer doesn't pay in time?</summary><div class="ans">The seller sets the time to pay. If it runs out before the buyer marks the trade as paid, the arbiter automatically sends the coins back to the seller. Either side can also open a dispute.</div></details>
       <details data-cat="safety"><summary>What if the other person disappears?</summary><div class="ans">Either of you can open a dispute, and an arbiter named in the offer decides who gets the coins. The arbiter can never keep them. And if everyone disappears, after 14 days the seller can take the coins back alone.</div></details>
-      <details data-cat="safety"><summary>When does my wallet ask me to sign?</summary><div class="ans">Only when coins move: publishing a sell offer, locking coins, releasing them, or cancelling. Buttons that open your wallet say so.</div></details>
+      <details data-cat="safety"><summary>When does my wallet ask me to sign?</summary><div class="ans">Once to sign in, the first time you connect in a browser: it is free and moves no funds. After that, only when coins move: publishing a sell offer, locking coins, releasing them, or cancelling. Buttons that open your wallet say so.</div></details>
       <details data-cat="costs"><summary>How much does it cost?</summary><div class="ans">Nothing for the buyer. The seller pays the network fee and a small fee to the arbiter and, at market price, to the price oracle: 0.5% each today. The fees are shown before anything is locked, and Campfire pays the fee to publish a buy offer.</div></details>
       <details data-cat="costs"><summary>What does “Simulated” mean?</summary><div class="ans">In demo trades the other person is Campfire’s demo bot, not a real user, and the bank payment is not real. The Bitcoin Cash, the contract and everything marked “On-chain” are real transactions on mainnet you can check.</div></details>
       <details data-cat="costs"><summary>Can I trade PUSD?</summary><div class="ans">Yes. PUSD is a dollar token on Bitcoin Cash (1 PUSD stays close to 1 US dollar). Offers can sell or buy Bitcoin Cash or PUSD.</div></details>
@@ -290,7 +290,7 @@
   <div class="wrap">
     <img class="symbol rv" src="{{SYMBOL}}" alt="">
     <h2 id="h-close" class="rv d1">Clear trades. Connected people.</h2>
-    <p class="lead rv d2">Try a whole trade with real Bitcoin Cash and a real contract on mainnet. Only the other person, a demo bot, and the bank payment are simulated.</p>
+    <p class="lead rv d2">Try a whole trade with real Bitcoin Cash and a real contract on mainnet. Only two things are simulated: the other side, played by a demo bot, and the bank payment.</p>
     <div class="ctas rv d3" style="margin-top:32px">
       <a class="btn btn-primary" href="#/offers" data-to="demo">Try the demo trade <span class="arrow" aria-hidden="true">→</span></a>
       <a class="btn btn-ghost" href="#/offers" data-to="/offers">See offers</a>

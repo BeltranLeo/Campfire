@@ -116,8 +116,8 @@ export function startLanding(root) {
       steps: [
         ['act', 'Your turn', 'Set your price and publish.', 'Choose your margin over the market price, how much you sell, how buyers can pay you and how long they have to pay.', 'Nothing is locked yet: the offer is an announcement until someone takes it. Publishing costs less than a cent.'],
         ['time', 'Time is running', 'Accept a buyer.', 'A buyer takes your offer. You have 10 minutes to accept.', 'The price is held while the clock runs. If you don\'t accept, the request is dropped.'],
-        ['wait', 'The contract holds them', 'Lock the coins in the contract.', 'Sign once in your wallet. You have about 60 minutes to lock.', 'A contract made only for this trade holds the coins. It can pay the buyer or return them to you.'],
-        ['wait', 'Someone else is working', 'Wait for the payment.', 'Nothing. The buyer pays you outside Campfire, within the time you set.', 'If the buyer doesn\'t pay in time, the trade is cancelled and the coins come back to you.'],
+        ['wait', 'The contract holds them', 'Lock the coins in the contract.', 'Sign once in your wallet. You have up to 30 minutes to lock.', 'A contract made only for this trade holds the coins. It can pay the buyer or return them to you.'],
+        ['wait', 'Someone else is working', 'Wait for the payment.', 'Nothing. The buyer pays you outside Campfire, within the time you set.', 'If the buyer doesn\'t pay in time, the arbiter sends the coins back to you automatically.'],
         ['time', 'Check before you act', 'Check your bank app, then release.', 'Confirm the exact amount in your own bank app — not a screenshot. Then release.', 'Releasing pays the buyer from the contract. It can\'t be undone.'],
         ['chain', 'Confirmed on-chain', 'You got paid.', 'Nothing else to do.', 'The payout is a real transaction anyone can check on-chain.'],
       ],
@@ -128,7 +128,7 @@ export function startLanding(root) {
         ['act', 'Your turn', 'Pick an offer and take it.', 'Compare price, payment method and time to pay. Type how much BCH you want.', 'You don\'t need any BCH. Your wallet only gives an address to receive.'],
         ['wait', 'Someone else is working', 'The seller locks the coins.', 'Wait. Don\'t pay anything yet.', 'The seller accepts and moves the BCH into this trade\'s contract.'],
         ['chain', 'Verified on the network', 'Your browser checks the deposit.', 'Watch the check finish.', 'Your browser rebuilds the contract and watches the network for 5 quiet seconds: Safe at 0-conf.'],
-        ['time', 'Your turn, with a clock', 'Pay and mark as paid.', 'Send the money with the seller\'s method before the clock runs out, then tap Mark as paid.', 'The seller sets the time to pay. If it runs out, the trade is cancelled and the coins go back.'],
+        ['time', 'Your turn, with a clock', 'Pay and mark as paid.', 'Send the money with the seller\'s method before the clock runs out, then tap Mark as paid.', 'The seller sets the time to pay. If it runs out before you mark as paid, the arbiter sends the coins back to the seller.'],
         ['wait', 'Someone else is working', 'The seller releases.', 'Wait while the seller checks their bank app.', 'When the seller signs, the contract pays the BCH to your wallet.'],
         ['chain', 'Confirmed on-chain', 'The BCH is yours.', 'Nothing else to do.', 'The payout is a real transaction anyone can check on-chain.'],
       ],
@@ -167,8 +167,8 @@ export function startLanding(root) {
     if (back) back.onclick = close;
     scrim.onclick = close;
   };
-  const wallet = (what, onOk) => sheet('dark', `<span class="pill neutral" style="align-self:flex-start;background:rgba(138,150,179,.14);color:var(--mist)">Simulated wallet</span><span class="t">Sign to ${what}</span><span class="muted">In the real app, your Bitcoin Cash wallet opens here and asks you to approve. It only asks when coins move.</span><button class="ab" type="button">Approve</button><button class="ab ghost" type="button" style="color:var(--pearl);border-color:rgba(244,243,238,.35)">Back</button>`, onOk);
-  whatIfBtn.onclick = () => sheet('light', `<span class="t">Time ran out</span><div class="state-box neutral"><b>Trade cancelled</b><span>The coins go back to the seller. Nobody loses anything.</span></div><div class="state-box arb"><b>Or: open a dispute</b><span>If something else went wrong, either side can open a dispute. An arbiter decides who gets the coins.</span></div><button class="ab ghost" type="button">← Back to the trade</button>`);
+  const wallet = (what, onOk) => sheet('dark', `<span class="pill neutral" style="align-self:flex-start;background:rgba(138,150,179,.14);color:var(--mist)">Simulated wallet</span><span class="t">Sign to ${what}</span><span class="muted">In the real app, your Bitcoin Cash wallet opens here and asks you to approve. Once you are signed in, it only asks when coins move.</span><button class="ab" type="button">Approve</button><button class="ab ghost" type="button" style="color:var(--pearl);border-color:rgba(244,243,238,.35)">Back</button>`, onOk);
+  whatIfBtn.onclick = () => sheet('light', `<span class="t">Time ran out</span><div class="state-box neutral"><b>Coins back to the seller</b><span>The arbiter returns them automatically. Nobody loses anything.</span></div><div class="state-box arb"><b>Or: open a dispute</b><span>If something else went wrong, either side can open a dispute. An arbiter decides who gets the coins.</span></div><button class="ab ghost" type="button">← Back to the trade</button>`);
 
   const SELL = [
     () => {
@@ -197,7 +197,7 @@ export function startLanding(root) {
     },
     () => {
       scr.innerHTML = `${head('Lock the coins', 'Trade')}<div class="card"><span class="muted" style="font-size:12px">You lock</span><span class="big-n">${fmtBch(st.amount)} <small style="font-size:14px">BCH</small></span></div><div class="state-box time"><b>Time left to lock</b><span class="timer" id="sLt"></span></div><div class="state-box wait"><b>Where do they go?</b><span>Into a contract made only for this trade. It can pay the buyer or return the coins to you.</span></div><button class="ab" type="button" id="sLock">Lock ${fmtBch(st.amount)} BCH</button>`;
-      countdown($('#sLt'), 3599);
+      countdown($('#sLt'), 1799);
       $('#sLock').onclick = () => wallet(`lock ${fmtBch(st.amount)} BCH`, next);
     },
     () => {
