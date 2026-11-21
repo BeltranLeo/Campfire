@@ -56,6 +56,11 @@ const COINS_REFRESH_MS = 15_000;
 /** A rough fee for the publication: one input, three outputs and an OP_RETURN. */
 const FEE_ESTIMATE_SATS = 600n;
 
+// Minter lanes (outpoints) whose publication failed in this tab. Two people who publish at the same moment through
+// the same lane conflict and only one gets in; the next try here then takes another lane.
+const failedMinterLanes = new Set<string>();
+const laneKey = (u: { txid: string; vout: number }) => `${u.txid}:${u.vout}`;
+
 const INITIAL: Omit<OfferForm, 'side'> = {
   fiat: 'ARS',
   priceType: 'market',
@@ -214,6 +219,7 @@ export function CreateOffer() {
     const changeAddress = xpubs.change && prep.data.changeIndex !== null ? payoutAddress(xpubs.change, prep.data.changeIndex, false) : plainMarker;
     // The coins are read again now, so a coin spent since the last refresh is never used.
     busyStep.setStep(READING_WALLET);
+    let lane: string | null = null;
     const tx = await withKeptElectrum(async (provider) => {
       const common = {
         provider,
@@ -224,19 +230,29 @@ export function CreateOffer() {
         changeAddress,
       };
       if (!category) return buildPublishOfferTransaction(common);
-      const [minterUtxo] = await findMinterUtxos(provider, category);
+      // The lanes come in random order; one that just failed here goes last, so a retry takes another lane.
+      const lanes = await findMinterUtxos(provider, category);
+      const minterUtxo = lanes.find((u) => !failedMinterLanes.has(laneKey(u))) ?? lanes[0];
       if (!minterUtxo) throw new Error(t.noMinter);
+      lane = laneKey(minterUtxo);
       return buildPublishNftOfferTransaction({ ...common, minterUtxo });
     });
     busyStep.setStep(null);
     const signedTxHex = await wallet.sign(tx.request, tx.inputPaths);
     busyStep.setStep(t.publishing);
-    const { offer } = await apiPost<{ offer: Offer }>('/api/offers', {
-      sellerIdentity: identity,
-      offerJson: built.json,
-      offerTxHex: signedTxHex,
-      markerReceiveIndex: markerIndex,
-    });
+    let offer: Offer;
+    try {
+      ({ offer } = await apiPost<{ offer: Offer }>('/api/offers', {
+        sellerIdentity: identity,
+        offerJson: built.json,
+        offerTxHex: signedTxHex,
+        markerReceiveIndex: markerIndex,
+      }));
+    } catch (err) {
+      // Someone else may have published through the same lane a moment earlier.
+      if (lane) failedMinterLanes.add(lane);
+      throw err;
+    }
     setPublished(offer);
     void refreshWalletCoins();
   }

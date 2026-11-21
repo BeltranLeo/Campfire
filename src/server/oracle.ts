@@ -17,9 +17,13 @@ export class LivePriceFeed implements PriceFeedProvider {
   private cache = new Map<string, CacheEntry>();
   private readonly ttlMs: number;
   private readonly fetchFn: typeof fetch;
+  private readonly timeoutMs: number;
 
-  constructor(options?: { ttlMs?: number; fetchFn?: typeof fetch }) {
+  // A price source that does not answer must not hold a trade request until the serverless function is killed:
+  // each request gives up after `timeoutMs` (5 s by default) and the quote fails with a clear error instead.
+  constructor(options?: { ttlMs?: number; fetchFn?: typeof fetch; timeoutMs?: number }) {
     this.ttlMs = options?.ttlMs ?? 60_000;
+    this.timeoutMs = options?.timeoutMs ?? 5_000;
     this.fetchFn = options?.fetchFn ?? globalThis.fetch.bind(globalThis);
   }
 
@@ -69,7 +73,10 @@ export class LivePriceFeed implements PriceFeedProvider {
   private async fetchCoinGeckoBch(): Promise<{ usd: number; ars?: number }> {
     const url =
       'https://api.coingecko.com/api/v3/simple/price?ids=bitcoin-cash&vs_currencies=usd,ars';
-    const res = await this.fetchFn(url, { headers: { accept: 'application/json' } });
+    const res = await this.fetchFn(url, {
+      headers: { accept: 'application/json' },
+      signal: AbortSignal.timeout(this.timeoutMs),
+    });
     if (!res.ok) {
       throw new Error(`CoinGecko request failed with status ${res.status}`);
     }
@@ -84,6 +91,7 @@ export class LivePriceFeed implements PriceFeedProvider {
   private async fetchUsdArs(): Promise<number> {
     const res = await this.fetchFn('https://api.yadio.io/exrates/ARS', {
       headers: { accept: 'application/json' },
+      signal: AbortSignal.timeout(this.timeoutMs),
     });
     if (!res.ok) {
       throw new Error(`Yadio request failed with status ${res.status}`);

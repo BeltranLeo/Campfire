@@ -33,6 +33,7 @@ import {
   derivePubkeyFromXpub,
   deriveWalletAddressMap,
   generateSessionKeyPair,
+  offerMinter,
   pkhToCashAddress,
   pkhToLockingBytecode,
   tagWalletUtxos,
@@ -675,5 +676,47 @@ describe('Demo seller bot (protocol section 8)', () => {
       const total = [...back, ...main].reduce((sum, u) => sum + u.satoshis, 0n);
       expect(data.bot.bchSats).toBe(total.toString());
     });
+  });
+});
+
+describe('Demo offers through the minter lanes', () => {
+  it('builds the offer again on another lane when the network refuses the first one', async () => {
+    const category = binToHex(sha256.hash(utf8ToBin('demo-lane-category')));
+    const provider = new MockNetworkProvider();
+    provider.network = Network.MAINNET;
+    const minting = { category, amount: 0n, nft: { capability: 'minting' as const, commitment: '' } };
+    const minter = offerMinter(provider).tokenAddress;
+    provider.addUtxo(minter, randomUtxo({ satoshis: 1000n, token: minting }));
+    provider.addUtxo(minter, randomUtxo({ satoshis: 1000n, token: minting }));
+
+    // The first broadcast is refused, as when someone else just spent the same lane.
+    const lanesTried: string[] = [];
+    const send = provider.sendRawTransaction.bind(provider);
+    provider.sendRawTransaction = async (hex: string) => {
+      const input = decodeTransactionUnsafe(hexToBin(hex)).inputs[0];
+      lanesTried.push(`${binToHex(input.outpointTransactionHash)}:${input.outpointIndex}`);
+      if (lanesTried.length === 1) throw new Error('txn-mempool-conflict');
+      return send(hex);
+    };
+
+    const nowSeconds = () => 1_794_900_000;
+    const oracle = new OracleService({ privateKey: sha256.hash(utf8ToBin('lane-oracle')), feed: new StaticPriceFeed({ 'BCH/USD': '450.00' }), nowSeconds });
+    const service = new CampfireService({
+      storage: new MemoryStorage(),
+      provider,
+      oracle,
+      arbiterPrivateKey: sha256.hash(utf8ToBin('lane-arbiter')),
+      nowSeconds,
+      demoSellerIdentity: botWallet.identity,
+      offerCategory: category,
+    });
+    const demo = new DemoSeller({ service, provider, wallet: botWallet, nowSeconds, indexPollMs: 0 });
+    await demo.init();
+    provider.addUtxo(botWallet.receiveAddress(0), randomUtxo({ satoshis: 500_000n }));
+
+    const [offer] = await demo.publishOffers(['BCH']);
+    expect(offer.onChain.version).toBe(2);
+    expect(lanesTried).toHaveLength(2);
+    expect(new Set(lanesTried).size).toBe(2);
   });
 });

@@ -103,7 +103,9 @@ export interface StoredTrade {
   paidAt?: number;
   disputedBy?: 'buyer' | 'seller';
   disputeReason?: string;
+  // The first trade key handed to the arbiter, and the one each party handed over (the arbiter tries all of them).
   sharedTradeKeyHex?: string;
+  disputeKeys?: { buyer?: string; seller?: string };
   disputedAt?: number;
   verdict?: VerdictHex;
   verdictSignature?: string;

@@ -272,7 +272,7 @@ When the seller accepts, both clients hold the same trade-terms document:
 
 `tradeId` = SHA-256 of these bytes. It is a constructor parameter of the escrow contract, so the escrow address commits to every term: the price, the oracle that signed it, the fiat amount, the session keys and the service fees (section 5.1). Anyone holding the document can recompute the address and check it against the chain.
 
-**Price quote.** For a floating offer, the oracle signs `SHA-256("CMPF-QUOTE" ‖ pair ‖ price ‖ timestamp)` with its key. Clients verify the signature against the oracle key in the offer before accepting. The contract does not verify the quote; it commits to it through `tradeId`, and the arbiter checks it in a dispute. For a fixed offer, `quote` is omitted and the price comes from the offer.
+**Price quote.** For a floating offer, the oracle signs `SHA-256("CMPF-QUOTE" ‖ pair ‖ price ‖ timestamp)` with its key. The fields are joined with no separator, so a quote is valid only when `pair` is capital letters and one `/` (no digits) and `timestamp` has exactly 10 digits: that leaves a single way to split the signed bytes back into fields. Clients verify the signature against the oracle key in the offer before accepting. The contract does not verify the quote; it commits to it through `tradeId`, and the arbiter checks it in a dispute. For a fixed offer, `quote` is omitted and the price comes from the offer.
 
 ### 3.4 NFT markers (format 2)
 

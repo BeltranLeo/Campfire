@@ -11,7 +11,7 @@ import {
   sha256,
   utf8ToBin,
 } from '@bitauth/libauth';
-import type { NetworkProvider, Utxo } from 'cashscript';
+import type { NetworkProvider, SpendableUtxo, Utxo } from 'cashscript';
 import {
   BCH_ASSET,
   DEFAULT_FEE_RATES,
@@ -34,6 +34,7 @@ import {
   createEscrowContract,
   decryptChatMessage,
   derivePubkeyFromXpub,
+  derivePayoutPkhFromXpub,
   identityFromDefiXpub,
   isCompressedPubkeyHex,
   MAX_CHAT_CIPHERTEXT_LENGTH,
@@ -54,8 +55,10 @@ import {
   verifyOfferAgainstOpReturn,
   verifyChatMessageSignature,
   verifyPaymentDetailsSignature,
+  QUOTE_MAX_CLOCK_SKEW_SEC,
   verifyPriceQuote,
   verifySignInTransaction,
+  settlementMismatch,
   verifySignedContractSpend,
   type FeeRates,
   type OfferDocument,
@@ -120,6 +123,10 @@ export class SponsorshipLimitError extends Error {}
 /** Registering these keys needs a signed sign-in challenge (protocol section 1); the HTTP layer answers 401. */
 export class SignInRequiredError extends Error {}
 
+// The offer passed every check, but the network did not accept its transaction (for example, a coin it spends
+// was just spent by another transaction). Nothing was listed.
+export class OfferBroadcastError extends Error {}
+
 // How long a session token lasts. A visitor who comes back later signs the challenge again.
 export const SESSION_LIFETIME_SEC = 30 * 86_400;
 const SESSION_TOKEN_RE = /^([0-9a-f]{64})\.([0-9]{1,12})\.([0-9a-f]{64})$/;
@@ -167,6 +174,27 @@ export interface ReputationSummary {
 
 export interface OfferView extends Omit<StoredOffer, 'status'> {
   status: OfferStatus;
+}
+
+// The coin a settlement spends: the deposit recorded when the trade was funded, never just any coin of the right
+// value at the escrow address (anyone can send one there). Trades recorded before the outpoint was kept fall back
+// to the first coin that matches the terms.
+function escrowUtxoOf<U extends SpendableUtxo>(trade: StoredTrade, utxos: U[]): U | undefined {
+  if (trade.fundingTxid !== undefined && trade.fundingVout !== undefined) {
+    return utxos.find((u) => u.txid === trade.fundingTxid && u.vout === trade.fundingVout && matchesEscrowFunding(u, trade.terms!));
+  }
+  return utxos.find((u) => matchesEscrowFunding(u, trade.terms!));
+}
+
+// The receive extended public key must derive addresses: every payout and marker address comes from it, and an
+// identity registered with one that does not would be unusable. (verifyDerivedPayoutPkh returns false instead of
+// throwing, so it cannot check this on its own.)
+function assertReceiveXpub(receiveXpub: string): void {
+  try {
+    derivePayoutPkhFromXpub(receiveXpub.trim(), 0);
+  } catch {
+    throw new Error('receiveXpub is not a valid extended public key');
+  }
 }
 
 export class CampfireService {
@@ -243,7 +271,7 @@ export class CampfireService {
   // signed answer registers exactly these keys, and it expires after a few minutes.
   createSignInChallenge(params: { defiXpub: string; receiveXpub: string }): SignInChallenge {
     const identity = identityFromDefiXpub(params.defiXpub);
-    verifyDerivedPayoutPkh(params.receiveXpub, 0, new Uint8Array(20));
+    assertReceiveXpub(params.receiveXpub);
     const expiresAt = this.nowSeconds() + SIGNIN_LIFETIME_SEC;
     const salt = randomBytes(16).toString('hex');
     const nonce = signInNonce(this.signInSecret, { identity, receiveXpub: params.receiveXpub, expiresAt, salt });
@@ -260,8 +288,7 @@ export class CampfireService {
     options: { trusted?: boolean } = {},
   ): Promise<{ record: UserIdentityRecord; sessionToken?: string }> {
     const identity = identityFromDefiXpub(params.defiXpub);
-    // Validate receiveXpub by deriving index 0.
-    verifyDerivedPayoutPkh(params.receiveXpub, 0, new Uint8Array(20));
+    assertReceiveXpub(params.receiveXpub);
     const now = this.nowSeconds();
     const existing = await this.options.storage.getIdentity(identity);
     if (!options.trusted) {
@@ -382,10 +409,21 @@ export class CampfireService {
     offerJson: string;
     offerTxHex: string;
     markerReceiveIndex: number;
-    broadcast?: boolean;
     // Set only by the service's own paid publication of a buy offer, never from a request.
     sponsored?: boolean;
   }): Promise<OfferView> {
+    // Every listed offer is broadcast by the service itself, so a listing always matches a transaction the network
+    // has seen. An offer transaction that is already listed is returned as it is: publishing it again (a retry after
+    // a lost answer) must never overwrite the record, which would reopen an offer that was closed.
+    const offerTxid = hashTransaction(hexToBin(params.offerTxHex));
+    const known = await this.options.storage.getOffer(offerTxid);
+    if (known) {
+      if (known.sellerIdentity !== params.sellerIdentity) {
+        throw new Error('This offer transaction is already listed for another identity');
+      }
+      return this.toOfferView(known);
+    }
+
     const seller = await this.options.storage.getIdentity(params.sellerIdentity);
     if (!seller) {
       throw new Error('Seller identity is not registered');
@@ -450,13 +488,14 @@ export class CampfireService {
       throw new Error('Offer expiresAt is already in the past');
     }
 
-    let offerTxid: string;
-    if (params.broadcast ?? true) {
-      offerTxid = await this.options.provider.sendRawTransaction(params.offerTxHex);
-    } else {
-      // Double SHA-256 reversed txid
-      const hash = sha256.hash(sha256.hash(hexToBin(params.offerTxHex)));
-      offerTxid = binToHex(Uint8Array.from([...hash].reverse()));
+    let broadcastTxid: string;
+    try {
+      broadcastTxid = await this.options.provider.sendRawTransaction(params.offerTxHex);
+    } catch (err) {
+      throw new OfferBroadcastError(`The network refused the offer transaction: ${err instanceof Error ? err.message : String(err)}`);
+    }
+    if (broadcastTxid.toLowerCase() !== offerTxid) {
+      throw new Error('The network returned another txid for the offer transaction');
     }
 
     const now = this.nowSeconds();
@@ -736,6 +775,7 @@ export class CampfireService {
     // The shared trade key is only visible to the arbiter in a dispute (section 6).
     if (!isArbiter) {
       delete copy.sharedTradeKeyHex;
+      delete copy.disputeKeys;
       delete copy.pendingFundingTxHex;
     }
     return copy;
@@ -802,7 +842,7 @@ export class CampfireService {
     try {
       const contract = createEscrowContract(trade.terms, trade.tradeId, this.options.provider);
       const utxos = await contract.getUtxos();
-      const escrowUtxo = utxos.find((u) => matchesEscrowFunding(u, trade.terms!));
+      const escrowUtxo = escrowUtxoOf(trade, utxos);
       if (!escrowUtxo) {
         return undefined;
       }
@@ -1429,17 +1469,26 @@ export class CampfireService {
       throw new Error(`Cannot open a dispute when trade is in state "${trade.status}"`);
     }
     const now = this.nowSeconds();
-    trade.status = 'Disputed';
-    trade.disputedBy = trade.buyerIdentity === params.callerIdentity ? 'buyer' : 'seller';
-    if (params.reason) {
-      trade.disputeReason = params.reason;
+    // Opening a dispute again (the other party, or a retry) never rewrites who opened it or why: the arbiter reads
+    // the opener's account as the opener wrote it.
+    if (trade.status !== 'Disputed') {
+      trade.status = 'Disputed';
+      trade.disputedBy = trade.buyerIdentity === params.callerIdentity ? 'buyer' : 'seller';
+      if (params.reason) {
+        trade.disputeReason = params.reason;
+      }
     }
     if (params.sharedTradeKeyHex) {
       const keyBytes = toBytes(params.sharedTradeKeyHex, 'sharedTradeKeyHex');
       if (keyBytes.length !== 32) {
         throw new Error('sharedTradeKeyHex must be a 32-byte key in hex');
       }
-      trade.sharedTradeKeyHex = binToHex(keyBytes);
+      // Each party fills only its own slot, so neither can replace the key the other handed over. Both parties
+      // derive the same key, and the arbiter tries every key it holds (see decryptDisputedChatForArbiter).
+      const offered = binToHex(keyBytes);
+      const role = trade.buyerIdentity === params.callerIdentity ? 'buyer' : 'seller';
+      trade.disputeKeys = { ...trade.disputeKeys, [role]: offered };
+      trade.sharedTradeKeyHex = trade.sharedTradeKeyHex ?? offered;
     }
     trade.disputedAt = trade.disputedAt ?? now;
     trade.updatedAt = now;
@@ -1468,6 +1517,9 @@ export class CampfireService {
       if (!verifyPriceQuote(trade.terms.quote, trade.terms.oraclePk)) {
         throw new Error('Trade quote failed oracle signature verification');
       }
+      if (trade.terms.quote.timestamp > this.nowSeconds() + QUOTE_MAX_CLOCK_SKEW_SEC) {
+        throw new Error('Trade quote is dated in the future');
+      }
     }
 
     const sig = signVerdict(this.arbiterPrivateKey, trade.tradeId, params.verdict);
@@ -1480,7 +1532,7 @@ export class CampfireService {
     if (params.broadcastOnChain ?? true) {
       const contract = createEscrowContract(trade.terms, trade.tradeId, this.options.provider);
       const utxos = await contract.getUtxos();
-      const escrowUtxo = utxos.find((u) => matchesEscrowFunding(u, trade.terms!));
+      const escrowUtxo = escrowUtxoOf(trade, utxos);
       if (!escrowUtxo) {
         throw new Error('Escrow UTXO not found on-chain for arbitrate broadcast');
       }
@@ -1526,7 +1578,7 @@ export class CampfireService {
 
     const contract = createEscrowContract(trade.terms, trade.tradeId, this.options.provider);
     const utxos = await contract.getUtxos();
-    const escrowUtxo = utxos.find((u) => matchesEscrowFunding(u, trade.terms!));
+    const escrowUtxo = escrowUtxoOf(trade, utxos);
     if (!escrowUtxo) {
       throw new Error('Escrow UTXO is not available on-chain');
     }
@@ -1544,6 +1596,10 @@ export class CampfireService {
         buyerPayoutPkh: trade.terms.buyerPayoutPkh,
         sellerDefiIndex: trade.sellerDefiIndex ?? 0,
       });
+      const mismatch = settlementMismatch(params.signedTxHex, expected.unsignedHex);
+      if (mismatch) {
+        throw new Error(`Signed release transaction rejected: ${mismatch}`);
+      }
       const check = verifySignedContractSpend(params.signedTxHex, expected.sourceOutputs);
       if (!check.valid) {
         throw new Error(`Signed release transaction failed VM verification: ${check.error}`);
@@ -1560,6 +1616,10 @@ export class CampfireService {
         sellerPayoutPkh: trade.terms.sellerPayoutPkh,
         buyerDefiIndex: trade.buyerDefiIndex ?? 0,
       });
+      const mismatch = settlementMismatch(params.signedTxHex, expected.unsignedHex);
+      if (mismatch) {
+        throw new Error(`Signed cancel transaction rejected: ${mismatch}`);
+      }
       const check = verifySignedContractSpend(params.signedTxHex, expected.sourceOutputs);
       if (!check.valid) {
         throw new Error(`Signed cancel transaction failed VM verification: ${check.error}`);
@@ -1703,7 +1763,7 @@ export class CampfireService {
     return this.options.storage.listChatMessages(trade.id, sinceSeconds);
   }
 
-  // In a dispute where a party handed over `sharedTradeKeyHex`, the arbiter can decrypt the chat log.
+  // In a dispute where a party handed over its trade key, the arbiter can decrypt the chat log.
   async decryptDisputedChatForArbiter(
     idOrTradeId: string,
     sinceSeconds?: number,
@@ -1712,7 +1772,9 @@ export class CampfireService {
     if (!trade) {
       throw new Error('Trade not found');
     }
-    if (!trade.sharedTradeKeyHex) {
+    // Every key a party handed over is tried, so a wrong key from one party cannot hide the chat.
+    const keys = [...new Set([trade.sharedTradeKeyHex, trade.disputeKeys?.buyer, trade.disputeKeys?.seller].filter((k): k is string => !!k))];
+    if (keys.length === 0) {
       throw new Error('No shared trade key has been handed to the arbiter for this trade');
     }
     const messages = await this.options.storage.listChatMessages(trade.id, sinceSeconds);
@@ -1720,11 +1782,14 @@ export class CampfireService {
     for (const m of messages) {
       // One message that does not decrypt (a party can post a signed message encrypted with another key) must not
       // hide the rest of the chat from the arbiter: it is returned as unreadable, with its author and signature.
-      let plaintext: string | null;
-      try {
-        plaintext = await decryptChatMessage(trade.sharedTradeKeyHex, m.ciphertext);
-      } catch {
-        plaintext = null;
+      let plaintext: string | null = null;
+      for (const key of keys) {
+        try {
+          plaintext = await decryptChatMessage(key, m.ciphertext);
+          break;
+        } catch {
+          // Not encrypted with this key: try the next one.
+        }
       }
       // Checked again here so the arbiter never relies on what was stored: a message counts as written by a role
       // only if that role's session key signed it.

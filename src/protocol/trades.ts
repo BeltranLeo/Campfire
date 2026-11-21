@@ -70,16 +70,27 @@ export interface TradeTerms {
 const POSITIVE_INT_RE = /^[1-9][0-9]*$/;
 const FIAT_RE = /^[A-Z]{3}$/;
 
+// The signed message joins its fields with no separator, so the fields are narrowed until only one split exists:
+// the pair has no digits (it ends where the price's first digit starts) and the timestamp always has 10 digits (the
+// last 10 characters). Without that, the same signature would also cover `price: "450.1", timestamp: 21763…` or
+// `price: "450.121", timestamp: 763…`. The signed bytes are unchanged, so every quote signed so far still verifies.
+const QUOTE_PAIR_RE = /^[A-Z]+\/[A-Z]+$/;
+const MIN_QUOTE_TIMESTAMP = 1_000_000_000;
+const MAX_QUOTE_TIMESTAMP = 9_999_999_999;
+
+// A quote signed a little ahead of the verifier's clock is accepted; one further ahead is not a real quote.
+export const QUOTE_MAX_CLOCK_SKEW_SEC = 300;
+
 // SHA-256("CMPF-QUOTE" ‖ pair ‖ price ‖ timestamp) as specified in protocol section 3.3.
 export function quoteMessageHash(pair: string, price: string, timestamp: number): Uint8Array {
-  if (!pair || typeof pair !== 'string') {
-    throw new Error('Quote pair must be a non-empty string');
+  if (typeof pair !== 'string' || !QUOTE_PAIR_RE.test(pair)) {
+    throw new Error('Quote pair must look like BASE/QUOTE in capital letters');
   }
   if (!isPositiveDecimalString(price)) {
     throw new Error('Quote price must be a positive decimal string');
   }
-  if (!Number.isInteger(timestamp) || timestamp < MIN_UNIX_TIMESTAMP) {
-    throw new Error('Quote timestamp must be a Unix timestamp (>= 500,000,000)');
+  if (!Number.isInteger(timestamp) || timestamp < MIN_QUOTE_TIMESTAMP || timestamp > MAX_QUOTE_TIMESTAMP) {
+    throw new Error('Quote timestamp must be a 10-digit Unix timestamp');
   }
   return sha256.hash(utf8ToBin(`${QUOTE_PREFIX}${pair}${price}${timestamp}`));
 }

@@ -58,7 +58,7 @@ import {
   type WalletSpendableUtxo,
 } from '../protocol/index.js';
 import { sumCoins } from './accounts.js';
-import { FUNDING_WINDOW_SEC, SponsorshipLimitError, type CampfireService, type OfferView } from './service.js';
+import { FUNDING_WINDOW_SEC, OfferBroadcastError, SponsorshipLimitError, type CampfireService, type OfferView } from './service.js';
 import type { StoredTrade, TradeState } from './storage.js';
 
 // Same derivation paths as the test wallets; the `defi` branch holds the contract signing keys.
@@ -388,20 +388,21 @@ export class DemoSeller {
         // NFT markers all go to the bot's identity address (receive/0); plain markers each take a fresh index.
         const nft = service.offerCategory !== null;
         const index = nft ? IDENTITY_RECEIVE_INDEX : markerIndex;
-        const tx = await this.buildOfferTransaction({
-          document,
-          offerJson: JSON.stringify(document),
-          utxos: await this.spendableUtxos(),
-          markerPkh: cashAddressToPkh(this.options.wallet.receiveAddress(index)),
-        });
-        const offer = await service.publishOffer({
-          sellerIdentity: this.identity,
-          offerJson: tx.offerJson,
-          offerTxHex: tx.hex,
-          markerReceiveIndex: index,
-          broadcast: true,
-        });
-        await this.waitUntilIndexed(tx.hex);
+        const offer = await this.publishOfferTransaction(
+          {
+            document,
+            offerJson: JSON.stringify(document),
+            utxos: await this.spendableUtxos(),
+            markerPkh: cashAddressToPkh(this.options.wallet.receiveAddress(index)),
+          },
+          (tx) =>
+            service.publishOffer({
+              sellerIdentity: this.identity,
+              offerJson: tx.offerJson,
+              offerTxHex: tx.hex,
+              markerReceiveIndex: index,
+            }),
+        );
         published.push(offer);
         if (!nft) markerIndex += 1;
       }
@@ -409,20 +410,39 @@ export class DemoSeller {
     });
   }
 
-  // An offer transaction paid by the bot's wallet: format 2 with an NFT marker from the minter covenant once the
-  // service has an offer category, format 1 with the 1,000-sat marker before that (protocol sections 3.1 and 3.4).
-  private async buildOfferTransaction(params: {
-    document: OfferDocument;
-    offerJson: string;
-    utxos: WalletSpendableUtxo[];
-    markerPkh: Uint8Array;
-  }) {
+  // Builds, publishes and waits for an offer transaction paid by the bot's wallet: format 2 with an NFT marker from
+  // the minter covenant once the service has an offer category, format 1 with the 1,000-sat marker before that
+  // (protocol sections 3.1 and 3.4). The minter has several lanes (minting UTXOs), taken in random order. Two
+  // publishers that pick the same lane at the same moment conflict, and only one transaction gets in: when the
+  // network refuses the broadcast, the same offer is built again on the next lane, up to one try per lane.
+  private async publishOfferTransaction(
+    params: { document: OfferDocument; offerJson: string; utxos: WalletSpendableUtxo[]; markerPkh: Uint8Array },
+    publish: (tx: { offerJson: string; hex: string }) => Promise<OfferView>,
+  ): Promise<OfferView> {
     const category = this.options.service.offerCategory;
     const common = { provider: this.options.provider, document: params.document, offerJson: params.offerJson, utxos: params.utxos, changeAddress: this.mainAddress };
-    if (!category) return buildPublishOfferTransaction({ ...common, markerAddress: pkhToCashAddress(params.markerPkh) });
-    const [minterUtxo] = await findMinterUtxos(this.options.provider, category);
-    if (!minterUtxo) throw new Error('The offer minter has no minting NFT of the Campfire offer category');
-    return buildPublishNftOfferTransaction({ ...common, minterUtxo, markerAddress: pkhToCashAddress(params.markerPkh, { tokenAware: true }) });
+    if (!category) {
+      const tx = buildPublishOfferTransaction({ ...common, markerAddress: pkhToCashAddress(params.markerPkh) });
+      const offer = await publish(tx);
+      await this.waitUntilIndexed(tx.hex);
+      return offer;
+    }
+    const lanes = await findMinterUtxos(this.options.provider, category);
+    if (lanes.length === 0) throw new Error('The offer minter has no minting NFT of the Campfire offer category');
+    let lastError: unknown;
+    for (const minterUtxo of lanes) {
+      const tx = buildPublishNftOfferTransaction({ ...common, minterUtxo, markerAddress: pkhToCashAddress(params.markerPkh, { tokenAware: true }) });
+      try {
+        const offer = await publish(tx);
+        await this.waitUntilIndexed(tx.hex);
+        return offer;
+      } catch (err) {
+        // Only a refused broadcast is worth another lane; any other error would repeat on every lane.
+        if (!(err instanceof OfferBroadcastError)) throw err;
+        lastError = err;
+      }
+    }
+    throw lastError;
   }
 
   // --- Limits ---
@@ -723,22 +743,22 @@ export class DemoSeller {
       if (utxos.reduce((sum, u) => sum + u.satoshis, 0n) < 3_000n) {
         throw new SponsorshipLimitError('Campfire cannot pay for new offers right now. Please try again later.');
       }
-      const tx = await this.buildOfferTransaction({
-        document,
-        offerJson: params.offerJson,
-        utxos,
-        markerPkh: derivePayoutPkhFromXpub(buyer.receiveXpub, params.markerReceiveIndex),
-      });
-      const published = await service.publishOffer({
-        sellerIdentity: params.buyerIdentity,
-        offerJson: tx.offerJson,
-        offerTxHex: tx.hex,
-        markerReceiveIndex: params.markerReceiveIndex,
-        broadcast: true,
-        sponsored: true,
-      });
-      await this.waitUntilIndexed(tx.hex);
-      return published;
+      return this.publishOfferTransaction(
+        {
+          document,
+          offerJson: params.offerJson,
+          utxos,
+          markerPkh: derivePayoutPkhFromXpub(buyer.receiveXpub, params.markerReceiveIndex),
+        },
+        (tx) =>
+          service.publishOffer({
+            sellerIdentity: params.buyerIdentity,
+            offerJson: tx.offerJson,
+            offerTxHex: tx.hex,
+            markerReceiveIndex: params.markerReceiveIndex,
+            sponsored: true,
+          }),
+      );
     });
     const trade = offer.document.paymentMethods.includes(DEMO_PAYMENT_METHOD) ? await this.takeBuyOffer(offer) : null;
     return { offer, trade };

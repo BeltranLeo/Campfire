@@ -203,6 +203,16 @@ describe('LivePriceFeed (CoinGecko + Yadio with caching and fallback)', () => {
     expect(await feed.getPrice('PUSD/USD')).toBe('1.00');
     expect(await feed.getPrice('PUSD/ARS')).toBe('1150.00');
   });
+
+  it('gives up on a price source that does not answer', async () => {
+    // A source that never answers: the request ends only when its signal aborts.
+    const hanging: typeof fetch = (_input, init) =>
+      new Promise((_resolve, reject) => {
+        init?.signal?.addEventListener('abort', () => reject(init.signal!.reason));
+      });
+    const feed = new LivePriceFeed({ fetchFn: hanging, timeoutMs: 20 });
+    await expect(feed.getPrice('BCH/USD')).rejects.toThrow();
+  });
 });
 
 describe('PostgresStorage SQL adapter', () => {
@@ -281,13 +291,17 @@ describe('CampfireService & HTTP API end-to-end lifecycle', () => {
       changeAddress: seller.receiveAddr(0),
     });
 
+    // `broadcast: false` is ignored: the service always broadcasts what it lists (the marker spent in step 9
+    // exists only because it did).
     const pubRes = await ctx.jsonReq<{ offer: StoredOffer }>('POST', '/api/offers', {
       sellerIdentity: sellerId,
       offerJson: pubTx.offerJson,
       offerTxHex: pubTx.hex,
       markerReceiveIndex: 1,
+      broadcast: false,
     });
     expect(pubRes.status).toBe(201);
+    expect((await ctx.provider.getUtxos(seller.receiveAddr(1))).map((u) => u.txid)).toContain(pubRes.data.offer.offerTxid);
     const offerTxid = pubRes.data.offer.offerTxid;
 
     // Verify the service serves the exact offer JSON by its SHA-256 digest (section 3.2).
@@ -487,20 +501,44 @@ describe('CampfireService & HTTP API end-to-end lifecycle', () => {
 
     // 7. Seller signs and broadcasts `release`.
     const escrowUtxos = await contract.getUtxos();
+    const deposit = escrowUtxos.find((u) => u.txid === fundRes.data.trade.fundingTxid)!;
+    const stray = escrowUtxos.find((u) => u.txid !== fundRes.data.trade.fundingTxid)!;
     const releaseReq = buildReleaseRequest({
       contract,
-      utxo: escrowUtxos[0],
+      utxo: deposit,
       buyerPayoutPkh: acceptedTrade.terms!.buyerPayoutPkh,
       sellerDefiIndex: 0,
     });
     const sellerDefiSigner = new SignatureTemplate(seller.defiPriv(0));
-    const signedReleaseHex = new TransactionBuilder({ provider: ctx.provider })
-      .addInput(escrowUtxos[0], contract.unlock.release(sellerDefiSigner))
-      .addOutput({
-        to: pkhToLockingBytecode(acceptedTrade.terms!.buyerPayoutPkh),
-        amount: escrowUtxos[0].satoshis - releaseReq.fee,
-      })
+    const signRelease = (utxo: typeof deposit) =>
+      new TransactionBuilder({ provider: ctx.provider })
+        .addInput(utxo, contract.unlock.release(sellerDefiSigner))
+        .addOutput({
+          to: pkhToLockingBytecode(acceptedTrade.terms!.buyerPayoutPkh),
+          amount: utxo.satoshis - releaseReq.fee,
+        })
+        .build();
+    const signedReleaseHex = signRelease(deposit);
+    const signedCancelHex = new TransactionBuilder({ provider: ctx.provider })
+      .addInput(deposit, contract.unlock.cancel(new SignatureTemplate(buyer.defiPriv(0))))
+      .addOutput({ to: pkhToLockingBytecode(acceptedTrade.terms!.sellerPayoutPkh), amount: deposit.satoshis - releaseReq.fee })
       .build();
+    const settle = (path: string, signedTxHex: string) =>
+      ctx.jsonReq('POST', `/api/trades/${acceptedTrade.tradeId}/settle`, { path, signedTxHex });
+
+    // Each of these is a valid spend for the contract, but not the settlement it claims to be: a `cancel` handed in
+    // as `release` (or the other way round) would record the wrong outcome, and a `release` of another coin at the
+    // escrow address would mark the trade as released while the deposit stays locked.
+    const cancelAsRelease = await settle('release', signedCancelHex);
+    expect(cancelAsRelease.status).toBe(400);
+    expect(cancelAsRelease.data.error).toMatch(/contract function of this settlement path/);
+    const releaseAsCancel = await settle('cancel', signedReleaseHex);
+    expect(releaseAsCancel.status).toBe(400);
+    expect(releaseAsCancel.data.error).toMatch(/contract function of this settlement path/);
+    const strayRelease = await settle('release', signRelease(stray));
+    expect(strayRelease.status).toBe(400);
+    expect(strayRelease.data.error).toMatch(/does not spend the escrow UTXO/);
+    expect((await ctx.jsonReq<{ trade: StoredTrade }>('GET', `/api/trades/${acceptedTrade.tradeId}`)).data.trade.status).toBe('Paid');
 
     const settleRes = await ctx.jsonReq<{ trade: StoredTrade }>(
       'POST',
@@ -570,6 +608,19 @@ describe('CampfireService & HTTP API end-to-end lifecycle', () => {
     expect(closeRes.status).toBe(200);
     expect(closeRes.data.offer.status).toBe('Closed');
     expect(closeRes.data.offer.closeTxid).toBe(hashTransaction(hexToBin(closeTx.hex)));
+
+    // Publishing the same offer transaction again neither reopens nor rewrites it, and a request cannot ask the
+    // service to list an offer without broadcasting it.
+    const republish = await ctx.jsonReq<{ offer: StoredOffer }>('POST', '/api/offers', {
+      sellerIdentity: sellerId,
+      offerJson: pubTx.offerJson,
+      offerTxHex: pubTx.hex,
+      markerReceiveIndex: 1,
+      broadcast: false,
+    });
+    expect(republish.status).toBe(201);
+    expect(republish.data.offer.status).toBe('Closed');
+    expect(republish.data.offer.closeTxid).toBe(closeRes.data.offer.closeTxid);
   });
 
   it('handles PUSD dispute with chat decryption for arbiter and automatic payment-window expiry', async () => {
@@ -678,13 +729,25 @@ describe('CampfireService & HTTP API end-to-end lifecycle', () => {
       buyerIdentity: buyerId,
     });
 
-    // Buyer opens a dispute and hands `sharedTradeKeyHex` to the arbiter.
+    // The seller opens the dispute first and hands the arbiter a wrong key; then the buyer opens it again with the
+    // right one. The second call changes neither who opened the dispute nor why, and the wrong key that came first
+    // cannot hide the chat: the arbiter tries the key each party handed over.
+    const sellerFirst = await ctx.jsonReq('POST', `/api/trades/${acc1.trade.tradeId}/dispute`, {
+      callerIdentity: sellerId,
+      reason: 'Buyer never paid',
+      sharedTradeKeyHex: binToHex(sha256.hash(utf8ToBin('not the trade key'))),
+    });
+    expect(sellerFirst.data.trade.status).toBe('Disputed');
     const dispRes = await ctx.jsonReq('POST', `/api/trades/${acc1.trade.tradeId}/dispute`, {
       callerIdentity: buyerId,
       reason: 'Seller has not released after 2 hours',
       sharedTradeKeyHex: binToHex(tradeKey),
     });
-    expect(dispRes.data.trade.status).toBe('Disputed');
+    expect(dispRes.status).toBe(200);
+    expect(dispRes.data.trade).toMatchObject({ status: 'Disputed', disputedBy: 'seller', disputeReason: 'Buyer never paid' });
+    // The keys are for the arbiter only.
+    expect(dispRes.data.trade.sharedTradeKeyHex).toBeUndefined();
+    expect(dispRes.data.trade.disputeKeys).toBeUndefined();
 
     // The arbiter views and verdicts are closed to anyone without the admin token.
     const anonChat = await ctx.jsonReq('GET', `/api/trades/${acc1.trade.tradeId}/chat?arbiter=true`);
@@ -798,6 +861,16 @@ describe('Identity registration', () => {
     const stored = await ctx.storage.getIdentity(reg.data.identity);
     expect(stored).not.toBeNull();
     expect(Object.keys(stored!).sort()).toEqual(['createdAt', 'defiXpub', 'identity', 'receiveXpub', 'updatedAt']);
+  });
+
+  it('refuses a receive key that derives no address', async () => {
+    const ctx = setupTestContext();
+    const challenge = await ctx.jsonReq('POST', '/api/identities/challenge', { defiXpub: buyer.defiXpub, receiveXpub: 'xpub-not-a-key' });
+    expect(challenge.status).toBe(400);
+    expect(challenge.data.error).toMatch(/receiveXpub is not a valid extended public key/);
+    const reg = await ctx.jsonReq('POST', '/api/identities', { defiXpub: buyer.defiXpub, receiveXpub: 'xpub-not-a-key' });
+    expect(reg.status).toBe(400);
+    expect(await ctx.storage.getIdentity(identityFromDefiXpub(buyer.defiXpub))).toBeNull();
   });
 
   it('signs in with a challenge, then resumes with the session token and nothing else', async () => {

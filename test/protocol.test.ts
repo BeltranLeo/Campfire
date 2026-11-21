@@ -354,6 +354,20 @@ describe('oracle quotes, trade terms, tradeId and arbiter verdicts (section 3.3 
     expect(verifyPriceQuote({ ...quote, timestamp: 1_794_900_001 }, oraclePk)).toBe(false);
   });
 
+  it('accepts a quote signature for one split of pair, price and timestamp only', () => {
+    // The signed message joins the fields with no separator, so these shifted readings have the same bytes. They
+    // are refused because the pair has no digits and the timestamp always has 10.
+    const quote = signPriceQuote(oracleSk, { pair: 'BCH/USD', price: '450.12', timestamp: 1_794_900_000 });
+    expect(verifyPriceQuote(quote, oraclePk)).toBe(true);
+    // A price digit moved into the timestamp: a date thousands of years ahead.
+    expect(verifyPriceQuote({ ...quote, price: '450.1', timestamp: 21_794_900_000 }, oraclePk)).toBe(false);
+    // A timestamp digit moved into the price: a higher price and a date in 1994.
+    expect(verifyPriceQuote({ ...quote, price: '450.121', timestamp: 794_900_000 }, oraclePk)).toBe(false);
+    // A price digit moved into the pair.
+    expect(verifyPriceQuote({ ...quote, pair: 'BCH/USD4', price: '50.12' }, oraclePk)).toBe(false);
+    expect(() => signPriceQuote(oracleSk, { pair: 'BCH/USD', price: '1', timestamp: 999_999_999 })).toThrow(/10-digit/);
+  });
+
   it('computes fiat amounts for BCH and PUSD with positive and negative margins', () => {
     // 0.0025 BCH (250,000 sats) at 400,000 ARS/BCH = 1,000.00 ARS; +250 bps (+2.5%) = 1,025.00 ARS
     expect(

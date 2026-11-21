@@ -187,16 +187,15 @@ export function createApiHandler(deps: {
             offerJson: string;
             offerTxHex: string;
             markerReceiveIndex: number;
-            broadcast?: boolean;
           }>(req);
           requireSession(body.sellerIdentity);
-          // Fields are copied one by one: whether an offer is a demo offer is decided by the service, never the client.
+          // Fields are copied one by one: whether an offer is a demo offer is decided by the service, never the client,
+          // and the service always broadcasts the offer itself.
           const offer = await service.publishOffer({
             sellerIdentity: body.sellerIdentity,
             offerJson: body.offerJson,
             offerTxHex: body.offerTxHex,
             markerReceiveIndex: body.markerReceiveIndex,
-            broadcast: body.broadcast,
           });
           return jsonResponse({ offer }, 201);
         }

@@ -15,7 +15,9 @@ import {
 import {
   binToHex,
   createVirtualMachineBch2026,
+  decodeAuthenticationInstructions,
   decodeTransactionUnsafe,
+  encodeAuthenticationInstructions,
   hexToBin,
   stringify,
 } from '@bitauth/libauth';
@@ -257,6 +259,41 @@ export function verifySignedContractSpend(
   } catch (err) {
     return { valid: false, error: err instanceof Error ? err.message : String(err) };
   }
+}
+
+// The VM check alone proves only that the signed transaction is a valid spend of *some* path of the contract. A
+// party could hand in a `cancel` for a `release`, or spend another coin at the escrow address, and the service
+// would record the wrong outcome. This compares the signed transaction with the one the service built for the
+// path: the same single input (the escrow UTXO), the same function selector and contract in the unlocking script,
+// and the same single payout output. Only the signature (the first push) may differ. Returns null when they match.
+export function settlementMismatch(signedHex: string, expectedUnsignedHex: string): string | null {
+  let signed: ReturnType<typeof decodeTransactionUnsafe>;
+  try {
+    signed = decodeTransactionUnsafe(hexToBin(signedHex));
+  } catch {
+    return 'the signed transaction cannot be decoded';
+  }
+  const expected = decodeTransactionUnsafe(hexToBin(expectedUnsignedHex));
+  if (signed.inputs.length !== 1 || signed.outputs.length !== 1) {
+    return 'it must have exactly one input and one output';
+  }
+  const [input] = signed.inputs;
+  const [expectedInput] = expected.inputs;
+  if (
+    binToHex(input.outpointTransactionHash) !== binToHex(expectedInput.outpointTransactionHash) ||
+    input.outpointIndex !== expectedInput.outpointIndex
+  ) {
+    return 'it does not spend the escrow UTXO of this trade';
+  }
+  // Everything after the signature: the function selector and the redeem script of this contract.
+  const tail = (bytecode: Uint8Array) => encodeAuthenticationInstructions(decodeAuthenticationInstructions(bytecode).slice(1));
+  if (binToHex(tail(input.unlockingBytecode)) !== binToHex(tail(expectedInput.unlockingBytecode))) {
+    return 'it does not use the contract function of this settlement path';
+  }
+  if (binToHex(signed.outputs[0].lockingBytecode) !== binToHex(expected.outputs[0].lockingBytecode)) {
+    return 'it does not pay the payout address of this settlement path';
+  }
+  return null;
 }
 
 export interface DirectEscrowSpend {
