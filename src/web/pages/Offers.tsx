@@ -311,7 +311,8 @@ export function Offers() {
                       : { initials: alias.initials, name: alias.name, detail: trades === null ? null : tradesText(trades), demo: false }
                   }
                   price={price === null ? null : formatFiat(price, doc.fiat)}
-                  priceDetail={`per ${asset.symbol} · ${priceKind(doc.price)}`}
+                  asset={asset}
+                  priceKind={priceKind(doc.price)}
                   limits={main}
                   limitsTone={tone}
                   limitsDetail={tone || !limits.fiat ? (limits.fiat ?? limits.coin) : limits.coin}

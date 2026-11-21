@@ -36,6 +36,9 @@ a.o-row:focus-visible { outline-offset: -2px; border-radius: var(--radius-md); }
 .o-value[data-tone="answer"] { font-weight: 600; }
 .o-value[data-tone="outside"] { color: var(--text-muted); }
 .o-sub { font-size: 13px; line-height: 18px; color: var(--text-muted); font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+/* The coin's logo shrinks to the text's height and sits on its line, just before the coin's name. */
+.o-coin { white-space: nowrap; }
+.o-coin > .s-coin, .o-coin > img.s-coin { display: inline-grid; width: 16px; height: 16px; margin-right: 4px; vertical-align: -3px; font-size: 7px; }
 .o-methods { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-1) var(--space-2); font-size: 14px; line-height: 20px; }
 .o-cta { justify-self: end; }
 

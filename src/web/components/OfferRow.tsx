@@ -1,5 +1,7 @@
 import type { ReactNode } from 'react';
 import { Link } from 'react-router';
+import type { AssetInfo } from '../assets';
+import { CoinIcon } from './CoinIcon';
 import { ProvenanceTag } from './Provenance';
 import { Skeleton } from './States';
 
@@ -27,10 +29,12 @@ export interface OfferRowProps {
     /** The service's demo seller: its trades are practice, so it shows no reputation. */
     demo: boolean;
   };
+  /** The coin on offer, named with its logo in the price's detail line so BCH and PUSD rows tell apart at a glance. */
+  asset: Pick<AssetInfo, 'symbol' | 'coin' | 'logo'>;
   /** "353,926.47 ARS", or null while the market price loads. */
   price: string | null;
-  /** "per BCH · market +2%". */
-  priceDetail: string;
+  /** "market +2%" or "at market": shown after "per BCH". */
+  priceKind: string;
   /** The main line of the limits column: the range in fiat, the visitor's answer, or the limit they crossed. */
   limits: string;
   limitsTone?: 'answer' | 'outside';
@@ -77,7 +81,14 @@ export function OfferRow(props: OfferRowProps) {
         </span>
         <Cell label="Price">
           <span className="o-value">{props.price ?? '—'}</span>
-          <span className="o-sub">{props.priceDetail}</span>
+          <span className="o-sub">
+            per{' '}
+            <span className="o-coin">
+              <CoinIcon asset={props.asset} />
+              {props.asset.symbol}
+            </span>{' '}
+            · {props.priceKind}
+          </span>
         </Cell>
         <Cell label={props.columns.limits}>
           <span className="o-value" data-tone={props.limitsTone}>
