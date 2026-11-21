@@ -6,6 +6,24 @@ Built by Leo and Aye Anto for BCH BLAZE 2026 (Mainnet category). Try it at <http
 
 The protocol, including the contract, the offer format and the trade states, is in [docs/protocol.md](docs/protocol.md). Work done before the build window (November 14–22, 2026) is in [preparation/](preparation/).
 
+## Why Campfire
+
+Peer-to-peer markets are how many people buy their first coins with local money. They used to run on a company's servers, and when LocalCryptos (2022) and LocalBitcoins (2023) closed, the offers and reputations closed with them. Campfire puts the offers and the escrow on Bitcoin Cash instead. The website is one way in.
+
+- **Non-custodial from the first click.** The seller's coins sit in a CashScript escrow that can only pay the buyer or return to the seller. Campfire never holds them, and the arbiter signs a verdict, never a transaction. Trading means connecting your own wallet, so a newcomer starts with self-custody.
+- **A buyer needs no BCH.** Taking an offer is free and needs no signature. The escrow pays its own network fee, and Campfire pays the fee to publish a buy offer.
+- **Real on mainnet.** A demo seller bot trades real BCH and PUSD through the real contract, and people have traded with each other through it. Every contract path that has run is linked [below](#real-transactions-on-mainnet) and on the app's transparency page.
+- **CashTokens at both levels.** Trades settle in BCH or in PUSD, a dollar token on Bitcoin Cash, with the same contract. Each offer is marked by an NFT of the Campfire offer category, whose metadata is published as a BCMR registry so wallets can show it.
+- **Offers nobody can forge.** The markers are minted by a covenant with no key ([`CampfireOfferMinter`](contracts/CampfireOfferMinter.cash)): anyone may mint one marker per offer, and only if its commitment matches the offer's on-chain hash. Four parallel minting lanes let several people publish at the same moment, and each lane chains publications without waiting for blocks.
+- **Verifiable offers.** An offer is an `OP_RETURN` with the hash of its terms, open while its NFT is unspent. The service indexes them to list them, but each one comes from a real wallet and can be checked on-chain: its page links to the transaction that opened it and, once closed, the one that closed it.
+- **No waiting for blocks.** Trades act on 0-conf deposits, checked in the buyer's browser with double-spend proofs (DSProofs).
+- **Sign-in nobody can fake.** WizardConnect is the only sign-in. The wallet signs a challenge transaction that can never be broadcast, and every action for an identity needs the session it opens, so nobody can act in someone else's name. Campfire sees public keys only, and the wallet asks before every transaction.
+- **Private by design.** Payment details are encrypted for the counterparty of each trade. The chat is end-to-end encrypted and every message is signed; the arbiter can read it only after a party opens a dispute. It stays open for seven days after the trade. Each trade uses a fresh key and address.
+- **Arbitration with a business model.** The seller pays the arbiter and, on market-price offers, the price oracle: 0.5% each today, as outputs of the funding transaction, fixed when the trade is requested.
+- **An open protocol.** The contract, the offer format and every trade state are specified in [docs/protocol.md](docs/protocol.md). An offer names its arbiter and oracle by public key, so anyone can build another client or run an arbiter or an oracle. Campfire is the default for both today.
+- **Made for people paying in fiat money.** A market nobody serves on Bitcoin Cash today. The app is in English and Spanish, prices follow the market with a margin above or below it, or are fixed, and each offer link shows a preview in messaging apps.
+- **Honest about the rest.** Identity is a hash of the wallet's public key, and reputation is a count of completed trades kept by the service, which a second wallet can inflate. Portable identity as an NFT, a fuller reputation and independent arbiters are on the public roadmap.
+
 ## What the service stores about you
 
 Please read this before connecting a wallet.
