@@ -6,6 +6,18 @@
   "rewrites": [{ "source": "/api/(.*)", "destination": "/api" }],
   "headers": [
     {
+      "source": "/(.*)",
+      "headers": [
+        { "key": "X-Content-Type-Options", "value": "nosniff" },
+        { "key": "Referrer-Policy", "value": "strict-origin-when-cross-origin" },
+        { "key": "Strict-Transport-Security", "value": "max-age=63072000" }
+      ]
+    },
+    {
+      "source": "/api/(.*)",
+      "headers": [{ "key": "Cache-Control", "value": "no-store" }]
+    },
+    {
       "source": "/.well-known/bitcoin-cash-metadata-registry.json",
       "headers": [
         { "key": "Access-Control-Allow-Origin", "value": "*" },
