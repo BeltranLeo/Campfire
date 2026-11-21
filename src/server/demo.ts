@@ -32,7 +32,11 @@ import {
   PUSD_DECIMALS,
   SIMULATED_PAYMENT_METHOD,
   buildFundEscrowTransaction,
+  buildPublishNftOfferTransaction,
   buildPublishOfferTransaction,
+  cashAddressToPkh,
+  findMinterUtxos,
+  IDENTITY_RECEIVE_INDEX,
   buildReleaseRequest,
   createEscrowContract,
   deriveSharedTradeKey,
@@ -381,26 +385,44 @@ export class DemoSeller {
           oracle: service.oraclePublicKeyHex,
         };
 
-        const tx = buildPublishOfferTransaction({
-          provider: this.options.provider,
+        // NFT markers all go to the bot's identity address (receive/0); plain markers each take a fresh index.
+        const nft = service.offerCategory !== null;
+        const index = nft ? IDENTITY_RECEIVE_INDEX : markerIndex;
+        const tx = await this.buildOfferTransaction({
           document,
+          offerJson: JSON.stringify(document),
           utxos: await this.spendableUtxos(),
-          markerAddress: this.options.wallet.receiveAddress(markerIndex),
-          changeAddress: this.mainAddress,
+          markerPkh: cashAddressToPkh(this.options.wallet.receiveAddress(index)),
         });
         const offer = await service.publishOffer({
           sellerIdentity: this.identity,
           offerJson: tx.offerJson,
           offerTxHex: tx.hex,
-          markerReceiveIndex: markerIndex,
+          markerReceiveIndex: index,
           broadcast: true,
         });
         await this.waitUntilIndexed(tx.hex);
         published.push(offer);
-        markerIndex += 1;
+        if (!nft) markerIndex += 1;
       }
       return published;
     });
+  }
+
+  // An offer transaction paid by the bot's wallet: format 2 with an NFT marker from the minter covenant once the
+  // service has an offer category, format 1 with the 1,000-sat marker before that (protocol sections 3.1 and 3.4).
+  private async buildOfferTransaction(params: {
+    document: OfferDocument;
+    offerJson: string;
+    utxos: WalletSpendableUtxo[];
+    markerPkh: Uint8Array;
+  }) {
+    const category = this.options.service.offerCategory;
+    const common = { provider: this.options.provider, document: params.document, offerJson: params.offerJson, utxos: params.utxos, changeAddress: this.mainAddress };
+    if (!category) return buildPublishOfferTransaction({ ...common, markerAddress: pkhToCashAddress(params.markerPkh) });
+    const [minterUtxo] = await findMinterUtxos(this.options.provider, category);
+    if (!minterUtxo) throw new Error('The offer minter has no minting NFT of the Campfire offer category');
+    return buildPublishNftOfferTransaction({ ...common, minterUtxo, markerAddress: pkhToCashAddress(params.markerPkh, { tokenAware: true }) });
   }
 
   // --- Limits ---
@@ -701,13 +723,11 @@ export class DemoSeller {
       if (utxos.reduce((sum, u) => sum + u.satoshis, 0n) < 3_000n) {
         throw new SponsorshipLimitError('Campfire cannot pay for new offers right now. Please try again later.');
       }
-      const tx = buildPublishOfferTransaction({
-        provider: this.options.provider,
+      const tx = await this.buildOfferTransaction({
         document,
         offerJson: params.offerJson,
         utxos,
-        markerAddress: pkhToCashAddress(derivePayoutPkhFromXpub(buyer.receiveXpub, params.markerReceiveIndex)),
-        changeAddress: this.mainAddress,
+        markerPkh: derivePayoutPkhFromXpub(buyer.receiveXpub, params.markerReceiveIndex),
       });
       const published = await service.publishOffer({
         sellerIdentity: params.buyerIdentity,

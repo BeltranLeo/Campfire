@@ -260,13 +260,15 @@ export function formatWalletTransactionRequest(
   inputs: WalletSpendableUtxo[],
   userPrompt: string,
   broadcast = false,
+  // The index of `inputs[0]` in the transaction, when inputs the wallet does not sign (a contract) come first.
+  firstWalletInput = 0,
 ): WalletTransactionRequest {
   const hex = builder.build();
   const wc = builder.generateWcTransactionObject({ broadcast, userPrompt });
   const request = JSON.parse(stringify(wc)) as Record<string, unknown>;
   request.transaction = hex;
   const inputPaths: [number, WalletPathName, number][] = inputs.map((u, idx) => [
-    idx,
+    idx + firstWalletInput,
     u.pathName,
     u.keyIndex,
   ]);

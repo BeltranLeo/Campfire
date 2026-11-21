@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router';
 import { verifyPriceQuote, computeFiatAmount } from '../../protocol/trades.js';
 import { MARKER_SATOSHIS, buildPublishOfferTransaction } from '../../protocol/offers.js';
+import { IDENTITY_RECEIVE_INDEX, buildPublishNftOfferTransaction, findMinterUtxos } from '../../protocol/marker.js';
 import { ApiError, apiGet, apiPost, type DemoInfo, type Offer, type PriceQuote, type SponsorshipStatus, type TradeSummary } from '../api';
 import { Button } from '../components/Button';
 import { Details } from '../components/Details';
@@ -126,6 +127,9 @@ export function CreateOffer() {
       changeIndex: scan && xpubs.change ? unusedIndex(scan, 'change') : null,
     };
   }, identity ?? 'none');
+  // With NFT markers every offer goes to the wallet's identity address, receive/0 (protocol section 3.4), so all of a
+  // publisher's offers are linked on-chain; the plain 1,000-sat marker keeps using a fresh address.
+  const markerIndex = !prep.data ? null : config?.offerCategory ? IDENTITY_RECEIVE_INDEX : prep.data.markerIndex;
   const busyStep = useBusyStep();
 
   // The wallet's coins, from the scan shared with the header and read again every few seconds: BCH sent while the
@@ -202,21 +206,28 @@ export function CreateOffer() {
           : null;
 
   async function publishSell() {
-    if (!built?.ok || !identity || !xpubs || !prep.data || !scan.data || prep.data.markerIndex === null) return;
-    const markerAddress = payoutAddress(xpubs.receive, prep.data.markerIndex, false);
-    const changeAddress = xpubs.change && prep.data.changeIndex !== null ? payoutAddress(xpubs.change, prep.data.changeIndex, false) : markerAddress;
+    if (!built?.ok || !identity || !xpubs || !prep.data || !scan.data || markerIndex === null) return;
+    // With an offer category the marker is an NFT, so it goes to the token-aware (z…) form of the same address.
+    const category = config?.offerCategory ?? null;
+    const markerAddress = payoutAddress(xpubs.receive, markerIndex, category !== null);
+    const plainMarker = payoutAddress(xpubs.receive, markerIndex, false);
+    const changeAddress = xpubs.change && prep.data.changeIndex !== null ? payoutAddress(xpubs.change, prep.data.changeIndex, false) : plainMarker;
     // The coins are read again now, so a coin spent since the last refresh is never used.
     busyStep.setStep(READING_WALLET);
-    const tx = await withKeptElectrum(async (provider) =>
-      buildPublishOfferTransaction({
+    const tx = await withKeptElectrum(async (provider) => {
+      const common = {
         provider,
         document: built.document,
         offerJson: built.json,
         utxos: (await freshWalletScan({ receive: xpubs.receive, change: xpubs.change })).coins,
         markerAddress,
         changeAddress,
-      }),
-    );
+      };
+      if (!category) return buildPublishOfferTransaction(common);
+      const [minterUtxo] = await findMinterUtxos(provider, category);
+      if (!minterUtxo) throw new Error(t.noMinter);
+      return buildPublishNftOfferTransaction({ ...common, minterUtxo });
+    });
     busyStep.setStep(null);
     const signedTxHex = await wallet.sign(tx.request, tx.inputPaths);
     busyStep.setStep(t.publishing);
@@ -224,7 +235,7 @@ export function CreateOffer() {
       sellerIdentity: identity,
       offerJson: built.json,
       offerTxHex: signedTxHex,
-      markerReceiveIndex: prep.data.markerIndex,
+      markerReceiveIndex: markerIndex,
     });
     setPublished(offer);
     void refreshWalletCoins();
@@ -233,18 +244,18 @@ export function CreateOffer() {
   // Campfire builds and pays for the transaction. If the demo seller took the offer at once, its request is already
   // waiting, with the 10-minute quote running: the buyer goes straight to it.
   async function publishBuy() {
-    if (!built?.ok || !identity || !prep.data || prep.data.markerIndex === null) return;
+    if (!built?.ok || !identity || !prep.data || markerIndex === null) return;
     const { offer, trade } = await apiPost<{ offer: Offer; trade: TradeSummary | null }>('/api/offers/sponsored', {
       buyerIdentity: identity,
       offerJson: built.json,
-      markerReceiveIndex: prep.data.markerIndex,
+      markerReceiveIndex: markerIndex,
     });
     if (trade) navigate(`/trade/${trade.id}`);
     else setPublished(offer);
   }
 
   async function publish() {
-    if (!built?.ok || !identity || !prep.data || prep.data.markerIndex === null || (!buying && (!xpubs || !scan.data))) {
+    if (!built?.ok || !identity || !prep.data || markerIndex === null || (!buying && (!xpubs || !scan.data))) {
       setTouched(new Set(['margin', 'fixedPrice', 'min', 'max', 'methods']));
       return;
     }
@@ -711,7 +722,7 @@ export function CreateOffer() {
                   </button>
                 </Notice>
               )}
-              {prep.data && prep.data.markerIndex === null && (
+              {prep.data && markerIndex === null && (
                 <Notice tone="attention" title={t.noFreshAddress}>
                   {t.lookupSlow}{' '}
                   <button type="button" className="cf-copy" onClick={prep.reload}>
@@ -747,7 +758,7 @@ export function CreateOffer() {
                   <Button
                     variant="primary"
                     busy={publishing}
-                    disabled={!config || !prep.data || prep.data.markerIndex === null || !status}
+                    disabled={!config || !prep.data || markerIndex === null || !status}
                     onClick={publish}
                     note={t.noSignature}
                   >
@@ -759,7 +770,7 @@ export function CreateOffer() {
                     signs
                     busy={publishing}
                     busyLabel={busyStep.label}
-                    disabled={!config || !prep.data || !scan.data || prep.data.markerIndex === null || short}
+                    disabled={!config || !prep.data || !scan.data || markerIndex === null || short}
                     onClick={publish}
                   >
                     {t.publish}
@@ -783,7 +794,7 @@ export function CreateOffer() {
                     <span className="cf-muted">{t.oracleNote}</span>
                   </div>
                 )}
-                <div className="cf-well cf-small">{t.markerNote(formatBch(MARKER_SATOSHIS), buying)}</div>
+                <div className="cf-well cf-small">{t.markerNote(formatBch(MARKER_SATOSHIS), buying, Boolean(config?.offerCategory))}</div>
               </Details>
             </>
           )}

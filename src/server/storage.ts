@@ -39,6 +39,8 @@ export interface StoredOffer {
   markerAddress: string;
   // The receive index of the marker's address, so the publisher's wallet finds it without searching.
   markerReceiveIndex?: number;
+  // Format-2 offers only: the token category of the NFT marker (protocol section 3.4). The address is then `z…`.
+  markerCategory?: string;
   status: 'Published' | 'Closed';
   closeTxid?: string;
   isDemo?: boolean;

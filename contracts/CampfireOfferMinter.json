@@ -1,0 +1,45 @@
+{
+  "contractName": "CampfireOfferMinter",
+  "constructorInputs": [],
+  "abi": [
+    { "name": "mint", "inputs": [] }
+  ],
+  "bytecode": "OP_INPUTINDEX OP_0 OP_NUMEQUALVERIFY OP_0 OP_UTXOTOKENCATEGORY OP_SIZE 21 OP_NUMEQUALVERIFY OP_DUP 20 OP_SPLIT OP_DROP OP_OVER 20 OP_SPLIT OP_NIP OP_2 OP_EQUALVERIFY OP_0 OP_OUTPUTBYTECODE OP_SIZE 6f OP_NUMEQUALVERIFY OP_DUP OP_10 OP_SPLIT OP_DROP 6a04434d504601020101 OP_EQUALVERIFY 4e OP_SPLIT OP_NIP OP_DUP OP_1 OP_SPLIT OP_DROP 20 OP_EQUALVERIFY OP_1 OP_SPLIT OP_NIP OP_0 OP_OUTPUTTOKENCATEGORY OP_0 OP_EQUALVERIFY OP_1 OP_OUTPUTTOKENCATEGORY OP_ROT OP_EQUALVERIFY OP_1 OP_OUTPUTTOKENAMOUNT OP_0 OP_NUMEQUALVERIFY OP_1 OP_OUTPUTTOKENCOMMITMENT OP_SIZE 21 OP_NUMEQUALVERIFY OP_DUP OP_1 OP_SPLIT OP_DROP OP_DUP OP_1 OP_EQUAL OP_SWAP OP_2 OP_EQUAL OP_BOOLOR OP_VERIFY OP_1 OP_SPLIT OP_NIP OP_EQUALVERIFY OP_2 OP_OUTPUTBYTECODE OP_0 OP_UTXOBYTECODE OP_EQUALVERIFY OP_2 OP_OUTPUTTOKENCATEGORY OP_EQUALVERIFY OP_2 OP_OUTPUTTOKENCOMMITMENT OP_0 OP_UTXOTOKENCOMMITMENT OP_EQUALVERIFY OP_2 OP_OUTPUTTOKENAMOUNT OP_0 OP_UTXOTOKENAMOUNT OP_NUMEQUALVERIFY OP_2 OP_OUTPUTVALUE OP_0 OP_UTXOVALUE OP_GREATERTHANOREQUAL OP_VERIFY OP_TXOUTPUTCOUNT OP_4 OP_LESSTHANOREQUAL OP_VERIFY OP_TXOUTPUTCOUNT OP_4 OP_NUMEQUAL OP_IF OP_3 OP_OUTPUTTOKENCATEGORY OP_0 OP_EQUALVERIFY OP_ENDIF OP_1",
+  "source": "pragma cashscript ^0.14.0;\n\n// Holds a minting NFT of the Campfire offer category (protocol section 3.4).\n// Anyone may spend it to publish one offer, and the transaction must then:\n//   output 0: the version-2 offer OP_RETURN, without tokens;\n//   output 1: one immutable marker NFT of the category, with the commitment\n//             <side byte> <offer content hash> (the hash from output 0);\n//   output 2: this minting NFT, back at this contract, unchanged;\n//   output 3: optional change, without tokens.\n// The contract has no key: it cannot be stopped, and it cannot mint anything\n// that is not tied to an offer published in the same transaction.\ncontract CampfireOfferMinter() {\n    function mint() {\n        // The minter is input 0, so no second minter can join the transaction.\n        require(this.activeInputIndex == 0, \"minter must be input 0\");\n        bytes minterCategory = tx.inputs[0].tokenCategory;\n        require(minterCategory.length == 33, \"minter holds no NFT\");\n        bytes category = minterCategory.split(32)[0];\n        require(minterCategory.split(32)[1] == 0x02, \"minter NFT must be minting\");\n\n        // Output 0: OP_RETURN \"CMPF\" 0x02 0x01 <arbiter 33> <oracle 33> <hash 32>, 111 bytes.\n        bytes opReturn = tx.outputs[0].lockingBytecode;\n        require(opReturn.length == 111, \"output 0 is not an offer OP_RETURN\");\n        require(opReturn.split(10)[0] == 0x6a04434d504601020101, \"output 0 is not a version-2 offer\");\n        bytes hashPush = opReturn.split(78)[1];\n        require(hashPush.split(1)[0] == 0x20, \"output 0 has no content hash\");\n        bytes offerHash = hashPush.split(1)[1];\n        require(tx.outputs[0].tokenCategory == 0x, \"output 0 carries tokens\");\n\n        // Output 1: the marker NFT, immutable (a 32-byte category means no capability byte).\n        require(tx.outputs[1].tokenCategory == category, \"output 1 is not an immutable marker\");\n        require(tx.outputs[1].tokenAmount == 0, \"marker carries fungible tokens\");\n        bytes commitment = tx.outputs[1].nftCommitment;\n        require(commitment.length == 33, \"marker commitment must be 33 bytes\");\n        bytes side = commitment.split(1)[0];\n        require(side == 0x01 || side == 0x02, \"unknown offer side\");\n        require(commitment.split(1)[1] == offerHash, \"marker is not tied to this offer\");\n\n        // Output 2: the minter comes back unchanged, with at least its value.\n        require(tx.outputs[2].lockingBytecode == tx.inputs[0].lockingBytecode, \"minter must return to the contract\");\n        require(tx.outputs[2].tokenCategory == minterCategory, \"minter category changed\");\n        require(tx.outputs[2].nftCommitment == tx.inputs[0].nftCommitment, \"minter commitment changed\");\n        require(tx.outputs[2].tokenAmount == tx.inputs[0].tokenAmount, \"minter token amount changed\");\n        require(tx.outputs[2].value >= tx.inputs[0].value, \"minter value decreased\");\n\n        // Nothing else may carry tokens, so no second NFT of the category is minted.\n        require(tx.outputs.length <= 4, \"too many outputs\");\n        if (tx.outputs.length == 4) {\n            require(tx.outputs[3].tokenCategory == 0x, \"change carries tokens\");\n        }\n    }\n}\n",
+  "fingerprint": "89c936ea3d8ba40e90729604b4c294162f480f0410201a4d1c81bdd59845882e",
+  "debug": {
+    "bytecode": "c0009d00ce8201219d7601207f757801207f77528800cd82016f9d765a7f750a6a04434d50460102010188014e7f7776517f75012088517f7700d1008851d17b8851d3009d51d28201219d76517f757651877c52879b69517f778852cd00c78852d18852d200cf8852d300d09d52cc00c6a269c454a169c4549c6353d100886851",
+    "sourceMap": "15:16:15:37;:41::42;:8::70:1;16:41:16:42:0;:31::57:1;17:16:17:37;:41::43:0;:8::68:1;18:25:18:39:0;:46::48;:25::49:1;:::52;19:16:19:30:0;:37::39;:16::40:1;:::43;:47::51:0;:8::83:1;22:36:22:37:0;:25::54:1;23:16:23:31;:35::38:0;:8::78:1;24:16:24:24:0;:31::33;:16::34:1;:::37;:41::63:0;:8::102:1;25:40:25:42:0;:25::43:1;:::46;26:16:26:24:0;:31::32;:16::33:1;:::36;:40::44:0;:8::78:1;27:41:27:42:0;:26::43:1;:::46;28:27:28:28:0;:16::43:1;:47::49:0;:8::78:1;31:27:31:28:0;:16::43:1;:47::55:0;:8::96:1;32:27:32:28:0;:16::41:1;:45::46:0;:8::82:1;33:38:33:39:0;:27::54:1;34:16:34:33;:37::39:0;:8::79:1;35:21:35:31:0;:38::39;:21::40:1;:::43;36:16:36:20:0;:24::28;:16:::1;:32::36:0;:40::44;:32:::1;:16;:8::68;37:33:37:34:0;:16::35:1;:::38;:8::89;40:27:40:28:0;:16::45:1;:59::60:0;:49::77:1;:8::117;41:27:41:28:0;:16::43:1;:8::90;42:27:42:28:0;:16::43:1;:57::58:0;:47::73:1;:8::104;43:27:43:28:0;:16::41:1;:55::56:0;:45::69:1;:8::102;44:27:44:28:0;:16::35:1;:49::50:0;:39::57:1;:16;:8::85;47:16:47:33:0;:37::38;:16:::1;:8::60;48:12:48:29:0;:33::34;:12:::1;:36:50:9:0;49:31:49:32;:20::47:1;:51::53:0;:12::80:1;48:36:50:9;13:20:51:5",
+    "logs": [],
+    "requires": [
+      { "ip": 2, "line": 15, "message": "minter must be input 0" },
+      { "ip": 7, "line": 17, "message": "minter holds no NFT" },
+      { "ip": 17, "line": 19, "message": "minter NFT must be minting" },
+      { "ip": 22, "line": 23, "message": "output 0 is not an offer OP_RETURN" },
+      { "ip": 28, "line": 24, "message": "output 0 is not a version-2 offer" },
+      { "ip": 37, "line": 26, "message": "output 0 has no content hash" },
+      { "ip": 44, "line": 28, "message": "output 0 carries tokens" },
+      { "ip": 48, "line": 31, "message": "output 1 is not an immutable marker" },
+      { "ip": 52, "line": 32, "message": "marker carries fungible tokens" },
+      { "ip": 57, "line": 34, "message": "marker commitment must be 33 bytes" },
+      { "ip": 69, "line": 36, "message": "unknown offer side" },
+      { "ip": 73, "line": 37, "message": "marker is not tied to this offer" },
+      { "ip": 78, "line": 40, "message": "minter must return to the contract" },
+      { "ip": 81, "line": 41, "message": "minter category changed" },
+      { "ip": 86, "line": 42, "message": "minter commitment changed" },
+      { "ip": 91, "line": 43, "message": "minter token amount changed" },
+      { "ip": 97, "line": 44, "message": "minter value decreased" },
+      { "ip": 101, "line": 47, "message": "too many outputs" },
+      { "ip": 109, "line": 49, "message": "change carries tokens" }
+    ]
+  },
+  "compiler": {
+    "name": "cashc",
+    "version": "0.14.0",
+    "options": {
+      "enforceFunctionParameterTypes": true,
+      "enforceLocktimeGuard": true
+    }
+  },
+  "updatedAt": "2026-11-21T05:19:55.813Z"
+}

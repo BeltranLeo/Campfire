@@ -86,7 +86,7 @@ stateDiagram-v2
 | Transition | Triggered by | Operation | Deadline |
 | --- | --- | --- | --- |
 | → Published | Seller | On-chain transaction with the offer `OP_RETURN` and a marker output (section 3) | — |
-| Published → Closed | Seller | On-chain transaction spending the marker output | Any time |
+| Published → Closed | Seller | On-chain transaction spending the marker output (in format 2, burning the marker NFT) | Any time |
 | Published → Expired | Nobody | None; clients compare `expiresAt` with the current time | `expiresAt` |
 
 Publishing an offer locks no funds. An offer with a `min`–`max` range can be taken many times, each time for an amount the taker chooses within the range, until the publisher closes it.
@@ -187,12 +187,14 @@ An offer is published by a transaction from the seller's wallet with these outpu
 | 1 | Marker: 1,000 sats to a fresh address of the seller. The offer is open while this output is unspent. |
 | 2 | Change (optional) |
 
+This is format 1. Format 2 (section 3.4) carries the same offer JSON and the same `OP_RETURN` fields, with format version `0x02`, and replaces the plain marker with an NFT. The service accepts both; offers published in format 1 keep working until they close or expire.
+
 `OP_RETURN` data pushes, in order:
 
 | # | Field | Size (bytes) | Value |
 | --- | --- | --- | --- |
 | 1 | Protocol identifier | 4 | ASCII `CMPF` |
-| 2 | Format version | 1 | `0x01` |
+| 2 | Format version | 1 | `0x01`, or `0x02` for an NFT marker (section 3.4) |
 | 3 | Message type | 1 | `0x01` = offer |
 | 4 | Arbiter public key | 33 | Compressed secp256k1 key |
 | 5 | Oracle public key | 33 | Compressed secp256k1 key; 33 zero bytes for a fixed-price offer |
@@ -271,6 +273,76 @@ When the seller accepts, both clients hold the same trade-terms document:
 `tradeId` = SHA-256 of these bytes. It is a constructor parameter of the escrow contract, so the escrow address commits to every term: the price, the oracle that signed it, the fiat amount, the session keys and the service fees (section 5.1). Anyone holding the document can recompute the address and check it against the chain.
 
 **Price quote.** For a floating offer, the oracle signs `SHA-256("CMPF-QUOTE" ‖ pair ‖ price ‖ timestamp)` with its key. Clients verify the signature against the oracle key in the offer before accepting. The contract does not verify the quote; it commits to it through `tradeId`, and the arbiter checks it in a dispute. For a fixed offer, `quote` is omitted and the price comes from the offer.
+
+### 3.4 NFT markers (format 2)
+
+**Why.** A 1,000-sat marker is an ordinary coin: a wallet that knows nothing about Campfire spends it to pay for something else, and the offer closes without its publisher meaning to. A CashTokens NFT is set apart by every token-aware wallet, which never spends it as plain BCH; it shows up in the wallet as a ticket for the offer; and all open offers can be found by looking for the live NFTs of one category.
+
+**The marker.** An immutable NFT (no capability) of the Campfire offer category, holding 1,000 sats, at the publisher's identity address: the token-aware (`z…`) form of `receive/0`. Its 33-byte commitment is:
+
+| Bytes | Field | Value |
+| --- | --- | --- |
+| 0 | Side | `0x01` = sell offer, `0x02` = buy offer |
+| 1–32 | Offer content hash | The hash in the `OP_RETURN` (section 3.1) |
+
+The offer is open while that exact output (`offerTxid`, output 1) is unspent, not while the NFT exists somewhere. Any spend closes the offer: burning the NFT, moving it to another address or selling it. Someone who receives a marker NFT from its publisher therefore gets no offer with it. Campfire closes an offer by spending the NFT into a plain BCH output at the same address, which burns it (`buildCloseNftOfferTransaction`, `src/protocol/marker.ts`).
+
+**Identity address.** Every format-2 marker of a wallet goes to the same address, `receive/0`, and the service refuses any other (`markerReceiveIndex` must be 0). All of a publisher's offers are therefore linked on-chain, which gives them a public history of offers that later versions can build reputation on. Trades are not linked to it: escrow keys and payout addresses stay fresh for each trade, and the escrow contract does not name the offer. Two things can still link, and neither is a weakness the protocol can remove:
+
+- `receive/0` is the address that many wallets show for receiving payments, so whoever paid the publisher there can tell which offers are theirs.
+- The seller's escrow deposit is paid with coins already in their wallet, and coins from the identity address can fund it, because that is where many wallets keep their balance. How well a deposit is kept apart from the identity depends on the seller's own coin habits (address reuse, coin control), which no web page can guarantee. What Campfire does guarantee is that the coins a trade pays out always go to a fresh address of the recipient.
+
+A next version may make the identity an NFT of its own, minted once by the covenant and spent and returned in every publication, so that a publisher could move it to another wallet without losing their history.
+
+**Who mints.** Only a minting NFT can create NFTs of a category, so Campfire keeps its minting NFTs in a covenant, `CampfireOfferMinter` (`contracts/CampfireOfferMinter.cash`), which has no key and no owner. Anyone may spend a minter UTXO to publish one offer, and the contract then requires:
+
+| Output | Rule |
+| --- | --- |
+| 0 | A format-2 offer `OP_RETURN` (111 bytes, prefix `6a04434d504601020101`), without tokens |
+| 1 | One immutable NFT of the category whose commitment is a side byte followed by the hash from output 0 |
+| 2 | The minting NFT, back at the covenant with the same commitment and at least the same value |
+| 3 | Optional change, without tokens; no further outputs |
+
+The minter must be input 0, so a transaction cannot carry two minters, and no output other than 1 may hold tokens, so nothing else of the category is minted. The covenant cannot read the offer JSON: it does not check that the side byte matches the document's `side`. The service does, and refuses to list an offer whose marker is of another category or whose commitment does not match its side and hash.
+
+| Input | Content |
+| --- | --- |
+| 0 | A minter UTXO (unlocked by the covenant's `mint()`, no signature) |
+| 1… | The publisher's plain BCH coins, which pay the marker and the fee |
+
+**Minter lanes.** Each publication spends a minter UTXO and creates a new one, so a minter is a lane that carries one publication at a time. The next publication can follow at once, without waiting for a block, because it spends the new UTXO while it is still unconfirmed. What collides is two publications built at the same moment from the same UTXO: both spend the same outpoint, the network keeps the first, and the second is rejected and has to be built and signed again. The genesis transaction (section 3.5) therefore creates four lanes, each a minter UTXO numbered by a one-byte commitment (`00` to `03`), and clients pick one at random. Two publishers who build at the same moment then share a lane one time in four, and a rejected publication is published again from a lane picked anew.
+
+The number of lanes is fixed for this category. A minting NFT could mint more minting NFTs, but the covenant forbids it (output 2 returns the same minter and no other output may hold tokens), so nobody can add lanes, and nobody can remove one either: the covenant always returns it. More lanes would take a new version of the covenant with a function that splits a minter in two.
+
+**WizardConnect.** The wallet signs only its own inputs (`inputPaths` starts at index 1); the minter's unlocking bytecode is complete before the wallet sees the transaction. This is the same request format as the escrow deposit, which already spends token outputs.
+
+**Buy offers.** The service builds a format-2 offer with its own coins as inputs 1… and the marker at the buyer's identity address, so the buyer closes it without the service, as in format 1.
+
+### 3.5 Metadata registry (BCMR)
+
+The offer category publishes a Bitcoin Cash Metadata Registry, so wallets show a marker as a "Sell offer" or "Buy offer" from "Campfire offer" with the Campfire logo, instead of an unknown token. Every text is in English. The registry is built by `buildOfferRegistry` (`src/protocol/bcmr.ts`) and served at `https://campfire.cash/.well-known/bitcoin-cash-metadata-registry.json`.
+
+| Part | Content |
+| --- | --- |
+| Identity | Name "Campfire offer", symbol `CAMPFIRE`, icon `https://campfire.cash/bcmr/campfire-offer.png`, links to the site and the source code |
+| NFT field | `offerHash`, hex |
+| `parse.bytecode` | `00cf517f7c6b6b` (`OP_0 OP_UTXOTOKENCOMMITMENT OP_1 OP_SPLIT OP_SWAP OP_TOALTSTACK OP_TOALTSTACK`): the side byte becomes the NFT type and the rest the `offerHash` field |
+| NFT types | `01` "Sell offer", `02` "Buy offer" |
+
+**On-chain publication.** The category's ID is the TXID of its authbase transaction, and the genesis transaction spends that transaction's output 0. The genesis transaction is therefore the next link of the category's authchain, and it carries the publication output `OP_RETURN <'BCMR'> <SHA-256 of the registry> <'campfire.cash'>`. A bare domain means the well-known path, and the hash is in `OP_SHA256` byte order. Its output 0, a plain 1,000-sat output to the key that created the category, is the identity output: as long as it stays unspent, the genesis transaction is the authhead and this publication is the current one. Spending it without a new publication would leave wallets with no registry on-chain.
+
+| Genesis output | Content |
+| --- | --- |
+| 0 | Identity output (1,000 sats, no token) |
+| 1…N | Minting NFTs at the minter covenant (N = 4 by default) |
+| N+1 | BCMR publication |
+| N+2 | Change (optional) |
+
+**On mainnet.** Category `dfe5f513117cd41512a2230be4e8dd4a6659b5e3ed41a8e6813be7a32ef60096`, created by genesis transaction [`696cd711…ecede9`](https://blockchair.com/bitcoin-cash/transaction/696cd7114e0f6c0a5bf529d27eeb8e40512f923626e6204bcadf1ac1a7ecede9). Its registry is `public/.well-known/bitcoin-cash-metadata-registry.json`, SHA-256 `8fc5f9ae0bba2687967b0b93e2eba0ffe8ec2a44e5b47f6f42932b10f90f7269`.
+
+`scripts/offer-genesis.ts` builds this transaction, writes the registry file before broadcasting, and prints the category for `CAMPFIRE_OFFER_CATEGORY`. The registry's bytes must not change after the genesis: wallets compare their hash with the publication. Changing the metadata means a new publication that spends the identity output.
+
+**What is not in the registry.** The details of each offer (price, amounts, payment methods) stay in the offer JSON. A registry that changed with every offer would no longer match the hash committed on-chain, and few wallets show parsed NFT fields yet.
 
 ## 4. Escrow contract
 

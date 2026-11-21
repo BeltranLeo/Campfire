@@ -10,6 +10,6 @@
     "noEmit": true,
     "types": ["node"]
   },
-  "include": ["src", "api", "test", "vite.config.ts"],
+  "include": ["src", "api", "test", "scripts", "vite.config.ts"],
   "exclude": ["src/web"]
 }

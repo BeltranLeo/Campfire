@@ -3,7 +3,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "compile": "cashc CampfireEscrow.cash -o CampfireEscrow.json",
+    "compile": "cashc CampfireEscrow.cash -o CampfireEscrow.json && cashc CampfireOfferMinter.cash -o CampfireOfferMinter.json",
     "test": "npm run compile && tsc --noEmit && vitest run"
   },
   "dependencies": {

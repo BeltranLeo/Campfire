@@ -37,6 +37,14 @@ import {
   buildCloseOfferTransaction,
   buildFundEscrowTransaction,
   buildPublishOfferTransaction,
+  buildPublishNftOfferTransaction,
+  buildCloseNftOfferTransaction,
+  findMinterUtxos,
+  isMarkerUtxo,
+  markerCommitment,
+  offerMinter,
+  parseMarkerCommitment,
+  FORMAT_VERSION_NFT,
   buildRefundSpend,
   buildReleaseRequest,
   cashAddressToPkh,
@@ -722,6 +730,64 @@ describe('escrow contract instantiation, funding check and spend builders (secti
       destinationAddress: changeAddr,
     });
     expect(closeTx.inputPaths).toEqual([[0, 'receive', 1]]);
+    await closeTx.builder.send();
+    expect(await provider.getUtxos(markerAddr)).toHaveLength(0);
+  });
+
+  it('publishes a version-2 offer with an NFT marker from the minter covenant and closes it by burning the NFT', async () => {
+    const provider = new MockNetworkProvider();
+    provider.network = Network.MAINNET;
+    const category = binToHex(sha256.hash(utf8ToBin('campfire-offer-category')));
+    const minting = { category, amount: 0n, nft: { capability: 'minting' as const, commitment: '' } };
+    const minterUtxo = provider.addUtxo(offerMinter(provider).tokenAddress, randomUtxo({ satoshis: 1000n, token: minting }));
+    // A token that is not a minter and a minter of another category sit there too and are never picked.
+    provider.addUtxo(offerMinter(provider).tokenAddress, randomUtxo({ satoshis: 1000n, token: { ...minting, category: '11'.repeat(32) } }));
+    expect(await findMinterUtxos(provider, category)).toEqual([minterUtxo]);
+
+    const addressMap = deriveWalletAddressMap({ receiveXpub: sellerWallet.receiveXpub, count: 5 });
+    const addr0 = pkhToCashAddress(derivePayoutPkhFromXpub(sellerWallet.receiveXpub, 0));
+    const markerAddr = pkhToCashAddress(derivePayoutPkhFromXpub(sellerWallet.receiveXpub, 1), { tokenAware: true });
+    const changeAddr = pkhToCashAddress(derivePayoutPkhFromXpub(sellerWallet.receiveXpub, 2));
+    const rawUtxo = provider.addUtxo(addr0, randomUtxo({ satoshis: 50_000n }));
+    const tagged = tagWalletUtxos([rawUtxo], addressMap).map((u) => ({
+      ...u,
+      signer: new SignatureTemplate(sellerWallet.receivePrivKey(u.keyIndex)),
+    }));
+
+    const doc: OfferDocument = {
+      v: 1, side: 'sell', asset: BCH_ASSET, assetDecimals: BCH_DECIMALS, fiat: 'ARS',
+      price: { type: 'floating', pair: 'BCH/ARS', marginBps: 100 },
+      min: '100000', max: '1000000', paymentMethods: ['bank-transfer'], paymentWindowSec: 3600,
+      expiresAt: 1_795_000_000, arbiter: arbiterPk, oracle: oraclePk,
+    };
+    const pubTx = buildPublishNftOfferTransaction({
+      provider, document: doc, utxos: tagged, minterUtxo, markerAddress: markerAddr, changeAddress: changeAddr,
+    });
+    // The wallet signs only its own coin, which comes after the minter.
+    expect(pubTx.inputPaths).toEqual([[1, 'receive', 0]]);
+
+    const decodedTx = decodeTransactionUnsafe(hexToBin(pubTx.hex));
+    expect(decodedTx.outputs).toHaveLength(4);
+    const verified = verifyOfferAgainstOpReturn(pubTx.offerJson, decodedTx.outputs[0].lockingBytecode);
+    expect(verified.onChain.version).toBe(FORMAT_VERSION_NFT);
+    expect(binToHex(decodedTx.outputs[1].token!.nft!.commitment)).toBe(markerCommitment('sell', verified.contentHash));
+    expect(parseMarkerCommitment(markerCommitment('buy', verified.contentHash))).toEqual({ side: 'buy', contentHash: verified.contentHash });
+
+    await pubTx.builder.send();
+    const [held] = await provider.getUtxos(markerAddr);
+    expect(isMarkerUtxo(held, category)).toBe(true);
+    const [minterBack] = await provider.getUtxos(offerMinter(provider).tokenAddress).then((u) => u.filter((x) => x.token?.category === category));
+    expect(minterBack.token).toEqual(minting);
+
+    const taggedMarker = tagWalletUtxos([held], addressMap).map((u) => ({
+      ...u,
+      signer: new SignatureTemplate(sellerWallet.receivePrivKey(u.keyIndex)),
+    }));
+    const closeTx = buildCloseNftOfferTransaction({ provider, markerUtxo: taggedMarker[0], destinationAddress: changeAddr, category });
+    expect(closeTx.inputPaths).toEqual([[0, 'receive', 1]]);
+    const closed = decodeTransactionUnsafe(hexToBin(closeTx.hex));
+    expect(closed.outputs).toHaveLength(1);
+    expect(closed.outputs[0].token).toBeUndefined();
     await closeTx.builder.send();
     expect(await provider.getUtxos(markerAddr)).toHaveLength(0);
   });

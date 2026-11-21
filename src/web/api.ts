@@ -140,6 +140,8 @@ export interface ApiConfig {
   arbiterPk: string;
   oraclePk: string;
   pusdCategory: string;
+  /** The token category of NFT offer markers (protocol section 3.4); null while offers use the 1,000-sat marker. */
+  offerCategory?: string | null;
   bchDecimals: number;
   pusdDecimals: number;
   demoSellerIdentity: string | null;
@@ -179,6 +181,8 @@ export interface Offer {
   markerVout?: number;
   /** The receive index of the marker's address in the publisher's wallet, when the service recorded it. */
   markerReceiveIndex?: number;
+  /** Set when the marker is an NFT of this category (format 2): closing burns it. */
+  markerCategory?: string;
   closeTxid?: string;
   /** Published and paid for by Campfire (buy offers). */
   sponsored?: boolean;

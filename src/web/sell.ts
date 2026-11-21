@@ -2,10 +2,11 @@
 // A sell offer is signed and paid for by the seller's wallet; a buy offer is published by Campfire for the buyer.
 // No DOM here, so test/sell.test.ts can check what ends up in the offer.
 
-import { binToHex } from '@bitauth/libauth';
+import { binToHex, hexToBin } from '@bitauth/libauth';
 import type { NetworkProvider } from 'cashscript';
 import { SIMULATED_PAYMENT_METHOD, buildCloseOfferTransaction, isPositiveDecimalString, validateOfferDocument, type OfferDocument } from '../protocol/offers.js';
-import { cashAddressToPkh, derivePayoutPkhFromXpub, pkhToLockingBytecode, type WalletSpendableUtxo, type WalletTransactionRequest } from '../protocol/keys.js';
+import { buildCloseNftOfferTransaction } from '../protocol/marker.js';
+import { cashAddressToPkh, derivePayoutPkhFromXpub, pkhToCashAddress, pkhToLockingBytecode, type WalletSpendableUtxo, type WalletTransactionRequest } from '../protocol/keys.js';
 import type { Offer as ListedOffer, OfferDocument as ListedOfferDocument } from './api';
 import { applyMargin, formatBch, formatFiat, fromBaseUnits } from './format';
 import { canonicalMethod, findMethod, isSuggestedAnywhere, methodsFor } from './paymentMethods';
@@ -270,7 +271,7 @@ const MARKER_SEARCH_LIMIT = 200;
 
 /**
  * The transaction that closes an offer: it spends the 1,000-sat marker back to the same address (minus the network
- * fee), and the service sees the marker gone. The marker sits on a `receive` address of this wallet, found by
+ * fee), and the service sees the marker gone. A format-2 marker also carries an NFT, which the close burns. The marker sits on a `receive` address of this wallet, found by
  * deriving the path, because the service does not keep the index. Anything that does not fit stops here with a
  * sentence, before the wallet is asked to sign.
  *
@@ -279,7 +280,7 @@ const MARKER_SEARCH_LIMIT = 200;
  * an ordinary coin, which the wallet app outside Campfire may do.
  */
 export async function buildCloseOffer(params: {
-  offer: Pick<ListedOffer, 'offerTxid' | 'markerAddress' | 'markerVout' | 'markerReceiveIndex'>;
+  offer: Pick<ListedOffer, 'offerTxid' | 'markerAddress' | 'markerVout' | 'markerReceiveIndex' | 'markerCategory'>;
   provider: NetworkProvider;
   receiveXpub: string;
 }): Promise<WalletTransactionRequest | null> {
@@ -303,5 +304,10 @@ export async function buildCloseOffer(params: {
     keyIndex: index,
     address: offer.markerAddress,
   } as WalletSpendableUtxo;
+  // A format-2 marker is an NFT: the close burns it and keeps its BCH at the plain (q…) form of the same address.
+  if (offer.markerCategory) {
+    const destinationAddress = pkhToCashAddress(hexToBin(wanted));
+    return buildCloseNftOfferTransaction({ provider: params.provider, markerUtxo, destinationAddress, category: offer.markerCategory });
+  }
   return buildCloseOfferTransaction({ provider: params.provider, markerUtxo, destinationAddress: offer.markerAddress });
 }
