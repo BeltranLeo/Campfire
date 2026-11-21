@@ -101,6 +101,7 @@ async function setupDemo(options?: {
   // After each broadcast, this many lookups of the bot's main address return the coins as they were
   // before it, like an Electrum server that has not processed the transaction yet.
   indexerLagLookups?: number;
+  reconcileWaitMs?: number;
 }) {
   let currentNow = 1_794_900_000;
   const nowSeconds = () => currentNow;
@@ -165,7 +166,7 @@ async function setupDemo(options?: {
     indexPollMs: 0,
   });
   await demo.init();
-  const api = createApiHandler({ service, oracle, demo, adminToken: ADMIN_TOKEN });
+  const api = createApiHandler({ service, oracle, demo, adminToken: ADMIN_TOKEN, reconcileWaitMs: options?.reconcileWaitMs });
 
   provider.addUtxo(botWallet.receiveAddress(0), randomUtxo({ satoshis: options?.botSats ?? 500_000n }));
   if (options?.botPusd !== 0n) {
@@ -478,6 +479,42 @@ describe('Demo seller bot (protocol section 8)', () => {
     // Declined trades are Dropped, so they hold no active slot.
     const trades = await ctx.service.listTrades({ identity: ctx.buyerId });
     expect(trades.map((t) => t.status)).toEqual(['Dropped', 'Dropped']);
+  });
+
+  it('does not count the sats under an offer NFT or another token as funds it can deposit', async () => {
+    // About 7,000 plain sats are left after the two offers. An offer NFT at the main address carries many more sats,
+    // but the funding transaction never spends a token coin, so the take must be declined, not accepted and stuck.
+    const ctx = await setupDemo({ botSats: 10_000n, botPusd: 0n });
+    ctx.provider.addUtxo(
+      botWallet.receiveAddress(0, true),
+      randomUtxo({ satoshis: 50_000n, token: { category: '11'.repeat(32), amount: 0n, nft: { capability: 'none', commitment: '' } } }),
+    );
+    const taken = await ctx.take(ctx.bchOffer.offerTxid, '20000');
+    expect(taken.status).toBe(429);
+    expect(taken.data.error).toMatch(/run out of funds/);
+    const trades = await ctx.service.listTrades({ identity: ctx.buyerId });
+    expect(trades.map((t) => t.status)).toEqual(['Dropped']);
+  });
+
+  it('answers a trade read while the bot is stuck on its deposit, and runs one retry at a time', async () => {
+    const ctx = await setupDemo({ reconcileWaitMs: 20 });
+    ctx.failBroadcasts(1);
+    const taken = await ctx.take(ctx.bchOffer.offerTxid, '20000');
+    expect(taken.status).toBe(400);
+    const [trade] = await ctx.service.listTrades({ identity: ctx.buyerId });
+    expect(trade.status).toBe('Accepted');
+
+    // From now on the network never answers a broadcast.
+    let sends = 0;
+    ctx.provider.sendRawTransaction = () => {
+      sends += 1;
+      return new Promise<string>(() => {});
+    };
+    const reads = await Promise.all([1, 2, 3].map(() => ctx.jsonReq<{ trade: StoredTrade }>('GET', `/api/trades/${trade.id}`)));
+    expect(reads.map((r) => r.status)).toEqual([200, 200, 200]);
+    expect(reads.map((r) => r.data.trade.status)).toEqual(['Accepted', 'Accepted', 'Accepted']);
+    // The three polls joined one retry instead of queuing three behind the lock.
+    expect(sends).toBe(1);
   });
 
   it('returns the funds to the bot by arbiter verdict when the 5-minute payment window ends', async () => {

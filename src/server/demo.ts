@@ -192,14 +192,16 @@ function compressedPublicKeyHex(privateKey: Uint8Array): string {
 
 // The rule the bot funds by: the escrow's sats, the fees and 2,000 sats of margin for the funding fee and the
 // change outputs, plus the tokens of a token trade. Shared by checkBalance and the administration panel.
+// Only the sats the funding transaction can spend count: those of plain coins and, on a token trade, those of the
+// coins that carry the trade's tokens. The sats under an offer NFT (which sits at the bot's main address) or under
+// another token are never selected, so counting them would accept a trade the bot then cannot fund.
 export function hasFundsFor(utxos: readonly Utxo[], trade: Pick<StoredTrade, 'asset' | 'amount' | 'fees'>): boolean {
   const expected = expectedEscrowFunding(trade);
-  const sats = utxos.reduce((sum, u) => sum + u.satoshis, 0n);
-  const tokens = expected.token
-    ? utxos
-        .filter((u) => u.token?.category.toLowerCase() === expected.token!.category && !u.token.nft)
-        .reduce((sum, u) => sum + u.token!.amount, 0n)
-    : 0n;
+  const tradeTokens = expected.token
+    ? utxos.filter((u) => u.token?.category.toLowerCase() === expected.token!.category && !u.token.nft)
+    : [];
+  const sats = [...utxos.filter((u) => !u.token), ...tradeTokens].reduce((sum, u) => sum + u.satoshis, 0n);
+  const tokens = tradeTokens.reduce((sum, u) => sum + u.token!.amount, 0n);
   return sats >= expected.satoshis + totalFeeSats(trade.fees) + 2000n && (!expected.token || tokens >= expected.token.amount);
 }
 
@@ -213,6 +215,8 @@ export class DemoSeller {
   // Serialises every action that selects the bot's UTXOs or allocates key indices, so two
   // simultaneous takes on the same instance never spend the same coin twice.
   private queue: Promise<unknown> = Promise.resolve();
+  // The reconcile run of each trade in progress on this instance (see reconcile).
+  private readonly reconciling = new Map<string, Promise<void>>();
 
   constructor(
     private readonly options: {
@@ -805,7 +809,18 @@ export class DemoSeller {
   }
 
   // Finishes any step left behind by a failed request (funding or release). Called on trade reads.
-  async reconcile(tradeRecordId: string): Promise<void> {
+  // A read that finds this trade already being reconciled joins that run instead of queuing another one: a page polls
+  // every few seconds, and when a step keeps failing slowly, one queued run per poll would pile up behind the lock
+  // faster than they finish, and every read would wait on all of them.
+  reconcile(tradeRecordId: string): Promise<void> {
+    const running = this.reconciling.get(tradeRecordId);
+    if (running) return running;
+    const run = this.reconcileOnce(tradeRecordId).finally(() => this.reconciling.delete(tradeRecordId));
+    this.reconciling.set(tradeRecordId, run);
+    return run;
+  }
+
+  private async reconcileOnce(tradeRecordId: string): Promise<void> {
     const trade = await this.options.service.getTrade(tradeRecordId);
     if (!trade || !this.options.service.isDemoTrade(trade)) return;
     try {
@@ -819,8 +834,10 @@ export class DemoSeller {
       } else if (trade.status === 'Paid') {
         await this.release(tradeRecordId);
       }
-    } catch {
-      // Best effort: the read that triggered this still returns the current state.
+    } catch (err) {
+      // Best effort: the read that triggered this still returns the current state. Logged, because a step that keeps
+      // failing here (a deposit the bot cannot pay, a refused broadcast) is otherwise invisible.
+      console.warn(`Demo seller could not finish trade ${tradeRecordId}: ${err instanceof Error ? err.message : String(err)}`);
     }
   }
 

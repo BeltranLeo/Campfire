@@ -44,6 +44,9 @@ async function readJson<T = Record<string, unknown>>(req: Request): Promise<T> {
   return JSON.parse(text) as T;
 }
 
+// A trade read waits this long for the demo seller before it answers with the trade as it stands.
+export const DEMO_RECONCILE_WAIT_MS = 4000;
+
 export function createApiHandler(deps: {
   service: CampfireService;
   oracle: OracleService;
@@ -51,8 +54,11 @@ export function createApiHandler(deps: {
   demo?: DemoSeller;
   // Bearer token for arbiter and demo-administration routes; those routes are disabled without it.
   adminToken?: string;
+  // How long a trade read waits for the demo seller to finish a step left behind (see GET /api/trades/:id).
+  reconcileWaitMs?: number;
 }) {
   const { service, oracle, demo, adminToken } = deps;
+  const reconcileWaitMs = deps.reconcileWaitMs ?? DEMO_RECONCILE_WAIT_MS;
 
   const isAdmin = (req: Request): boolean => {
     if (!adminToken) return false;
@@ -372,7 +378,14 @@ export function createApiHandler(deps: {
       if (method === 'GET' && tradeMatch) {
         refuseWrongToken(req);
         if (demo) {
-          await demo.reconcile(tradeMatch[1]);
+          // The read waits a little for the bot, never longer: a deposit that keeps failing (or a slow network) must not
+          // hold the page on "Loading" forever. Whatever the bot did not finish yet, a later read picks up.
+          let timer: ReturnType<typeof setTimeout> | undefined;
+          await Promise.race([
+            demo.reconcile(tradeMatch[1]),
+            new Promise<void>((resolve) => (timer = setTimeout(resolve, reconcileWaitMs))),
+          ]);
+          clearTimeout(timer);
         }
         const trade = await service.getTrade(tradeMatch[1]);
         if (!trade) {
