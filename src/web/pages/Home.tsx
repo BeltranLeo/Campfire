@@ -10,6 +10,8 @@ import { HashLink, ProvenanceTag } from '../components/Provenance';
 import { EmptyState, Notice, Skeleton } from '../components/States';
 import { StatusPill } from '../components/StatusPill';
 import { Countdown } from '../components/Timeline';
+import { HIDDEN_AMOUNT, useHideBalance } from '../hideBalance';
+import { BalanceEye } from '../components/BalanceEye';
 import { freshReceiveAddress, spendableBch, tokenBalance } from '../coins';
 import { useConfig } from '../config';
 import { formatAmount, formatBchBalance, formatDate, formatFiat, formatFiatAmount, formatRange, fromBaseUnits, paymentMethodLabel } from '../format';
@@ -91,14 +93,26 @@ function WalletCard({ receiveXpub, trades }: { receiveXpub: string | null; trade
   const completed = rep ? rep.completedAsBuyer + rep.completedAsSeller : null;
   const failed = !scan && coins.error !== null;
   const [receiving, setReceiving] = useState(false);
+  const hidden = useHideBalance();
 
   return (
     <section className="cf-card cf-glass" data-pad>
       <div className="s-idcard">
         <div>
           <div className="s-balance">
-            <span className="cf-label">Your wallet</span>
-            {sats !== null ? (
+            <span className="s-balancehead">
+              <span className="cf-label">Your wallet</span>
+              <BalanceEye />
+            </span>
+            {sats !== null && hidden ? (
+              <>
+                {/* Every amount goes, PUSD too: showing it only when there is some would give that away. */}
+                <strong>{HIDDEN_AMOUNT} BCH</strong>
+                <span className="cf-muted">
+                  ≈ {HIDDEN_AMOUNT} USD{config && ` · ${HIDDEN_AMOUNT} PUSD`}
+                </span>
+              </>
+            ) : sats !== null ? (
               <>
                 <strong>{formatBchBalance(sats)} BCH</strong>
                 <span className="cf-muted">

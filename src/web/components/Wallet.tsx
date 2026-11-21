@@ -6,6 +6,7 @@ import { aliasFor } from '../alias';
 import { spendableBch, tokenBalance } from '../coins';
 import { useConfig } from '../config';
 import { formatBchBalance, fromBaseUnits } from '../format';
+import { HIDDEN_AMOUNT, useHideBalance } from '../hideBalance';
 import { describeProgress, refreshWalletCoins, useWalletCoins } from '../walletCoins';
 import { useWallet } from '../wallet';
 import { CopyButton } from './CopyButton';
@@ -14,6 +15,7 @@ import { HashLink } from './Provenance';
 import { Notice, Skeleton } from './States';
 import { NavBadge } from './Notifications';
 import { useMessages } from '../lang';
+import { BalanceEye } from './BalanceEye';
 
 // The WizardConnect button at the top right, in its four states (Shell-* screens):
 // disconnected, pairing, connecting and connected with its menu.
@@ -85,14 +87,16 @@ export function WalletButton() {
   );
 }
 
-/** The wallet's BCH and PUSD as the shared scan reads them: "0.0412 BCH · 12.50 PUSD". */
+/** The wallet's BCH and PUSD as the shared scan reads them: "0.0412 BCH · 12.50 PUSD", or dots when hidden. */
 function useBalanceText() {
   const coins = useWalletCoins();
   const config = useConfig();
-  if (!coins.data) return { bch: null, pusd: null, sats: null, failed: coins.error !== null, loading: coins.loading };
+  const hidden = useHideBalance();
+  if (!coins.data) return { bch: null, pusd: null, failed: coins.error !== null };
+  if (hidden) return { bch: HIDDEN_AMOUNT, pusd: config ? HIDDEN_AMOUNT : null, failed: false };
   const sats = spendableBch(coins.data.coins);
   const pusd = config ? fromBaseUnits(tokenBalance(coins.data.coins, config.pusdCategory), config.pusdDecimals) : null;
-  return { bch: formatBchBalance(sats), pusd, sats, failed: false, loading: false };
+  return { bch: formatBchBalance(sats), pusd, failed: false };
 }
 
 function PillBalance() {
@@ -114,7 +118,10 @@ function MenuBalance() {
   const progress = describeProgress(useWalletCoins().progress);
   return (
     <div className="cf-well s-menu__balance">
-      <span className="cf-label">Balance</span>
+      <span className="s-balancehead">
+        <span className="cf-label">Balance</span>
+        <BalanceEye />
+      </span>
       {bch === null ? (
         failed ? (
           <>
