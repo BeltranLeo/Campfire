@@ -1,33 +1,75 @@
-/* Offers list: compact comparable rows, the amount field and the demo strip. */
+/* Offers list: one table for both sides of the market, the amount field, and the create-offer button. */
 
-.o-row { display: grid; grid-template-columns: 36px minmax(0, 1fr) auto; gap: var(--space-3); align-items: center; padding: var(--space-3) var(--space-4); border-top: 1px solid var(--border); }
-.o-row:first-child { border-top: 0; }
-.o-avatar { display: inline-flex; align-items: center; justify-content: center; width: 36px; height: 36px; border-radius: var(--radius-pill); border: 1px solid var(--border); background: var(--bg); color: var(--text); font: 600 13px/1 var(--font-display); }
-.o-main { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+/* The page widens on a computer so the offers can be a table; the question above it keeps a readable width. */
+.s-main[data-wide] { max-width: calc(960px + 2 * var(--layout-app-margin)); }
+.s-main[data-wide] > .o-ask, .s-main[data-wide] > .s-intent { max-width: 560px; }
+
+/* Columns: who, price, limits, payment, action. The header and every row share them. */
+.o-thead, .o-row {
+  display: grid;
+  /* The action column has a fixed width: "auto" would size it by the button in rows and by nothing in the header. */
+  grid-template-columns: minmax(0, 1.25fr) minmax(0, 1fr) minmax(0, 1.2fr) minmax(0, 1.1fr) 64px;
+  column-gap: var(--space-4);
+  align-items: center;
+  padding: var(--space-3) var(--space-4);
+}
+.o-thead { padding-block: var(--space-2); border-bottom: 1px solid var(--border); background: var(--bg); font-size: 12px; line-height: 16px; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; color: var(--text-muted); }
+
+.o-list { list-style: none; margin: 0; padding: 0; }
+.o-list > li + li { border-top: 1px solid var(--border); }
+.cf a.o-row, .o-row { color: var(--text); text-decoration: none; }
+a.o-row:hover { background: var(--bg); }
+a.o-row:hover .cf-btn { border-color: var(--text-muted); }
+a.o-row:focus-visible { outline-offset: -2px; border-radius: var(--radius-md); }
+
+.o-cell { display: flex; flex-direction: column; min-width: 0; }
+.o-stack { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.o-party { flex-direction: row; align-items: center; gap: var(--space-3); }
+.o-who { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.o-name { font-size: 15px; line-height: 20px; font-weight: 600; overflow-wrap: anywhere; }
+.o-avatar { display: inline-flex; flex: none; align-items: center; justify-content: center; width: 36px; height: 36px; border-radius: var(--radius-pill); border: 1px solid var(--border); background: var(--bg); color: var(--text); font: 600 13px/1 var(--font-display); }
+/* The demo seller's mark is dashed like every other simulated thing. */
+.o-avatar[data-demo] { border: 1px dashed var(--simulated); color: var(--simulated); }
+
 /* Amounts are data: Geist Mono with tabular figures. */
-.o-headline { font: 500 16px/22px var(--font-data); font-variant-numeric: tabular-nums; color: var(--text); overflow-wrap: anywhere; }
-.o-headline[data-muted] { font-weight: 500; font-size: 14px; color: var(--text-muted); }
-.o-line { font-size: 13px; line-height: 18px; color: var(--text-muted); font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
-.o-cta { display: flex; }
+.o-value { font: 500 15px/20px var(--font-data); font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+.o-value[data-tone="answer"] { font-weight: 600; }
+.o-value[data-tone="outside"] { color: var(--text-muted); }
+.o-sub { font-size: 13px; line-height: 18px; color: var(--text-muted); font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+.o-methods { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-1) var(--space-2); font-size: 14px; line-height: 20px; }
+.o-cta { justify-self: end; }
+
+/* Column names inside the cells: the header says them on a computer, so here they are only read aloud. */
+.o-k { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
 
 .o-amount { min-width: 0; }
 .o-amountinput { font-variant-numeric: tabular-nums; font-weight: 600; }
-.o-postlink { align-self: flex-start; font-size: 14px; line-height: 20px; font-weight: 600; color: var(--text); text-decoration: underline; text-underline-offset: 3px; }
-.o-postlink:hover { text-decoration-thickness: 2px; }
-
-/* A compact strip: it only points at the demo offer, whose page asks for a wallet itself. */
-.o-demo { display: flex; align-items: center; gap: var(--space-3); padding: var(--space-2) var(--space-3); border-radius: var(--radius-md); }
-.o-demotext { flex: 1; min-width: 0; font-size: 14px; line-height: 20px; }
 
 /* Title and the buy / sell switch share a row; the amount and the Filters button share the next. */
 .o-head { flex-direction: row; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: var(--space-3); }
 .o-ask { display: flex; align-items: flex-end; gap: var(--space-3); }
 .o-ask > .o-amount { flex: 1; }
 .o-ask > .o-filterbtn { flex: none; margin-left: auto; height: 44px; padding-top: 0; padding-bottom: 0; }
-.o-status { display: flex; align-items: baseline; justify-content: space-between; flex-wrap: wrap; gap: var(--space-1) var(--space-3); }
-.o-top { display: flex; align-items: center; flex-wrap: wrap; gap: 2px var(--space-2); }
-/* On a phone the avatar (decoration: the initials repeat the name) gives its width to the text, so a row keeps to three lines. */
-@container s-main (max-width: 420px) {
-  .o-row { grid-template-columns: minmax(0, 1fr) auto; }
-  .o-row > .o-avatar { display: none; }
+.o-status { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: var(--space-2) var(--space-3); }
+
+/* On a phone each row is a card: who and the action on top, then one labelled line per value. */
+@container s-main (max-width: 679px) {
+  .o-thead { display: none; }
+  .o-row {
+    grid-template-columns: minmax(0, 1fr) auto;
+    grid-template-areas: "party cta" "price price" "limits limits" "pay pay";
+    row-gap: var(--space-2);
+    padding: var(--space-4);
+  }
+  .o-row > .o-party { grid-area: party; margin-bottom: var(--space-1); }
+  .o-row > .o-cell:nth-child(2) { grid-area: price; }
+  .o-row > .o-cell:nth-child(3) { grid-area: limits; }
+  .o-row > .o-cell:nth-child(4) { grid-area: pay; }
+  .o-row > .o-cta { grid-area: cta; align-self: start; }
+  .o-row > .o-cell:not(.o-party) { display: grid; grid-template-columns: 64px minmax(0, 1fr); column-gap: var(--space-3); align-items: baseline; }
+  /* The value and its detail share a line when they fit. */
+  .o-row > .o-cell:not(.o-party) > .o-stack { flex-direction: row; flex-wrap: wrap; align-items: baseline; column-gap: var(--space-2); }
+  .o-k { position: static; width: auto; height: auto; overflow: visible; clip-path: none; font-size: 13px; line-height: 18px; color: var(--text-muted); }
+  .o-who .o-k { display: inline; font-size: inherit; line-height: inherit; }
+  .o-who .o-k:not(:last-child)::after { content: " · "; }
 }
