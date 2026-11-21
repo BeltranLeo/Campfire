@@ -1,4 +1,4 @@
-/* Wallet pairing dialog: numbered scan steps beside the QR code (or above it when narrow) and the folded link. */
+/* Wallet pairing dialog: numbered scan steps beside the QR code (or above it when narrow) and the pairing link. */
 
 .pr-scan {
   display: flex;
@@ -46,19 +46,22 @@
   font-variant-numeric: tabular-nums;
 }
 
-.pr-fold {
-  min-width: 0;
-}
-
-.pr-fold__summary {
-  cursor: pointer;
-  font-weight: 600;
-}
-
-.pr-fold__body {
+.pr-link {
   display: flex;
   flex-direction: column;
   gap: var(--space-2);
-  padding-top: var(--space-2);
   min-width: 0;
+}
+
+.pr-link > p {
+  margin: 0;
+}
+
+/* The full link, broken at any character so it fills each line, and selectable in one go. */
+.pr-link__value {
+  min-width: 0;
+  word-break: break-all;
+  user-select: all;
+  font-size: 12px;
+  line-height: 18px;
 }

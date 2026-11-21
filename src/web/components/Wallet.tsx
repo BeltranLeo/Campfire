@@ -24,7 +24,8 @@ export function WalletButton() {
   const wallet = useWallet();
   const [menuOpen, setMenuOpen] = useState(false);
   const closeMenu = useCallback(() => setMenuOpen(false), []);
-  const t = useMessages().wallet;
+  const msgs = useMessages();
+  const t = msgs.wallet;
 
   if (wallet.status === 'disconnected') {
     return (
@@ -37,16 +38,17 @@ export function WalletButton() {
   }
 
   if (wallet.status !== 'connected' || !wallet.identity) {
+    const ts = msgs.signIn;
     return (
       <>
         <button type="button" className="cf-btn" aria-busy={!wallet.signInFailed}>
           {wallet.status === 'pairing'
-            ? 'Pairing…'
+            ? ts.pairing
             : wallet.signing
-              ? 'Approve in your wallet…'
+              ? ts.approving
               : wallet.signInFailed
-                ? 'Sign-in needed'
-                : 'Connecting…'}
+                ? ts.needed
+                : ts.connecting}
         </button>
         {/* A portal, because the header's backdrop-filter makes it the containing block of any fixed
             descendant: inside it the overlay shrinks to the header's height and the dialog cannot be reached. */}
@@ -238,12 +240,14 @@ function WalletMenu({ onClose }: { onClose: () => void }) {
 }
 
 // On a phone the wallet is usually on the same device, so the link comes first and the QR code is folded.
-// On a computer the QR code is the way in.
+// On a computer the QR code is the way in, with the same link in plain view below it: some wallets take it pasted,
+// and a wallet on this computer opens it directly (a BCH Blaze judge asked for it).
 function PairingDialog({ uri, qrUri, onClose }: { uri: string; qrUri: string; onClose: () => void }) {
   const titleId = useId();
   const dialogRef = useRef<HTMLDivElement>(null);
   const [onPhone] = useState(() => window.matchMedia('(hover: none) and (pointer: coarse)').matches);
   const [slow, setSlow] = useState(false);
+  const t = useMessages().pairing;
 
   useEffect(() => {
     dialogRef.current?.focus();
@@ -260,8 +264,6 @@ function PairingDialog({ uri, qrUri, onClose }: { uri: string; qrUri: string; on
     return () => clearTimeout(timer);
   }, []);
 
-  const steps = ['Open your wallet app', 'Tap Scan', 'Approve Campfire'];
-
   return (
     <div
       className="s-overlay"
@@ -273,28 +275,26 @@ function PairingDialog({ uri, qrUri, onClose }: { uri: string; qrUri: string; on
       <div className="s-dialog" role="dialog" aria-modal="true" aria-labelledby={titleId} tabIndex={-1} ref={dialogRef}>
         <div className="cf-row" data-between data-nowrap>
           <h2 className="cf-heading" id={titleId}>
-            Connect your wallet
+            {t.title}
           </h2>
-          <button type="button" className="cf-copy" aria-label="Close" onClick={onClose}>
-            Close
+          <button type="button" className="cf-copy" aria-label={t.close} onClick={onClose}>
+            {t.close}
           </button>
         </div>
         {onPhone ? (
           <>
             {/* The phone may pause this page while the wallet is open; coming back lets it finish the pairing. */}
-            <p className="cf-small cf-muted">
-              Open your wallet app on this phone to pair. If it keeps saying it is connecting, come back to this tab.
-            </p>
+            <p className="cf-small cf-muted">{t.phoneHint}</p>
             <a className="cf-btn" data-variant="primary" data-block href={uri}>
-              Open in wallet
+              {t.openInWallet}
             </a>
-            <CopyButton value={uri} label="Copy pairing link" block />
+            <CopyButton value={uri} label={t.copyPairingLink} block />
             <details>
               <summary className="cf-small" style={{ cursor: 'pointer', fontWeight: 600 }}>
-                Show QR code for another device
+                {t.showQr}
               </summary>
               <div style={{ display: 'grid', placeItems: 'center', paddingTop: 'var(--space-3)' }}>
-                <PairingQr value={qrUri} />
+                <PairingQr value={qrUri} label={t.qrLabel} />
               </div>
             </details>
           </>
@@ -302,7 +302,7 @@ function PairingDialog({ uri, qrUri, onClose }: { uri: string; qrUri: string; on
           <>
             <div className="pr-scan">
               <ol className="pr-steps">
-                {steps.map((step, i) => (
+                {t.steps.map((step, i) => (
                   <li key={step} className="pr-step">
                     <span className="pr-dot" aria-hidden="true">
                       {i + 1}
@@ -311,31 +311,30 @@ function PairingDialog({ uri, qrUri, onClose }: { uri: string; qrUri: string; on
                   </li>
                 ))}
               </ol>
-              <PairingQr value={qrUri} />
+              <PairingQr value={qrUri} label={t.qrLabel} />
             </div>
-            <details className="pr-fold">
-              <summary className="cf-small pr-fold__summary">Can't scan?</summary>
-              <div className="pr-fold__body">
-                <p className="cf-small cf-muted">Copy this link into your wallet instead.</p>
-                <div className="cf-well cf-row" data-between data-nowrap>
-                  <span className="cf-mono" style={{ overflowWrap: 'anywhere' }} title={uri}>
-                    {uri.length > 28 ? `${uri.slice(0, 20)}…${uri.slice(-4)}` : uri}
-                  </span>
-                  <CopyButton value={uri} />
-                </div>
+            {/* The whole string is shown, not shortened: people check what they paste, and it wraps in the well. */}
+            <div className="pr-link">
+              <strong className="cf-small">{t.linkTitle}</strong>
+              <p className="cf-small cf-muted">{t.linkHint}</p>
+              <div className="cf-well pr-link__value">
+                <span className="cf-mono">{uri}</span>
               </div>
-            </details>
+              <div className="cf-row">
+                <CopyButton value={uri} label={t.copyLink} />
+                <a className="cf-copy" href={uri}>
+                  {t.openInWallet}
+                </a>
+              </div>
+            </div>
           </>
         )}
         <div className="cf-row">
           <Skeleton width={10} height={10} style={{ borderRadius: '50%' }} />
-          <span className="cf-small cf-muted">Waiting for the wallet…</span>
+          <span className="cf-small cf-muted">{t.waiting}</span>
         </div>
-        {slow && <Notice>Nothing yet? Make sure the wallet app is open, then {onPhone ? 'try again' : 'scan again'}.</Notice>}
-        <p className="cf-small cf-subtle">
-          Connecting is your only sign-in. Campfire sees public keys, never private keys, and the wallet asks you
-          before every transaction.
-        </p>
+        {slow && <Notice>{onPhone ? t.slowPhone : t.slowDesktop}</Notice>}
+        <p className="cf-small cf-subtle">{t.privacy}</p>
       </div>
     </div>
   );
@@ -348,6 +347,7 @@ function PairingDialog({ uri, qrUri, onClose }: { uri: string; qrUri: string; on
 function SignInDialog({ failed, onRetry, onCancel }: { failed: boolean; onRetry: () => void; onCancel: () => void }) {
   const titleId = useId();
   const dialogRef = useRef<HTMLDivElement>(null);
+  const t = useMessages().signIn;
 
   useEffect(() => {
     dialogRef.current?.focus();
@@ -358,32 +358,25 @@ function SignInDialog({ failed, onRetry, onCancel }: { failed: boolean; onRetry:
     return () => document.removeEventListener('keydown', onKey);
   }, [onCancel]);
 
-  const steps = ['Open your wallet app', 'Review the Campfire sign-in request', 'Approve it, then come back here'];
-
   // Not closed by a click outside: one stray tap would cancel a sign-in the wallet may already be showing.
   return (
     <div className="s-overlay" data-modal>
       <div className="s-dialog" role="dialog" aria-modal="true" aria-labelledby={titleId} tabIndex={-1} ref={dialogRef}>
         <div className="cf-stack" data-gap="1">
-          <span className="cf-label">Sign in</span>
+          <span className="cf-label">{t.label}</span>
           <h2 className="cf-heading" id={titleId} style={{ margin: 0 }}>
-            {failed ? 'Your wallet did not approve the sign-in' : 'Approve the sign-in in your wallet'}
+            {failed ? t.failedTitle : t.title}
           </h2>
         </div>
         {failed ? (
-          <Notice tone="attention">
-            The request was declined or timed out. Ask again and approve it in your wallet, or cancel to disconnect.
-          </Notice>
+          <Notice tone="attention">{t.failed}</Notice>
         ) : (
-          <p className="cf-small cf-muted">
-            Your wallet is paired. To finish, it asks you to sign once, which proves the wallet is yours so nobody else
-            can trade under your name.
-          </p>
+          <p className="cf-small cf-muted">{t.intro}</p>
         )}
         {!failed && (
           // flex: none, because .pr-steps grows to fill the pairing dialog's row and here it sits in a column.
           <ol className="pr-steps" style={{ flex: 'none' }}>
-            {steps.map((step, i) => (
+            {t.steps.map((step, i) => (
               <li key={step} className="pr-step">
                 <span className="pr-dot" aria-hidden="true">
                   {i + 1}
@@ -394,32 +387,29 @@ function SignInDialog({ failed, onRetry, onCancel }: { failed: boolean; onRetry:
           </ol>
         )}
         <div className="cf-well cf-stack" data-gap="1">
-          <strong className="cf-small">Free, and moves no funds</strong>
-          <span className="cf-small cf-muted">
-            Your wallet may show it as a transaction. It spends a coin that does not exist, so it can never be broadcast
-            and nothing leaves your wallet.
-          </span>
+          <strong className="cf-small">{t.freeTitle}</strong>
+          <span className="cf-small cf-muted">{t.free}</span>
         </div>
         {failed ? (
           <button type="button" className="cf-btn" data-variant="primary" data-block onClick={onRetry}>
-            Ask my wallet again
+            {t.retry}
           </button>
         ) : (
           <div className="cf-row">
             <Skeleton width={10} height={10} style={{ borderRadius: '50%' }} />
-            <span className="cf-small cf-muted">Waiting for your approval…</span>
+            <span className="cf-small cf-muted">{t.waiting}</span>
           </div>
         )}
         <button type="button" className="cf-btn" data-variant="ghost" data-block onClick={onCancel}>
-          Cancel and disconnect
+          {t.cancel}
         </button>
-        <p className="cf-small cf-subtle">You sign once on this browser. Later visits reuse it.</p>
+        <p className="cf-small cf-subtle">{t.once}</p>
       </div>
     </div>
   );
 }
 
-function PairingQr({ value }: { value: string }) {
+function PairingQr({ value, label }: { value: string; label: string }) {
   const [src, setSrc] = useState<string | null>(null);
 
   useEffect(() => {
@@ -435,7 +425,7 @@ function PairingQr({ value }: { value: string }) {
   }, [value]);
 
   return (
-    <div className="cf-qr" role="img" aria-label="Pairing QR code">
+    <div className="cf-qr" role="img" aria-label={label}>
       {src && <img src={src} alt="" width={176} height={176} style={{ display: 'block', width: '100%', height: '100%' }} />}
     </div>
   );

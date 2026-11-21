@@ -66,6 +66,46 @@ const en = {
     showBalance: 'Show balance',
     hideBalance: 'Hide balance',
   },
+  // The WizardConnect pairing dialog. The link is the same string the QR code holds, so a wallet can take either.
+  pairing: {
+    title: 'Connect your wallet',
+    close: 'Close',
+    steps: ['Open your wallet app', 'Tap Scan', 'Approve Campfire'],
+    qrLabel: 'Pairing QR code',
+    linkTitle: 'Or use the link',
+    linkHint: 'Paste it into your wallet’s WizardConnect option, or open it if your wallet runs on this computer.',
+    copyLink: 'Copy link',
+    openInWallet: 'Open in wallet',
+    phoneHint: 'Open your wallet app on this phone to pair. If it keeps saying it is connecting, come back to this tab.',
+    copyPairingLink: 'Copy pairing link',
+    showQr: 'Show QR code for another device',
+    waiting: 'Waiting for the wallet…',
+    slowPhone: 'Nothing yet? Make sure the wallet app is open, then try again.',
+    slowDesktop: 'Nothing yet? Make sure the wallet app is open, then scan again.',
+    privacy:
+      'Connecting is your only sign-in. Campfire sees public keys, never private keys, and the wallet asks you before every transaction.',
+  },
+  // The header button while connecting, and the sign-in dialog that follows the pairing.
+  signIn: {
+    pairing: 'Pairing…',
+    approving: 'Approve in your wallet…',
+    needed: 'Sign-in needed',
+    connecting: 'Connecting…',
+    label: 'Sign in',
+    title: 'Approve the sign-in in your wallet',
+    failedTitle: 'Your wallet did not approve the sign-in',
+    failed: 'The request was declined or timed out. Ask again and approve it in your wallet, or cancel to disconnect.',
+    intro:
+      'Your wallet is paired. To finish, it asks you to sign once, which proves the wallet is yours so nobody else can trade under your name.',
+    steps: ['Open your wallet app', 'Review the Campfire sign-in request', 'Approve it, then come back here'],
+    freeTitle: 'Free, and moves no funds',
+    free: 'Your wallet may show it as a transaction. It spends a coin that does not exist, so it can never be broadcast and nothing leaves your wallet.',
+    retry: 'Ask my wallet again',
+    waiting: 'Waiting for your approval…',
+    cancel: 'Cancel and disconnect',
+    once: 'You sign once on this browser. Later visits reuse it.',
+  },
+
   common: {
     copy: 'Copy',
     copied: 'Copied',
@@ -239,6 +279,46 @@ const es: Messages = {
     showBalance: 'Mostrar saldo',
     hideBalance: 'Ocultar saldo',
   },
+  pairing: {
+    title: 'Conecta tu billetera',
+    close: 'Cerrar',
+    steps: ['Abre la aplicación de tu billetera', 'Toca «Escanear»', 'Aprueba Campfire'],
+    qrLabel: 'Código QR para emparejar',
+    linkTitle: 'O usa el enlace',
+    linkHint: 'Pégalo en la opción WizardConnect de tu billetera, o ábrelo si tu billetera está en esta computadora.',
+    copyLink: 'Copiar enlace',
+    openInWallet: 'Abrir en la billetera',
+    phoneHint:
+      'Abre la aplicación de tu billetera en este teléfono para emparejarla. Si se queda en «Conectando», vuelve a esta pestaña.',
+    copyPairingLink: 'Copiar enlace de emparejamiento',
+    showQr: 'Mostrar código QR para otro dispositivo',
+    waiting: 'Esperando a la billetera…',
+    slowPhone: '¿Todavía nada? Asegúrate de que la aplicación de la billetera esté abierta y vuelve a intentarlo.',
+    slowDesktop: '¿Todavía nada? Asegúrate de que la aplicación de la billetera esté abierta y vuelve a escanear.',
+    privacy:
+      'Conectar la billetera es tu único inicio de sesión. Campfire ve claves públicas, nunca las privadas, y la billetera te pregunta antes de cada transacción.',
+  },
+  signIn: {
+    pairing: 'Emparejando…',
+    approving: 'Aprueba en tu billetera…',
+    needed: 'Falta iniciar sesión',
+    connecting: 'Conectando…',
+    label: 'Iniciar sesión',
+    title: 'Aprueba el inicio de sesión en tu billetera',
+    failedTitle: 'Tu billetera no aprobó el inicio de sesión',
+    failed:
+      'La solicitud se rechazó o se agotó el tiempo. Pídela de nuevo y apruébala en tu billetera, o cancela para desconectarte.',
+    intro:
+      'Tu billetera ya está emparejada. Para terminar, te pide firmar una vez: así se comprueba que la billetera es tuya y nadie más puede operar con tu nombre.',
+    steps: ['Abre la aplicación de tu billetera', 'Revisa la solicitud de inicio de sesión de Campfire', 'Apruébala y vuelve aquí'],
+    freeTitle: 'Gratis y sin mover fondos',
+    free: 'Puede que tu billetera la muestre como una transacción. Gasta una moneda que no existe, así que nunca puede transmitirse y nada sale de tu billetera.',
+    retry: 'Pedírselo de nuevo a mi billetera',
+    waiting: 'Esperando tu aprobación…',
+    cancel: 'Cancelar y desconectar',
+    once: 'Firmas una sola vez en este navegador. Las próximas visitas la reutilizan.',
+  },
+
   common: {
     copy: 'Copiar',
     copied: 'Copiado',
