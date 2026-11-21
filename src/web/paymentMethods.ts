@@ -2,6 +2,8 @@
 // protocol takes any string), so these names are what ends up in published offers. Spellings people type by hand
 // ("zelle", "transferencia por alias") are read as the same method, so the offer filter finds them too.
 
+import { text } from './messages';
+
 export interface PaymentMethod {
   /** The name stored in the offer and shown everywhere. */
   name: string;
@@ -95,14 +97,14 @@ export const reversibleMethods = (names: readonly string[], fiat: string): strin
 /** "PayPal", "PayPal and Venmo", "Cash App, Venmo and PayPal". */
 export function joinNames(names: readonly string[]): string {
   if (names.length <= 1) return names[0] ?? '';
-  return `${names.slice(0, -1).join(', ')} and ${names[names.length - 1]}`;
+  return `${names.slice(0, -1).join(', ')} ${text().common.and} ${names[names.length - 1]}`;
 }
 
 /** The warning for whoever receives a reversible payment; null when no method is reversible. */
 export function reversibleWarning(names: readonly string[], fiat: string): string | null {
   const reversible = reversibleMethods(names, fiat);
   if (reversible.length === 0) return null;
-  return `${joinNames(reversible)} payments can be reversed after the coins are released. Only accept them from people you trust.`;
+  return text().common.reversible(joinNames(reversible));
 }
 
 /** The options of the offer filter: the suggestions of one currency, or of every currency when none is chosen. */

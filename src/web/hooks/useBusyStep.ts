@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { text } from '../messages';
 import { describeProgress, useWalletCoins } from '../walletCoins';
 
 /** The step that reads the wallet's coins: its label follows the scan ("Reading your balance… 25%"). */
@@ -18,5 +19,5 @@ export function useBusyStep() {
 /** While a page waits for a fresh address, how far the wallet scan it waits on has got. */
 export function useFindingAddressNote(): string {
   const { progress } = useWalletCoins();
-  return describeProgress(progress) ?? 'Finding a fresh address of your wallet…';
+  return describeProgress(progress) ?? text().common.findingFreshAddress;
 }

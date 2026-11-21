@@ -5,6 +5,7 @@
 // No DOM here, so test/lang.test.ts can check both languages under Node; the language switch is in lang.ts.
 
 import { offers } from './i18n/offers';
+import { take } from './i18n/take';
 
 export type Lang = 'en' | 'es';
 
@@ -66,6 +67,20 @@ const en = {
     minToPay: (minutes: number) => `${minutes} min to pay`,
     buy: 'Buy',
     sell: 'Sell',
+    // "Cash App, PayPal and Venmo".
+    and: 'and',
+    noWallet: 'No wallet yet? Your coins go to your own wallet.',
+    getOneFirst: 'Get one first',
+    findingFreshAddress: 'Finding a fresh address of your wallet…',
+    findingAddresses: 'Finding your addresses…',
+    readingBalance: (percent: number) => `Reading your balance… ${percent}%`,
+    reversible: (methods: string) =>
+      `${methods} payments can be reversed after the coins are released. Only accept them from people you trust.`,
+    whatIs: (word: string) => `What does ${word} mean?`,
+    glossary: {
+      arbiter: 'A neutral person who decides only if there is a dispute. They can choose who gets the BCH, but can never take it.',
+      'on-chain': 'Written on the Bitcoin Cash network, where anyone can check it. Campfire cannot change it.',
+    },
   },
   offers: offers.en,
   balanceLoading: {
@@ -79,6 +94,7 @@ const en = {
     almostDone: 'almost done',
     percent: (n: number) => `${n}%`,
   },
+  take: take.en,
   landing: {
     title: 'Buy or sell Bitcoin Cash directly with another person',
     lead: 'No exchange holds your money. A contract on the Bitcoin Cash network locks the seller’s coins until the payment is done.',
@@ -209,6 +225,19 @@ const es: Messages = {
     minToPay: (minutes: number) => `${minutes} min para pagar`,
     buy: 'Comprar',
     sell: 'Vender',
+    and: 'y',
+    noWallet: '¿Todavía no tienes billetera? Tus monedas van a tu propia billetera.',
+    getOneFirst: 'Consigue una primero',
+    findingFreshAddress: 'Buscando una dirección nueva de tu billetera…',
+    findingAddresses: 'Buscando tus direcciones…',
+    readingBalance: (percent) => `Leyendo tu saldo… ${percent}\u00a0%`,
+    reversible: (methods) =>
+      `Los pagos con ${methods} se pueden revertir después de liberar las monedas. Acéptalos solo de personas de confianza.`,
+    whatIs: (word) => `¿Qué significa «${word}»?`,
+    glossary: {
+      arbiter: 'Una persona neutral que decide solo si hay una disputa. Puede elegir quién recibe los BCH, pero nunca quedárselos.',
+      'on-chain': 'Escrito en la red de Bitcoin Cash, donde cualquiera puede comprobarlo. Campfire no puede cambiarlo.',
+    },
   },
   offers: offers.es,
   balanceLoading: {
@@ -223,6 +252,7 @@ const es: Messages = {
     // The RAE puts a space before %, a non-breaking one so it never ends up alone on a line.
     percent: (n: number) => `${n}\u00a0%`,
   },
+  take: take.es,
   landing: {
     title: 'Compra o vende Bitcoin Cash directamente con otra persona',
     lead: 'Ninguna plataforma guarda tu dinero. Un contrato en la red de Bitcoin Cash bloquea las monedas del vendedor hasta que se completa el pago.',

@@ -6,6 +6,7 @@ import { binToHex, sha256, utf8ToBin } from '@bitauth/libauth';
 import { useEffect, useSyncExternalStore } from 'react';
 import { scanWalletCoins, type CoinKeys, type ScanMemory, type ScanOptions, type ScanProgress, type WalletScan } from './coins';
 import { keptElectrum } from './electrum';
+import { text } from './messages';
 import { useWallet } from './wallet';
 
 /**
@@ -207,8 +208,9 @@ export const latestWalletScan = (keys: CoinKeys) => walletCoins.latest(keys);
  */
 export function describeProgress(progress: ScanProgress | null): string | null {
   if (!progress) return null;
-  if (progress.phase === 'addresses') return progress.done > 0 ? `Finding your addresses… ${progress.done}` : 'Finding your addresses…';
-  return `Reading your balance… ${scanPercent(progress) ?? 0}%`;
+  const t = text().common;
+  if (progress.phase === 'addresses') return progress.done > 0 ? `${t.findingAddresses} ${progress.done}` : t.findingAddresses;
+  return t.readingBalance(scanPercent(progress) ?? 0);
 }
 
 /** Percent of the addresses read, or null while the scan is still finding how many there are. */

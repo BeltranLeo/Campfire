@@ -1,9 +1,15 @@
 import { Link } from 'react-router';
+import { useMessages } from '../lang';
 
 // Under a "Connect wallet to …" button: without a wallet the button only connects, so the note gives a way out to
 // someone who has none yet, instead of naming the pairing protocol.
-export const noWalletNote = (
-  <>
-    No wallet yet? Your coins go to your own wallet. <Link to="/welcome">Get one first</Link>
-  </>
-);
+function NoWalletNote() {
+  const t = useMessages().common;
+  return (
+    <>
+      {t.noWallet} <Link to="/welcome">{t.getOneFirst}</Link>
+    </>
+  );
+}
+
+export const noWalletNote = <NoWalletNote />;
