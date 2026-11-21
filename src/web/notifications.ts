@@ -6,6 +6,7 @@ import { isFinalState, type ChatMessage, type Trade } from './api';
 import { unreadCount, type ChatRole } from './chat';
 import { nextStep } from './mytrades';
 import { roleOf } from './trade';
+import { text } from './messages';
 
 const nowSeconds = () => Math.floor(Date.now() / 1000);
 
@@ -167,42 +168,37 @@ export function toastFor(event: NotificationEvent, identity: string, what: strin
   const href = eventHref(event);
   const other = role === 'buyer' ? 'seller' : 'buyer';
   const step = role === 'visitor' ? '' : nextStep(trade, role, now).step;
-  // Invented copy: the design has no notifications; every label and title below is ours.
+  // Invented copy: the design has no notifications; every label and title is ours (messages.ts, `notify`).
+  const t = text().notify;
   switch (event.kind) {
     case 'request':
-      return { label: 'New request', title: step, body: what, href, tone: 'attention' };
+      return { label: t.request, title: step, body: what, href, tone: 'attention' };
     case 'turn':
-      return { label: 'Your turn', title: step, body: what, href, tone: 'attention' };
+      return { label: t.turn, title: step, body: what, href, tone: 'attention' };
     case 'disputed':
-      return { label: 'Dispute', title: `The ${other} opened a dispute`, body: what, href, tone: 'arbiter' };
+      return { label: t.dispute, title: t.disputeBy(other), body: what, href, tone: 'arbiter' };
     case 'message':
-      return {
-        label: 'New message',
-        title: event.unread > 1 ? `${event.unread} unread messages from the ${other}` : `The ${other} sent you a message`,
-        body: what,
-        href,
-        tone: 'escrow',
-      };
+      return { label: t.message, title: t.unreadFrom(event.unread, other), body: what, href, tone: 'escrow' };
     case 'ended':
-      return { label: 'Trade ended', title: endedTitle(trade), body: what, href, tone: trade.status === 'Released' || trade.status === 'ResolvedBuyer' || trade.status === 'ResolvedSeller' ? 'verified' : 'neutral' };
+      return { label: t.ended, title: endedTitle(trade), body: what, href, tone: trade.status === 'Released' || trade.status === 'ResolvedBuyer' || trade.status === 'ResolvedSeller' ? 'verified' : 'neutral' };
   }
 }
 
-// Invented copy.
 function endedTitle(trade: Trade): string {
+  const t = text().notify;
   switch (trade.status) {
     case 'Released':
-      return 'Completed: the coins were released to the buyer';
+      return t.released;
     case 'ResolvedBuyer':
-      return 'The arbiter decided for the buyer';
+      return t.resolvedBuyer;
     case 'ResolvedSeller':
-      return trade.disputedAt ? 'The arbiter decided for the seller' : 'The payment window ended; the coins went back to the seller';
+      return trade.disputedAt ? t.resolvedSeller : t.paymentWindowEnded;
     case 'Refunded':
-      return 'The coins went back to the seller after the refund time';
+      return t.refunded;
     case 'Cancelled':
-      return 'The buyer cancelled the trade';
+      return t.cancelled;
     default:
-      return 'The trade ended before the coins were locked';
+      return t.endedEarly;
   }
 }
 

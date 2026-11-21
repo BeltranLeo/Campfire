@@ -80,7 +80,8 @@ export interface WalletState {
   signing: boolean;
   /** The wallet refused or ignored the sign-in signature; the pairing stays open so it can be asked again. */
   signInFailed: boolean;
-  error: { title: string; message: string } | null;
+  /** Why the last pairing failed; the words are in messages.ts (wallet.timeout*, wallet.load*). */
+  error: { kind: 'timeout' } | { kind: 'load'; detail: string | null } | null;
 }
 
 const INITIAL: WalletState = {
@@ -155,12 +156,7 @@ class WalletController {
     clearTimeout(this.pairingTimer);
     this.pairingTimer = setTimeout(() => {
       this.disconnect();
-      this.set({
-        error: {
-          title: 'The wallet did not answer',
-          message: 'Pairing timed out after 2 minutes. Open the wallet and try again.',
-        },
-      });
+      this.set({ error: { kind: 'timeout' } });
     }, PAIRING_TIMEOUT_MS);
   }
 
@@ -365,10 +361,8 @@ class WalletController {
       this.close();
       this.set({
         ...INITIAL,
-        error: {
-          title: 'Campfire could not load your wallet',
-          message: err instanceof ApiError ? err.message : 'Something went wrong. Reload the page to try again.',
-        },
+        // The service's own words when it gave a reason (they are in English), else a general line.
+        error: { kind: 'load', detail: err instanceof ApiError ? err.message : null },
       });
     } finally {
       this.registering = false;

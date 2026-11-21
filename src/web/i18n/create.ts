@@ -48,7 +48,10 @@ const en = {
   other: '+ Other',
   otherLabel: 'Other ways to pay, separated by commas',
   add: 'Add',
-  methodsHint: 'Only the names are public. You share your account details with each buyer, encrypted, after you accept them.',
+  methodsHint: (buying: boolean): string =>
+    buying
+      ? 'Only the names are public. Each seller shares their account details with you, encrypted, after you accept them.'
+      : 'Only the names are public. You share your account details with each buyer, encrypted, after you accept them.',
   timeToPay: 'Time to pay',
   minutes: (n: number) => `${n} minutes`,
   staysOpen: 'Offer stays open for',
@@ -182,7 +185,10 @@ const es: typeof en = {
   other: '+ Otra',
   otherLabel: 'Otras formas de pago, separadas por comas',
   add: 'Agregar',
-  methodsHint: 'Solo los nombres son públicos. Los datos de tu cuenta los compartes cifrados con cada comprador, después de aceptarlo.',
+  methodsHint: (buying) =>
+    buying
+      ? 'Solo los nombres son públicos. Cada vendedor te comparte cifrados los datos de su cuenta, después de que lo aceptas.'
+      : 'Solo los nombres son públicos. Los datos de tu cuenta los compartes cifrados con cada comprador, después de aceptarlo.',
   timeToPay: 'Plazo para pagar',
   minutes: (n) => `${n} minutos`,
   staysOpen: 'La oferta queda abierta durante',

@@ -14,7 +14,7 @@ import { useConfig } from '../config';
 import { withKeptElectrum } from '../electrum';
 import { READING_WALLET, useBusyStep } from '../hooks/useBusyStep';
 import { unusedIndex } from '../indices';
-import { applyMargin, formatBch, formatDateTime, formatFiat, formatFiatAmount, toAmountInput } from '../format';
+import { applyMargin, formatBch, formatDateTime, formatFiat, formatFiatAmount, paymentMethodLabel, toAmountInput } from '../format';
 import { usePoll } from '../hooks/usePoll';
 import { VISIBLE_METHODS, reversibleWarning } from '../paymentMethods';
 import { freshWalletScan, latestWalletScan, refreshWalletCoins, useWalletCoins } from '../walletCoins';
@@ -361,7 +361,7 @@ export function CreateOffer() {
   };
 
   const rangeText = `${toAmountInput(parseAmount(form.min, decimals) ?? 0n, coinAsset)} ${t.rangeTo} ${toAmountInput(parseAmount(form.max, decimals) ?? 0n, coinAsset)} ${coin}`;
-  const payNames = [...chosen, ...(demoOn ? [t.simulatedMethod] : [])];
+  const payNames = [...chosen.map(paymentMethodLabel), ...(demoOn ? [t.simulatedMethod] : [])];
   const windowMinutes = form.paymentWindowSec / 60;
   const openFor = t.days(form.expirySec / 86_400);
 
@@ -583,7 +583,7 @@ export function CreateOffer() {
                 <div className="co-chips" role="group" aria-labelledby="co-methods">
                   {[...shownNames, ...customNames].map((name) => (
                     <button key={name} type="button" className="co-chip" aria-pressed={isChosen(name)} onClick={() => toggleChip(name)}>
-                      {name}
+                      {paymentMethodLabel(name)}
                     </button>
                   ))}
                   {!moreOpen && hiddenNames.some((n) => !isChosen(n)) && (
@@ -616,7 +616,7 @@ export function CreateOffer() {
                     </Button>
                   </div>
                 )}
-                <span className="cf-hint">{methodsMessage ?? t.methodsHint}</span>
+                <span className="cf-hint">{methodsMessage ?? t.methodsHint(buying)}</span>
                 {/* Invented copy: the design has no reversible payment methods. */}
                 {reversibleNote && <Notice tone="attention">{reversibleNote}</Notice>}
               </div>

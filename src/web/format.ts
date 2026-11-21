@@ -73,10 +73,11 @@ export function describeMargin(marginBps: number, base = text().common.marketPri
 
 /**
  * A payment method as people read it. Offers store the names their author typed; the demo's "simulated"
- * would read like an error on its own.
+ * would read like an error on its own, and Campfire's own suggestions show in the reader's language.
  */
 export function paymentMethodLabel(method: string): string {
-  return method === 'simulated' ? text().common.simulatedPayment : method;
+  if (method === 'simulated') return text().common.simulatedPayment;
+  return text().common.methodNames[method] ?? method;
 }
 
 /** "5 min to pay": the payment window is always given in minutes. */

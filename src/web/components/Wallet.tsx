@@ -5,7 +5,7 @@ import QRCode from 'qrcode';
 import { aliasFor } from '../alias';
 import { spendableBch, tokenBalance } from '../coins';
 import { useConfig } from '../config';
-import { formatBchBalance, fromBaseUnits } from '../format';
+import { formatBchBalance, formatDate, fromBaseUnits } from '../format';
 import { HIDDEN_AMOUNT, useHideBalance } from '../hideBalance';
 import { refreshWalletCoins, scanPercent, useWalletCoins } from '../walletCoins';
 import { useWallet } from '../wallet';
@@ -126,10 +126,11 @@ function PillBalance() {
 function MenuBalance() {
   const { bch, pusd, failed } = useBalanceText();
   const { progress } = useWalletCoins();
+  const t = useMessages().wallet;
   return (
     <div className="cf-well s-menu__balance">
       <span className="s-balancehead">
-        <span className="cf-label">Balance</span>
+        <span className="cf-label">{t.balance}</span>
         <BalanceEye />
       </span>
       {bch === null ? (
@@ -137,9 +138,9 @@ function MenuBalance() {
           <>
             <strong className="s-menu__bch cf-muted">— BCH</strong>
             <span className="cf-small cf-muted">
-              Could not read it. Trading still works.{' '}
+              {t.balanceFailed}{' '}
               <button type="button" className="cf-copy" onClick={() => void refreshWalletCoins()}>
-                Try again
+                {t.tryAgain}
               </button>
             </span>
           </>
@@ -158,6 +159,8 @@ function MenuBalance() {
 
 function WalletMenu({ onClose }: { onClose: () => void }) {
   const wallet = useWallet();
+  const msgs = useMessages();
+  const t = msgs.wallet;
   const ref = useRef<HTMLDivElement>(null);
 
   // Close on Escape or on a click outside the menu and its button.
@@ -192,11 +195,8 @@ function WalletMenu({ onClose }: { onClose: () => void }) {
           <span className="s-term">
             <strong>{alias.name}</strong>
             <details>
-              <summary aria-label="Where does this name come from?">?</summary>
-              <span className="s-term__text">
-                The name others see on your offers and trades. It comes from your wallet, so it never changes and nobody
-                can pick it.
-              </span>
+              <summary aria-label={t.nameQuestion}>?</summary>
+              <span className="s-term__text">{t.nameAnswer}</span>
             </details>
           </span>
           <span className="cf-row" data-nowrap>
@@ -210,30 +210,32 @@ function WalletMenu({ onClose }: { onClose: () => void }) {
         <div className="cf-stack" data-gap="1">
           {rep.completedAsBuyer + rep.completedAsSeller > 0 ? (
             <span className="cf-small">
-              <strong>{rep.completedAsBuyer}</strong> bought · <strong>{rep.completedAsSeller}</strong> sold
-              {rep.firstCompletedAt !== null && ` · since ${formatDate(rep.firstCompletedAt)}`}
+              <strong>{rep.completedAsBuyer}</strong>
+              {t.bought(rep.completedAsBuyer)} · <strong>{rep.completedAsSeller}</strong>
+              {t.sold(rep.completedAsSeller)}
+              {rep.firstCompletedAt !== null && t.since(formatDate(rep.firstCompletedAt))}
             </span>
           ) : (
-            <span className="cf-small">No trades yet</span>
+            <span className="cf-small">{t.noTrades}</span>
           )}
           {/* The count is not on-chain, so it must never read as proof (About explains how it can be inflated). */}
-          <span className="cf-small cf-subtle">Counted by Campfire, not verifiable on-chain.</span>
+          <span className="cf-small cf-subtle">{t.countedByCampfire}</span>
         </div>
       )}
       <Link className="cf-btn" data-block to="/trades" onClick={onClose}>
-        {wallet.activeTrades ? `My trades · ${wallet.activeTrades} active` : 'My trades'}
+        {wallet.activeTrades ? t.myTradesActive(wallet.activeTrades) : t.myTrades}
       </Link>
       {/* On a phone the header nav gives way to the balance and BottomNav, so these two pages are linked here. */}
       <div className="s-mobileonly s-menu__links">
         <Link to="/about" onClick={onClose}>
-          How it works
+          {msgs.nav.about}
         </Link>
         <Link to="/transparency" onClick={onClose}>
-          Transparency
+          {msgs.nav.transparency}
         </Link>
       </div>
       <button type="button" className="cf-btn" data-variant="ghost" data-block onClick={wallet.disconnect}>
-        Disconnect
+        {t.disconnect}
       </button>
     </div>
   );
@@ -485,40 +487,37 @@ function PairingQr({
 // Shown under the header when pairing fails or the service cannot load the wallet.
 export function WalletError() {
   const { error } = useWallet();
+  const t = useMessages().wallet;
   if (!error) return null;
   return (
     <div className="s-walleterror">
-      <Notice tone="danger" title={error.title}>
-        {error.message}
+      <Notice tone="danger" title={error.kind === 'timeout' ? t.timeoutTitle : t.loadTitle}>
+        {error.kind === 'timeout' ? t.timeoutBody : (error.detail ?? t.loadBody)}
       </Notice>
     </div>
   );
 }
 
-const BOTTOM_NAV: { to: string; label: string; icon: IconName }[] = [
-  { to: '/', label: 'Home', icon: 'home' },
-  { to: '/offers', label: 'Offers', icon: 'offers' },
-  { to: '/trades', label: 'Trades', icon: 'trades' },
-  { to: '/chats', label: 'Chats', icon: 'chats' },
+const BOTTOM_NAV: { to: string; label: 'home' | 'offers' | 'trades' | 'chats'; icon: IconName }[] = [
+  { to: '/', label: 'home', icon: 'home' },
+  { to: '/offers', label: 'offers', icon: 'offers' },
+  { to: '/trades', label: 'trades', icon: 'trades' },
+  { to: '/chats', label: 'chats', icon: 'chats' },
 ];
 
 // With a wallet and below 720px, the main sections move to a bar at the bottom (CSS hides it on wider screens).
 // Trades counts the trades waiting for this person and Chats the unread messages, as in the header.
 export function BottomNav() {
+  const t = useMessages().nav;
   return (
-    <nav className="cf-bottomnav" aria-label="Main">
+    <nav className="cf-bottomnav" aria-label={t.label}>
       {BOTTOM_NAV.map((item) => (
         <NavLink key={item.to} to={item.to} end={item.to === '/'}>
           <Icon name={item.icon} />
-          {item.label}
+          {t[item.label]}
           <NavBadge to={item.to} />
         </NavLink>
       ))}
     </nav>
   );
 }
-
-
-// "15 Nov 2026", as in the design. The service counts time in seconds.
-const formatDate = (seconds: number) =>
-  new Date(seconds * 1000).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' });

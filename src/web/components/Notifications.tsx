@@ -21,6 +21,7 @@ import {
 } from '../notifications';
 import { readSessionKey } from '../take';
 import { roleOf } from '../trade';
+import { useMessages } from '../lang';
 
 // In-app notifications while the page is open and a wallet is connected: the counters on Trades and Chats, the
 // count in the tab title, and a short toast when something happens. Nothing is pushed: this page polls the service,
@@ -206,13 +207,13 @@ export function NotificationsProvider({ identity, children }: { identity: string
  */
 export function NavBadge({ to }: { to: string }) {
   const counts = useNotificationCounts();
+  const t = useMessages().notify;
   const n = to === '/trades' ? counts.trades : to === '/chats' ? counts.chats : 0;
   if (n === 0) return null;
   return (
     <span className="cf-badge">
       {n}
-      {/* Invented copy. */}
-      <span className="nt-sronly">{to === '/trades' ? ' waiting for you' : ' unread'}</span>
+      <span className="nt-sronly">{to === '/trades' ? t.waitingForYou : t.unread}</span>
     </span>
   );
 }
@@ -255,6 +256,8 @@ function describe(trade: Trade, identity: string, config: ReturnType<typeof useC
 
 function ToastHost({ event, identity, onDismiss }: { event: NotificationEvent | undefined; identity: string; onDismiss: () => void }) {
   const config = useConfig();
+  // Also re-renders the toast when the language changes.
+  const t = useMessages().notify;
   const [held, setHeld] = useState(false);
   const [hidden, setHidden] = useState(() => document.hidden);
 
@@ -294,8 +297,7 @@ function ToastHost({ event, identity, onDismiss }: { event: NotificationEvent | 
             <strong className="nt-toast__title">{toast.title}</strong>
             {toast.body && <span className="nt-toast__body">{toast.body}</span>}
           </Link>
-          {/* Invented copy. */}
-          <button type="button" className="nt-toast__close" aria-label="Dismiss" onClick={onDismiss}>
+          <button type="button" className="nt-toast__close" aria-label={t.dismiss} onClick={onDismiss}>
             <span aria-hidden="true">×</span>
           </button>
         </div>

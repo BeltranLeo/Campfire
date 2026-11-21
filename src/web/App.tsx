@@ -10,7 +10,7 @@ import { Home } from './pages/Home';
 import { Landing } from './pages/Landing';
 import { MyOffers } from './pages/MyOffers';
 import { MyTrades } from './pages/MyTrades';
-import { NotBuilt } from './pages/NotBuilt';
+import { NotFound } from './pages/NotFound';
 import { Offers } from './pages/Offers';
 import { Roadmap } from './pages/Roadmap';
 import { Take } from './pages/Take';
@@ -43,7 +43,7 @@ function Front() {
   return <Landing />;
 }
 
-// Every route from the design handoff. Pages that are not built yet say so instead of showing a mock-up.
+// Every route from the design handoff, and a not-found page for any other address.
 export function App() {
   return (
     <Routes>
@@ -65,7 +65,7 @@ export function App() {
         <Route path="transparency" element={<Transparency />} />
         <Route path="roadmap" element={<Roadmap />} />
         {import.meta.env.DEV && <Route path="dev/components" element={<DevComponents />} />}
-        <Route path="*" element={<NotBuilt title="Page not found" />} />
+        <Route path="*" element={<NotFound />} />
       </Route>
     </Routes>
   );

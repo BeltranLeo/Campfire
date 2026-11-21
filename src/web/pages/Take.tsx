@@ -252,7 +252,7 @@ function TakeOffer({ offer }: { offer: Offer }) {
             <div className="cf-field" data-invalid={!inRange || undefined}>
               {/* Pesos or coins for every coin: a PUSD buyer thinks in their own money as much as a BCH buyer. */}
               <div className="tk-label">
-                <label htmlFor="amount">{t.youPay}</label>
+                <label htmlFor="amount">{mode === 'fiat' ? t.youPay : t.youGet}</label>
                 <div className="cf-seg" role="group" aria-label={t.typeIn}>
                   <button type="button" aria-pressed={mode === 'fiat'} disabled={!priced} title={priced ? undefined : t.priceUnavailable} onClick={() => chooseMode('fiat')}>
                     {doc.fiat}

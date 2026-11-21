@@ -84,7 +84,7 @@ const en = {
     },
     {
       q: 'When does my wallet ask me to sign?',
-      a: 'Only when coins move: publishing a sell offer, locking coins, releasing them, or cancelling. Buttons that open your wallet say so.',
+      a: 'Once to sign in, the first time you connect in a browser: it is free and moves no funds. After that, only when coins move: publishing a sell offer, locking coins, releasing them, or cancelling. Buttons that open your wallet say so.',
     },
     {
       q: 'What does “Simulated” mean?',
@@ -186,7 +186,7 @@ const es: typeof en = {
     },
     {
       q: '¿Cuándo me pide firmar mi billetera?',
-      a: 'Solo cuando se mueven monedas: al publicar una oferta de venta, bloquear monedas, liberarlas o cancelar. Los botones que abren tu billetera lo indican.',
+      a: 'Una vez para iniciar sesión, la primera vez que conectas en un navegador: es gratis y no mueve fondos. Después, solo cuando se mueven monedas: al publicar una oferta de venta, bloquear monedas, liberarlas o cancelar. Los botones que abren tu billetera lo indican.',
     },
     {
       q: '¿Qué significa «Simulado»?',
