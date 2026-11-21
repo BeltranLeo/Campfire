@@ -34,6 +34,9 @@ import { useWallet } from '../wallet';
 
 const QUOTE_INTERVAL_MS = 30_000;
 
+/** How often the list is read again while the page is open. */
+const OFFERS_REFRESH_MS = 30_000;
+
 export function Offers() {
   const [params, setParams] = useSearchParams();
   // The link decides; without one, the list starts on buying.
@@ -44,7 +47,8 @@ export function Offers() {
   const m = useMessages();
   const t = m.offers;
 
-  const offers = usePoll(() => apiGet<{ offers: Offer[] }>('/api/offers?onlyOpen=true').then((r) => r.offers), 'offers');
+  // Read again every 30 s, as on Home, so new offers show up and taken or closed ones leave without a reload.
+  const offers = usePoll(() => apiGet<{ offers: Offer[] }>('/api/offers?onlyOpen=true').then((r) => r.offers), 'offers', OFFERS_REFRESH_MS);
   const all = offers.data ?? [];
   // With a wallet, a tab leads to the offers it published; its badge counts the open ones, already in this list.
   const wallet = useWallet();
