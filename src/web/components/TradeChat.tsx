@@ -4,6 +4,8 @@ import { ApiError, isFinalState, type Trade } from '../api';
 import {
   ChatSendError,
   MAX_CHAT_MESSAGE_CHARS,
+  chatClosedText,
+  chatClosesAt,
   noChatKey,
   chatState,
   createChatFeed,
@@ -12,10 +14,11 @@ import {
   sendChatImage,
   sendChatMessage,
   type ChatLine,
+  type ChatState,
   type ChatRole,
 } from '../chat';
 import { CHAT_IMAGE_ACCEPT, prepareChatImage } from '../chatImage';
-import { formatHourMinute } from '../format';
+import { formatDateTime, formatHourMinute } from '../format';
 import { usePoll } from '../hooks/usePoll';
 import { readSessionKey } from '../take';
 import { useWallet } from '../wallet';
@@ -37,6 +40,7 @@ export function TradeChat({ trade, role }: { trade: Trade; role: ChatRole }) {
   const t = useMessages().chat;
   const sessionKey = readSessionKey(trade.id);
   const state = chatState(trade, role, sessionKey);
+  useCloseOnTime(trade, state);
   const sectionRef = useRef<HTMLElement>(null);
   const [params] = useSearchParams();
   const wantsChat = params.has('chat');
@@ -76,6 +80,22 @@ export function TradeChat({ trade, role }: { trade: Trade; role: ChatRole }) {
       </div>
     </section>
   );
+}
+
+// A finished trade's chat stays open for seven days. The page may stop polling a finished trade, so nothing else
+// would re-render this card when that time comes: a timer does, and the chat turns read-only in place.
+function useCloseOnTime(trade: Trade, state: ChatState) {
+  const [, setTick] = useState(0);
+  const ended = isFinalState(trade.status);
+  const closesAt = ended ? chatClosesAt(trade) : 0;
+  useEffect(() => {
+    if (state !== 'open' || !ended) return;
+    const wait = closesAt * 1000 - Date.now();
+    // Browsers fire a timer longer than about 24.8 days at once; seven days is well within it.
+    if (wait <= 0 || wait > 2 ** 31 - 1) return;
+    const timer = setTimeout(() => setTick((n) => n + 1), wait + 1000);
+    return () => clearTimeout(timer);
+  }, [state, ended, closesAt]);
 }
 
 // Invented copy: the design only shows an open chat. The chat opens when the trade is accepted, which on a sell
@@ -216,10 +236,15 @@ function ChatThread({ trade, role, sessionKey, open }: { trade: Trade; role: Cha
           {t.intro}
         </div>
         {messages}
-        {!open && (
-          // Invented copy.
+        {/* Invented copy: a finished trade's chat stays open for seven days, then closes. */}
+        {open && isFinalState(trade.status) && (
           <div className="cf-msg" data-system>
-            {t.closed}
+            {t.openAfterEnd(formatDateTime(chatClosesAt(trade)))}
+          </div>
+        )}
+        {!open && (
+          <div className="cf-msg" data-system>
+            {chatClosedText(trade)}
           </div>
         )}
       </div>

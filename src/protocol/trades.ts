@@ -22,6 +22,20 @@ export const VERDICT_BUYER = '01' as const;
 export const VERDICT_SELLER = '02' as const;
 export type VerdictHex = typeof VERDICT_BUYER | typeof VERDICT_SELLER;
 
+/**
+ * How long the trade chat stays open after the trade ends (protocol section 6): time for a late transfer, a receipt
+ * or a thank-you. Then it closes and the history stays readable.
+ */
+export const CHAT_OPEN_AFTER_END_SECONDS = 7 * 24 * 60 * 60;
+
+/**
+ * When a finished trade's chat closes, in Unix seconds. A trade that settled or got a verdict has `completedAt`; a
+ * dropped one has none, and its last update is the moment it was dropped.
+ */
+export function chatClosesAt(trade: { completedAt?: number; updatedAt: number }): number {
+  return (trade.completedAt ?? trade.updatedAt) + CHAT_OPEN_AFTER_END_SECONDS;
+}
+
 export interface PriceQuote {
   pair: string;
   price: string;

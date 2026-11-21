@@ -11,24 +11,27 @@ import {
   verifyChatMessageSignature,
 } from '../protocol/crypto.js';
 import { encodeChatImage, looksLikeChatImage, parseChatImage, type ChatImage } from '../protocol/chatImage.js';
+import { chatClosesAt } from '../protocol/trades.js';
 import { apiGet, apiPost, isFinalState, type ChatMessage, type Trade } from './api';
+import { formatDateTime } from './format';
 import { text } from './messages';
 import { disputeKeyHex, type Role } from './trade';
 
 export { MAX_CHAT_MESSAGE_CHARS };
 export { MAX_CHAT_IMAGE_BYTES, type ChatImage } from '../protocol/chatImage.js';
+export { chatClosesAt };
 
 export type ChatRole = 'buyer' | 'seller';
 
 /** The fields of a trade the chat needs. */
-export type ChatTrade = Pick<Trade, 'id' | 'tradeId' | 'status' | 'buyerSessionPk' | 'sellerSessionPk'>;
+export type ChatTrade = Pick<Trade, 'id' | 'tradeId' | 'status' | 'buyerSessionPk' | 'sellerSessionPk' | 'completedAt' | 'updatedAt'>;
 
 /**
  * - `visitor`: not a party to the trade; there is no chat to show.
  * - `not-open`: the chat opens once the trade is accepted and both session keys are in the terms.
  * - `no-key`: this browser does not hold this party's session key (another device, cleared storage).
- * - `closed`: the trade ended; the history can be read, nothing new can be sent.
- * - `open`: read and write.
+ * - `closed`: the trade ended more than seven days ago (chatClosesAt); the history can be read, nothing new can be sent.
+ * - `open`: read and write, also for seven days after the trade ends.
  */
 export type ChatState = 'visitor' | 'not-open' | 'no-key' | 'closed' | 'open';
 
@@ -57,12 +60,21 @@ export function holdsSessionKey(trade: ChatTrade, role: ChatRole, sessionPrivate
   return publicKeyOf(sessionPrivateKey) === expected.toLowerCase();
 }
 
-export function chatState(trade: ChatTrade, role: Role, sessionPrivateKey: string | null): ChatState {
+/** `nowSeconds` is Unix seconds, for tests; the service enforces the same limit with its own clock. */
+export function chatState(
+  trade: ChatTrade,
+  role: Role,
+  sessionPrivateKey: string | null,
+  nowSeconds = Date.now() / 1000,
+): ChatState {
   if (role === 'visitor') return 'visitor';
   if (!trade.tradeId || !trade.buyerSessionPk || !trade.sellerSessionPk) return 'not-open';
   if (!holdsSessionKey(trade, role, sessionPrivateKey)) return 'no-key';
-  return isFinalState(trade.status) ? 'closed' : 'open';
+  return isFinalState(trade.status) && nowSeconds >= chatClosesAt(trade) ? 'closed' : 'open';
 }
+
+/** "The chat closed on …": said under a closed chat and when sending to one. */
+export const chatClosedText = (trade: ChatTrade) => text().chat.closed(formatDateTime(chatClosesAt(trade)));
 
 /** The AES key both parties derive for the chat: this party's session key with the other party's public one. */
 export function chatKeyHex(trade: ChatTrade, role: ChatRole, sessionPrivateKey: string | null): string | undefined {
@@ -212,7 +224,7 @@ async function sendPlaintext(params: SendParams, plaintext: string): Promise<Cha
   const state = chatState(trade, role, sessionPrivateKey);
   if (state === 'not-open') throw new ChatSendError(text().chat.notOpen);
   if (state === 'no-key') throw new ChatSendError(noChatKey());
-  if (state === 'closed') throw new ChatSendError(text().chat.closed);
+  if (state === 'closed') throw new ChatSendError(chatClosedText(trade));
   const key = chatKeyHex(trade, role, sessionPrivateKey);
   if (!key || !sessionPrivateKey || !trade.tradeId) throw new ChatSendError(noChatKey());
   const ciphertext = await encryptChatMessage(key, plaintext);

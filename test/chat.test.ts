@@ -1,10 +1,12 @@
 import { describe, expect, it } from 'vitest';
+import { CHAT_OPEN_AFTER_END_SECONDS } from '../src/protocol/trades.js';
 import { CHAT_IMAGE_PREFIX, MAX_CHAT_IMAGE_BYTES, chatImageBytes, encodeChatImage, parseChatImage } from '../src/protocol/chatImage.js';
 import { MAX_CHAT_CIPHERTEXT_LENGTH, encryptChatMessage, MAX_CHAT_MESSAGE_CHARS, signChatMessage } from '../src/protocol/crypto.js';
 import type { ChatMessage } from '../src/web/api.js';
 import {
   ChatSendError,
   chatKeyHex,
+  chatClosesAt,
   chatState,
   createChatFeed,
   createChatReader,
@@ -31,6 +33,7 @@ const trade: ChatTrade = {
   status: 'Funded',
   buyerSessionPk: buyerSession.publicKey,
   sellerSessionPk: sellerSession.publicKey,
+  updatedAt: 0,
 };
 
 // Sends as one party through a fake service that stores what it receives, the way POST /api/trades/:id/chat does.
@@ -108,6 +111,16 @@ describe('Trade chat in the browser (protocol section 6)', () => {
     expect(chatState(trade, 'buyer', sellerSession.privateKey)).toBe('no-key');
     expect(chatState(trade, 'buyer', buyerSession.privateKey)).toBe('open');
     expect(chatState({ ...trade, status: 'Released' }, 'seller', sellerSession.privateKey)).toBe('closed');
+    // A finished trade's chat stays open for seven days from when it ended, then closes.
+    const ended = { ...trade, status: 'Released' as const, completedAt: 1_000_000, updatedAt: 1_000_500 };
+    const week = CHAT_OPEN_AFTER_END_SECONDS;
+    expect(chatClosesAt(ended)).toBe(1_000_000 + week);
+    expect(chatState(ended, 'seller', sellerSession.privateKey, 1_000_000 + week - 1)).toBe('open');
+    expect(chatState(ended, 'seller', sellerSession.privateKey, 1_000_000 + week)).toBe('closed');
+    // A dropped trade has no completedAt: its last update is when it was dropped.
+    const dropped = { ...trade, status: 'Dropped' as const, updatedAt: 2_000_000 };
+    expect(chatState(dropped, 'buyer', buyerSession.privateKey, 2_000_000 + week - 1)).toBe('open');
+    expect(chatState(dropped, 'buyer', buyerSession.privateKey, 2_000_000 + week)).toBe('closed');
   });
 
   it('refuses to send what the service would refuse', async () => {

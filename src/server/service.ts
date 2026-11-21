@@ -25,6 +25,7 @@ import {
   buildArbitrateSpend,
   buildCancelRequest,
   buildRefundSpend,
+  chatClosesAt,
   buildReleaseRequest,
   computeFiatAmount,
   computeTradeFees,
@@ -138,8 +139,8 @@ export interface SponsorshipStatus extends SponsorshipLimits {
   openNow: number;
 }
 
-// States in which the trade is over, so its chat no longer takes messages.
-const CHAT_CLOSED_STATES: ReadonlySet<TradeState> = new Set(['Released', 'ResolvedBuyer', 'ResolvedSeller', 'Cancelled', 'Refunded', 'Dropped']);
+// States in which the trade is over: its chat takes messages for seven more days (chatClosesAt), then closes.
+const TRADE_ENDED_STATES: ReadonlySet<TradeState> = new Set(['Released', 'ResolvedBuyer', 'ResolvedSeller', 'Cancelled', 'Refunded', 'Dropped']);
 
 export interface DecryptedChatMessage {
   id: string;
@@ -1624,9 +1625,9 @@ export class CampfireService {
     if (!trade.tradeId || !trade.buyerSessionPk || !trade.sellerSessionPk) {
       throw new Error('The chat opens once the trade is accepted');
     }
-    // A finished trade keeps its chat as a record; nothing new can be added to it.
-    if (CHAT_CLOSED_STATES.has(trade.status)) {
-      throw new Error('The chat closed when the trade ended');
+    // A finished trade keeps its chat open for seven days, then as a record that takes nothing new.
+    if (TRADE_ENDED_STATES.has(trade.status) && this.nowSeconds() >= chatClosesAt(trade)) {
+      throw new Error('The chat closed seven days after the trade ended');
     }
     // The role whose session key signed it; a person trading with themselves holds both roles.
     const roles: ('buyer' | 'seller')[] = [];

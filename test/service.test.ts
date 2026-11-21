@@ -22,6 +22,7 @@ import {
 import {
   BCH_ASSET,
   BCH_DECIMALS,
+  CHAT_OPEN_AFTER_END_SECONDS,
   PUSD_CATEGORY,
   MAX_CHAT_CIPHERTEXT_LENGTH,
   MAX_CHAT_IMAGE_PLAINTEXT_CHARS,
@@ -468,17 +469,6 @@ describe('CampfireService & HTTP API end-to-end lifecycle', () => {
     expect(settleRes.data.trade.status).toBe('Released');
     expect(settleRes.data.trade.settlementTxid).toMatch(/^[0-9a-f]{64}$/);
 
-    // A finished trade keeps its chat, read-only.
-    const late = await encryptChatMessage(sharedKey, 'Thanks!');
-    const afterEnd = await ctx.jsonReq('POST', `/api/trades/${acceptedTrade.tradeId}/chat`, {
-      senderIdentity: buyerId,
-      ciphertext: late,
-      signature: signChatMessage(buyerSession.privateKey, acceptedTrade.tradeId!, late),
-    });
-    expect(afterEnd.status).toBe(400);
-    expect(afterEnd.data.error).toMatch(/chat closed/);
-    const history = await ctx.jsonReq('GET', `/api/trades/${acceptedTrade.tradeId}/chat`);
-    expect(history.data.messages).toHaveLength(1);
     // A polling client asks only for what is new: from the second of its newest message (that one comes again, and
     // the client drops it by id), and nothing once it is behind.
     const sentAt: number = chatRes.data.message.createdAt;
@@ -487,6 +477,25 @@ describe('CampfireService & HTTP API end-to-end lifecycle', () => {
     expect((await chatSince(String(sentAt + 1))).data.messages).toHaveLength(0);
     expect((await chatSince('abc')).status).toBe(400);
     expect((await chatSince('-5')).status).toBe(400);
+
+    // A finished trade keeps its chat open for seven days, then read-only.
+    const postLate = async (plaintext: string) => {
+      const late = await encryptChatMessage(sharedKey, plaintext);
+      return ctx.jsonReq('POST', `/api/trades/${acceptedTrade.tradeId}/chat`, {
+        senderIdentity: buyerId,
+        ciphertext: late,
+        signature: signChatMessage(buyerSession.privateKey, acceptedTrade.tradeId!, late),
+      });
+    };
+    const endedAt: number = settleRes.data.trade.completedAt!;
+    ctx.advanceTime(endedAt + CHAT_OPEN_AFTER_END_SECONDS - 1 - ctx.getNow());
+    expect((await postLate('Thanks!')).status).toBe(201);
+    ctx.advanceTime(1);
+    const afterWeek = await postLate('One more thing');
+    expect(afterWeek.status).toBe(400);
+    expect(afterWeek.data.error).toMatch(/chat closed seven days after the trade ended/);
+    const history = await ctx.jsonReq('GET', `/api/trades/${acceptedTrade.tradeId}/chat`);
+    expect(history.data.messages).toHaveLength(2);
 
     // 8. Check reputation counters for both seller and buyer.
     const sellerRep = await ctx.jsonReq('GET', `/api/identities/${sellerId}/reputation`);
