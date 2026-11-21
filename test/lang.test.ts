@@ -23,7 +23,6 @@ describe('the interface language', () => {
         ? Object.entries(value).flatMap(([k, v]) => keys(v, `${path}.${k}`))
         : [path];
     expect(keys(MESSAGES.es)).toEqual(keys(MESSAGES.en));
-    expect(MESSAGES.es.landing.how).toHaveLength(MESSAGES.en.landing.how.length);
     expect(MESSAGES.es.tradePage.disputeReasons).toHaveLength(MESSAGES.en.tradePage.disputeReasons.length);
     expect(MESSAGES.es.seller.disputeReasons).toHaveLength(MESSAGES.en.seller.disputeReasons.length);
   });

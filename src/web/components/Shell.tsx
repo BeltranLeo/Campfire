@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Link, NavLink, Outlet } from 'react-router';
+import { Link, NavLink, Outlet, useLocation } from 'react-router';
 import { BANNER_LINKS, PROTOCOL_SPEC_URL, REPO_URL, VOTING_ADDRESS } from '../links';
 import { setLang, useLang, useMessages } from '../lang';
 import type { Lang, Messages } from '../messages';
@@ -35,35 +35,39 @@ export function Shell() {
   useWalletCoinsSync();
   const nav = NAV.filter((item) => connected || !item.app);
   const t = useMessages().nav;
+  // The landing page (a visitor at "/") brings its own header and footer: only the hackathon banner stays above it.
+  const landing = useLocation().pathname === '/' && wallet.status !== 'connected' && wallet.status !== 'connecting';
 
   // The provider is always there, so connecting or disconnecting never remounts the page; it is idle without a wallet.
   return (
     <NotificationsProvider identity={connected ? wallet.identity : null}>
       <Banner />
-      <header className="cf-header">
-        <div className="s-headerbar">
-          {/* The logo is a file, never the word set in a font: the version for the night-blue header. */}
-          <Link className="cf-logo" to="/" aria-label={t.logo}>
-            <img src={logoDark} alt="" data-wordmark />
-            {/* On a phone only the symbol shows, so the logo, the nav and the wallet button share one row. */}
-            <img src={logoSymbol} alt="" data-symbol />
-          </Link>
-          <nav className="cf-nav" data-app={connected || undefined} aria-label={t.label}>
-            {nav.map((item) => (
-              // `end` keeps "/" from matching every route.
-              <NavLink key={item.to} to={item.to} end={item.to === '/'}>
-                {t[item.label]}
-                {connected && <NavBadge to={item.to} />}
-              </NavLink>
-            ))}
-          </nav>
-          <span className="cf-grow" />
-          <WalletButton />
-        </div>
-      </header>
+      {!landing && (
+        <header className="cf-header">
+          <div className="s-headerbar">
+            {/* The logo is a file, never the word set in a font: the version for the night-blue header. */}
+            <Link className="cf-logo" to="/" aria-label={t.logo}>
+              <img src={logoDark} alt="" data-wordmark />
+              {/* On a phone only the symbol shows, so the logo, the nav and the wallet button share one row. */}
+              <img src={logoSymbol} alt="" data-symbol />
+            </Link>
+            <nav className="cf-nav" data-app={connected || undefined} aria-label={t.label}>
+              {nav.map((item) => (
+                // `end` keeps "/" from matching every route.
+                <NavLink key={item.to} to={item.to} end={item.to === '/'}>
+                  {t[item.label]}
+                  {connected && <NavBadge to={item.to} />}
+                </NavLink>
+              ))}
+            </nav>
+            <span className="cf-grow" />
+            <WalletButton />
+          </div>
+        </header>
+      )}
       <WalletError />
       <Outlet />
-      <Footer />
+      {!landing && <Footer />}
       {connected && <BottomNav />}
     </NotificationsProvider>
   );

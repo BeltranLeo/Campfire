@@ -1,187 +1,120 @@
-import { Link } from 'react-router';
-import { apiGet, type Offer, type PublicTradePage } from '../api';
-import { assetInfo } from '../assets';
-import { Button } from '../components/Button';
-import { Details } from '../components/Details';
-import { Icon } from '../components/Icon';
-import { ProvenanceTag, SimBox } from '../components/Provenance';
-import { Skeleton } from '../components/States';
-import { useConfig } from '../config';
-import { DSPROOF_WATCH_SEC } from '../dsproof';
-import { formatFiat, formatRange, fromBaseUnits, paymentMethodLabel } from '../format';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
+import { useNavigate } from 'react-router';
+import { apiGet, type Offer } from '../api';
+import { WalletButton } from '../components/Wallet';
 import { usePoll } from '../hooks/usePoll';
-import { useMessages } from '../lang';
-import { isSimulatedOffer, loadQuotes, priceOf, unique } from '../offerData';
+import { setLang, useLang } from '../lang';
+import markupEn from '../landing/landing.html?raw';
+import { startLanding } from '../landing/motion.js';
+import { translateToSpanish } from '../landing/translate';
+import '../landing/landing.css';
+import bandI2n from '../landing/img/band-i2n.webp';
+import bandN2i from '../landing/img/band-n2i.webp';
+import bannerGlass from '../landing/img/banner-glass.webp';
+import ben1 from '../landing/img/ben1.webp';
+import ben2 from '../landing/img/ben2.webp';
+import ben3 from '../landing/img/ben3.webp';
+import ben4 from '../landing/img/ben4.webp';
+import logoDark from '../landing/img/logo-dark.webp';
+import panelBlue from '../landing/img/panel-blue.webp';
+import panelLight from '../landing/img/panel-light.webp';
+import simRibbon from '../landing/img/sim-ribbon.webp';
+import symbol from '../landing/img/symbol.webp';
+import texture from '../landing/img/texture.webp';
 
-// The front page (Landing-* screens): the two intentions and where to get a wallet, the demo, how a trade works
-// (with why nobody waits for blocks folded under it), the latest offers and Campfire's numbers. Every number is real.
+// The front page for a visitor, exactly as Aye designed it (design/landing.src.html on the design branch): the
+// markup and styles are hers, kept in src/web/landing/, and only the buttons are wired to the app's pages.
+// The page brings its own header and footer, so the Shell draws only the hackathon banner above it; the app's
+// wallet button goes into her header, at the top right, as the hackathon rules ask.
+
+const IMAGES: Record<string, string> = {
+  BAND_I2N: bandI2n,
+  BAND_N2I: bandN2i,
+  BANNER_GLASS: bannerGlass,
+  BEN1: ben1,
+  BEN2: ben2,
+  BEN3: ben3,
+  BEN4: ben4,
+  LOGO_DARK: logoDark,
+  PANEL_BLUE: panelBlue,
+  PANEL_LIGHT: panelLight,
+  SIM_RIBBON: simRibbon,
+  SYMBOL: symbol,
+  TEXTURE: texture,
+};
 
 export function Landing() {
-  const config = useConfig();
-  const offers = usePoll(() => apiGet<{ offers: Offer[] }>('/api/offers?onlyOpen=true').then((r) => r.offers), 'offers');
-  // Only the totals: the list itself is the public view, and the front page shows none of it.
-  const stats = usePoll(() => apiGet<PublicTradePage>('/api/trades?limit=1').then((r) => r.stats), 'trades');
-  const latest = offers.data?.slice(0, 3) ?? [];
-  const pairs = unique(latest.flatMap((o) => (o.document.price.type === 'floating' ? [o.document.price.pair] : [])));
-  const quotes = usePoll(() => loadQuotes(pairs), pairs.join(','), pairs.length ? 30_000 : undefined);
-  const demoOffer = offers.data?.find((o) => o.isDemo && o.document.asset === 'BCH') ?? offers.data?.find((o) => o.isDemo);
-  const t = useMessages().landing;
+  const root = useRef<HTMLDivElement>(null);
+  const [walletSlot, setWalletSlot] = useState<HTMLElement | null>(null);
+  const navigate = useNavigate();
+  const lang = useLang();
+  const offers = usePoll(
+    () => apiGet<{ offers: Offer[] }>('/api/offers?onlyOpen=true').then((r) => r.offers),
+    'offers',
+  );
+  const demoOffer =
+    offers.data?.find((o) => o.isDemo && o.document.asset === 'BCH') ?? offers.data?.find((o) => o.isDemo);
+  const demoPath = demoOffer ? `/offers/${demoOffer.offerTxid}` : '/offers';
+
+  const html = useMemo(() => markupEn.replace(/\{\{(\w+)\}\}/g, (_, key: string) => IMAGES[key] ?? ''), []);
+
+  // The page scrolls smoothly to its sections and leaves room for its header, only while it is shown.
+  useEffect(() => {
+    const el = root.current;
+    if (!el) return;
+    const style = document.documentElement.style;
+    style.scrollBehavior = 'smooth';
+    style.scrollPaddingTop = 'calc(var(--lp-header, 76px) + 8px)';
+    const stop = startLanding(el);
+    // In Spanish the texts are translated as they are drawn (landing/translate.ts).
+    const stopTranslating = lang === 'es' ? translateToSpanish(el) : undefined;
+    setWalletSlot(el.querySelector<HTMLElement>('#navWallet'));
+    el.querySelector(`a[data-lang="${lang}"]`)?.setAttribute('aria-current', 'true');
+    return () => {
+      stop();
+      stopTranslating?.();
+      style.scrollBehavior = '';
+      style.scrollPaddingTop = '';
+    };
+  }, [html, lang]);
+
+  // Buttons marked data-to open the app's pages without reloading it ("demo" is the demo offer), section links
+  // scroll, and the footer's language links switch the language. `lang` is here because the page is redrawn
+  // (a new element) when the language changes.
+  useEffect(() => {
+    const el = root.current;
+    if (!el) return;
+    const onClick = (event: MouseEvent) => {
+      const langLink = (event.target as Element).closest<HTMLAnchorElement>('a[data-lang]');
+      if (langLink) {
+        event.preventDefault();
+        setLang(langLink.dataset.lang === 'es' ? 'es' : 'en');
+        return;
+      }
+      // The app routes by the address's hash, so a section link (#why) would open a page called "why": scroll to
+      // the section instead.
+      const sectionLink = (event.target as Element).closest<HTMLAnchorElement>('a[href^="#"]:not([href^="#/"])');
+      if (sectionLink && !sectionLink.dataset.to) {
+        event.preventDefault();
+        el.querySelector(sectionLink.getAttribute('href')!)?.scrollIntoView();
+        return;
+      }
+      const link = (event.target as Element).closest<HTMLAnchorElement>('a[data-to]');
+      if (!link || event.metaKey || event.ctrlKey || event.shiftKey || event.button !== 0) return;
+      event.preventDefault();
+      const to = link.dataset.to === 'demo' ? demoPath : link.dataset.to!;
+      window.scrollTo(0, 0);
+      navigate(to);
+    };
+    el.addEventListener('click', onClick);
+    return () => el.removeEventListener('click', onClick);
+  }, [demoPath, navigate, lang]);
 
   return (
-    <main className="s-main" data-site>
-      <section className="s-hero">
-        <div className="cf-stack">
-          <h1>{t.title}</h1>
-          <p className="cf-muted s-herolead">{t.lead}</p>
-        </div>
-        <div className="s-intents">
-          <Link className="cf-quick" data-variant="primary" to="/offers?side=buy">
-            <Icon name="buy" />
-            {t.buy}
-            <small>{t.buyHint}</small>
-          </Link>
-          <Link className="cf-quick" to="/offers?side=sell">
-            <Icon name="sell" />
-            {t.sell}
-            <small>{t.sellHint}</small>
-          </Link>
-          <p className="s-walletlink">
-            {/* Welcome shows how to get a wallet, then connects it. */}
-            {t.newcomer} <Link to="/welcome">{t.getWallet}</Link>
-          </p>
-        </div>
-      </section>
-
-      {/* The demo is the safest way to try, so it comes right after the two intentions. */}
-      <SimBox tag={t.demoTag} label={t.demoLabel} bodyGap={3}>
-        <p>{t.demoBody}</p>
-        <div>
-          <Button to={demoOffer ? `/offers/${demoOffer.offerTxid}` : '/offers'}>{t.demoButton}</Button>
-        </div>
-      </SimBox>
-
-      {/* What sets Campfire apart, one plain sentence each. Every card is true today. */}
-      <section className="cf-stack">
-        <h2 className="cf-title">{t.whyTitle}</h2>
-        <div className="s-3">
-          {t.why.map((item) => (
-            <div key={item.title} className="cf-card cf-stack" data-pad data-gap="1">
-              <strong>{item.title}</strong>
-              <span className="cf-small cf-muted">{item.body}</span>
-            </div>
-          ))}
-        </div>
-      </section>
-
-      <section className="cf-stack">
-        <h2 className="cf-title">{t.howTitle}</h2>
-        <HowSteps steps={t.how} />
-        {/* The 0-conf explanation does not help a newcomer decide, so it is folded; its On-chain tag stays on the summary. */}
-        <Details summary={t.safeSummary} tag={<ProvenanceTag kind="chain">{t.safeTag}</ProvenanceTag>}>
-          <p className="cf-muted">{t.safeLead}</p>
-          <HowSteps steps={t.safe(DSPROOF_WATCH_SEC)} />
-        </Details>
-      </section>
-
-      <section className="cf-card" data-flush>
-        <div className="s-sechead">
-          <h2 className="cf-heading">{t.latest}</h2>
-          <Link to="/offers">{t.seeAll}</Link>
-        </div>
-        {offers.data ? (
-          latest.map((offer) => {
-            const doc = offer.document;
-            const asset = assetInfo(doc.asset, doc.assetDecimals, config);
-            // Say what the visitor does: a buy offer is where *you* sell.
-            const visitorBuys = doc.side === 'sell';
-            const deal = visitorBuys ? t.payFiat(doc.fiat) : t.getFiat(doc.fiat);
-            const price = priceOf(offer, quotes.data?.byPair);
-            return (
-              <Link key={offer.offerTxid} className="s-item" to={`/offers/${offer.offerTxid}`}>
-                <span className="s-cell">
-                  <span>
-                    <strong>{visitorBuys ? t.youBuy(asset.symbol) : t.youSell(asset.symbol)}</strong>{' '}
-                    · <span className="cf-num">{price === null ? deal : formatFiat(price, doc.fiat)}</span>
-                  </span>
-                  <span className="cf-small cf-muted">
-                    {formatRange(doc.min, doc.max, asset)} ·{' '}
-                    {doc.paymentMethods.map((m) => (m === 'simulated' ? t.simulatedPayment : paymentMethodLabel(m))).join(', ')}
-                  </span>
-                  {isSimulatedOffer(offer) && (
-                    <span>
-                      <ProvenanceTag kind="sim">{t.demoTag}</ProvenanceTag>
-                    </span>
-                  )}
-                </span>
-                <span className="cf-btn" data-size="sm">
-                  {visitorBuys ? t.buyButton : t.sellButton}
-                </span>
-              </Link>
-            );
-          })
-        ) : (
-          <div className="s-item">
-            <Skeleton width="60%" />
-          </div>
-        )}
-      </section>
-
-      <section className="cf-card" data-pad>
-        <div className="cf-stack">
-          <div className="cf-row" data-between>
-            <h2 className="cf-heading">{t.statsTitle}</h2>
-            <ProvenanceTag kind="chain">{t.statsTag}</ProvenanceTag>
-          </div>
-          <Stats stats={stats.data} openOffers={offers.data?.length} />
-          <p className="cf-small cf-subtle">
-            {t.proofBefore}
-            <Link to="/transparency">{t.proofLink}</Link>
-            {t.proofAfter}
-            {stats.data && stats.data.demo > 0 && t.mostlyDemo}
-          </p>
-        </div>
-      </section>
-    </main>
+    <>
+      <div key={lang} className="lp" ref={root} dangerouslySetInnerHTML={{ __html: html }} />
+      {walletSlot && createPortal(<WalletButton />, walletSlot)}
+    </>
   );
 }
-
-function HowSteps({ steps }: { steps: { title: string; body: string }[] }) {
-  return (
-    <ol className="s-howto">
-      {steps.map((step, i) => (
-        <li key={step.title}>
-          <i>{i + 1}</i>
-          <span>
-            <strong>{step.title}</strong>
-            <span className="cf-small cf-muted">{step.body}</span>
-          </span>
-        </li>
-      ))}
-    </ol>
-  );
-}
-
-function Stats({ stats, openOffers }: { stats?: PublicTradePage['stats']; openOffers?: number }) {
-  const sats = stats ? BigInt(stats.bchSats) : undefined;
-  const value = (v: string | undefined) => (v === undefined ? <Skeleton width={64} height={28} /> : v);
-  const t = useMessages().landing;
-  return (
-    <div className="s-3">
-      <div className="s-stat">
-        <strong>{value(stats?.completed.toString())}</strong>
-        <span className="cf-small cf-muted">{t.tradesCompleted(stats?.completed ?? 0)}</span>
-      </div>
-      <div className="s-stat">
-        <strong>{value(sats === undefined ? undefined : `${trimZeros(fromBaseUnits(sats, 8))} BCH`)}</strong>
-        <span className="cf-small cf-muted">{t.traded}</span>
-      </div>
-      <div className="s-stat">
-        <strong>{value(openOffers?.toString())}</strong>
-        <span className="cf-small cf-muted">{t.openOffers}</span>
-      </div>
-    </div>
-  );
-}
-
-// "0.00005000" → "0.00005"; "1.84000000" → "1.84".
-const trimZeros = (decimal: string) => decimal.replace(/\.?0+$/, '');
