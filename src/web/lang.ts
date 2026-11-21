@@ -3,7 +3,7 @@
 // Only interface text changes: offers, the sign-in message and everything written on-chain stay byte for byte the same.
 
 import { useSyncExternalStore } from 'react';
-import { langFromUrl, MESSAGES, parseLang, type Lang, type Messages } from './messages';
+import { langFromUrl, MESSAGES, parseLang, setActiveLang, type Lang, type Messages } from './messages';
 
 export const LANG_KEY = 'campfire.lang';
 
@@ -23,12 +23,14 @@ export function readLang(): Lang {
   } catch {
     current = 'en';
   }
+  setActiveLang(current);
   document.documentElement.lang = current;
   return current;
 }
 
 export function setLang(lang: Lang): void {
   current = lang;
+  setActiveLang(lang);
   try {
     if (lang === 'en') localStorage.removeItem(LANG_KEY);
     else localStorage.setItem(LANG_KEY, lang);

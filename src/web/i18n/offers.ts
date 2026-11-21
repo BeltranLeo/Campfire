@@ -1,0 +1,118 @@
+// The offer list (pages/Offers.tsx and components/OfferRow.tsx). `es` must have the shape of `en`; messages.ts checks it.
+
+type Intent = 'buy' | 'sell';
+
+const en = {
+  title: 'Offers',
+  sideGroup: 'What do you want to do',
+  // `coin` is the filtered coin, or null for all of them.
+  intentBuy: (coin: string | null) =>
+    `You pay the seller directly. Their ${coin ?? 'coins'} ${coin ? 'is' : 'are'} locked in a contract before you pay.`,
+  intentSell: (coin: string | null) =>
+    `The buyer pays you directly. You lock your ${coin ?? 'coins'} only after you accept their request.`,
+  wantToPay: 'I want to pay',
+  wantToSell: 'I want to sell',
+  amountHint: (example: string) => `Enter an amount like ${example}.`,
+  filters: (active: number): string => (active ? `Filters (${active})` : 'Filters'),
+  coinLabel: (intent: Intent): string => (intent === 'buy' ? 'You get' : 'You give'),
+  fiatLabel: (intent: Intent): string => (intent === 'buy' ? 'You pay in' : 'You get paid in'),
+  methodLabel: (intent: Intent): string => (intent === 'buy' ? 'You pay by' : 'You get paid by'),
+  anyCoin: 'Any coin',
+  anyCurrency: 'Any currency',
+  anyMethod: 'Any method',
+  seller: 'Seller',
+  buyer: 'Buyer',
+  limits: 'Limits',
+  price: 'Price',
+  per: 'per',
+  payBy: (intent: Intent): string => (intent === 'buy' ? 'Pay by' : 'Paid by'),
+  loading: 'Loading offers…',
+  unavailable: 'Offers unavailable',
+  bestFirst: (count: number, intent: Intent) =>
+    `${count} ${count === 1 ? 'offer' : 'offers'} · most ${intent === 'buy' ? 'BCH for your money' : 'money for your BCH'} first`,
+  open: (count: number) => `${count} open ${count === 1 ? 'offer' : 'offers'}`,
+  pricesUpdated: (clock: string) => ` · Prices updated ${clock}`,
+  createOffer: 'Create offer',
+  listLabel: (intent: Intent) => `Offers to ${intent}`,
+  youGet: (amount: string) => `You get ${amount}`,
+  min: 'Min',
+  max: 'Max',
+  demoSeller: 'Demo seller',
+  demoSellerInitials: 'DS',
+  runByCampfire: 'Run by Campfire',
+  trades: (count: number): string => (count === 0 ? 'No trades yet' : `${count} ${count === 1 ? 'trade' : 'trades'}`),
+  fixedPrice: 'fixed price',
+  atMarket: 'at market',
+  market: (sign: string, percent: number) => `market ${sign}${percent}%`,
+  namesNote:
+    "Names like Quiet Ember come from each person's key. Nobody chooses them, and trade counts come from Campfire and can be inflated with a second wallet.",
+  noMatch: 'No offers match these filters',
+  noMatchBody: 'Try another coin, currency or payment method.',
+  clearFilters: 'Clear filters',
+  noBuyOffers: 'No buy offers right now',
+  noBuyOffersBody: 'Offers to buy appear here as soon as a buyer publishes one on-chain.',
+  noOffers: 'No open offers right now',
+  noOffersBody: 'Offers appear here as soon as a seller publishes one on-chain.',
+  publishOffer: 'Publish an offer',
+  loadError: 'We could not load the offers',
+  loadErrorBody: 'The server did not answer. Offers are published on-chain, so nothing is lost.',
+};
+
+const es: typeof en = {
+  title: 'Ofertas',
+  sideGroup: '¿Qué quieres hacer?',
+  intentBuy: (coin) =>
+    coin
+      ? `Le pagas directamente al vendedor. Sus ${coin} quedan bloqueados en un contrato antes de que pagues.`
+      : 'Le pagas directamente al vendedor. Sus monedas quedan bloqueadas en un contrato antes de que pagues.',
+  intentSell: (coin) =>
+    `El comprador te paga directamente. Bloqueas tus ${coin ?? 'monedas'} solo después de aceptar su solicitud.`,
+  wantToPay: 'Quiero pagar',
+  wantToSell: 'Quiero vender',
+  amountHint: (example) => `Escribe un monto como ${example}.`,
+  filters: (active) => (active ? `Filtros (${active})` : 'Filtros'),
+  coinLabel: (intent) => (intent === 'buy' ? 'Recibes' : 'Entregas'),
+  fiatLabel: (intent) => (intent === 'buy' ? 'Pagas en' : 'Cobras en'),
+  methodLabel: (intent) => (intent === 'buy' ? 'Pagas con' : 'Cobras con'),
+  anyCoin: 'Cualquiera',
+  anyCurrency: 'Cualquiera',
+  anyMethod: 'Cualquier método',
+  seller: 'Vendedor',
+  buyer: 'Comprador',
+  limits: 'Límites',
+  price: 'Precio',
+  per: 'por',
+  payBy: (intent) => (intent === 'buy' ? 'Pagas con' : 'Cobras con'),
+  loading: 'Cargando ofertas…',
+  unavailable: 'Ofertas no disponibles',
+  bestFirst: (count, intent) =>
+    `${count} ${count === 1 ? 'oferta' : 'ofertas'} · primero, ${intent === 'buy' ? 'las que dan más BCH por tu dinero' : 'las que pagan más por tus BCH'}`,
+  open: (count) => `${count} ${count === 1 ? 'oferta abierta' : 'ofertas abiertas'}`,
+  pricesUpdated: (clock) => ` · Precios actualizados a las ${clock}`,
+  createOffer: 'Crear oferta',
+  listLabel: (intent) => (intent === 'buy' ? 'Ofertas para comprar' : 'Ofertas para vender'),
+  youGet: (amount) => `Recibes ${amount}`,
+  min: 'Mín.',
+  max: 'Máx.',
+  demoSeller: 'Vendedor de demostración',
+  demoSellerInitials: 'VD',
+  runByCampfire: 'Administrado por Campfire',
+  trades: (count) => (count === 0 ? 'Sin operaciones aún' : `${count} ${count === 1 ? 'operación' : 'operaciones'}`),
+  fixedPrice: 'precio fijo',
+  atMarket: 'a precio de mercado',
+  market: (sign, percent) => `mercado ${sign}${percent}%`,
+  namesNote:
+    'Los nombres como Quiet Ember salen de la clave de cada persona. Nadie los elige, y el número de operaciones lo cuenta Campfire: se puede inflar con una segunda billetera.',
+  noMatch: 'Ninguna oferta coincide con estos filtros',
+  noMatchBody: 'Prueba con otra criptomoneda, moneda o método de pago.',
+  clearFilters: 'Borrar filtros',
+  noBuyOffers: 'No hay ofertas de compra por ahora',
+  noBuyOffersBody: 'Las ofertas de compra aparecen aquí en cuanto un comprador publica una en la cadena.',
+  noOffers: 'No hay ofertas abiertas por ahora',
+  noOffersBody: 'Las ofertas aparecen aquí en cuanto un vendedor publica una en la cadena.',
+  publishOffer: 'Publicar una oferta',
+  loadError: 'No pudimos cargar las ofertas',
+  loadErrorBody: 'El servidor no respondió. Las ofertas se publican en la cadena, así que no se pierde nada.',
+};
+
+export const offers = { en, es };

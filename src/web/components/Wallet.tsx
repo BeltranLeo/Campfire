@@ -23,12 +23,14 @@ export function WalletButton() {
   const wallet = useWallet();
   const [menuOpen, setMenuOpen] = useState(false);
   const closeMenu = useCallback(() => setMenuOpen(false), []);
-  const connectLabel = useMessages().wallet.connect;
+  const t = useMessages().wallet;
 
   if (wallet.status === 'disconnected') {
     return (
       <button type="button" className="cf-btn" onClick={wallet.connect}>
-        {connectLabel}
+        {/* Spanish runs longer, and on a phone the button shares one row with the nav: there it says less. */}
+        <span className="s-connect__long">{t.connect}</span>
+        <span className="s-connect__short">{t.connectShort}</span>
       </button>
     );
   }

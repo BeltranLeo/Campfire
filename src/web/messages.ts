@@ -1,8 +1,10 @@
-// Interface text in each language. So far: the site's frame (nav, footer, the connect button), the landing page
-// and Welcome; every other page is still English only. `es` must have the same shape as `en`, so TypeScript
+// Interface text in each language. The site's frame (nav, footer, the connect button) and the shared bits live here;
+// each translated page has its own file in i18n/, merged below. Pages not listed are still English only. `es` must have the same shape as `en`, so TypeScript
 // catches a missing or misnamed line. Spanish is neutral (no regional slang) and speaks to the person as «tú».
 // Never put here anything that is signed, hashed or stored in an offer: those words stay as they are in every language.
 // No DOM here, so test/lang.test.ts can check both languages under Node; the language switch is in lang.ts.
+
+import { offers } from './i18n/offers';
 
 export type Lang = 'en' | 'es';
 
@@ -46,7 +48,26 @@ const en = {
   },
   wallet: {
     connect: 'Connect wallet',
+    // The phone header shares one row with the nav, so the button says less there.
+    connectShort: 'Connect',
+    showBalance: 'Show balance',
+    hideBalance: 'Hide balance',
   },
+  common: {
+    copy: 'Copy',
+    copied: 'Copied',
+    tryAgain: 'Try again',
+    onChain: 'On-chain',
+    simulated: 'Simulated',
+    offChain: 'Off-chain',
+    onChainDetails: 'On-chain details',
+    openInExplorer: (value: string) => `${value}, open in block explorer`,
+    simulatedPayment: 'Simulated payment',
+    minToPay: (minutes: number) => `${minutes} min to pay`,
+    buy: 'Buy',
+    sell: 'Sell',
+  },
+  offers: offers.en,
   landing: {
     title: 'Buy or sell Bitcoin Cash directly with another person',
     lead: 'No exchange holds your money. A contract on the Bitcoin Cash network locks the seller’s coins until the payment is done.',
@@ -160,7 +181,25 @@ const es: Messages = {
   },
   wallet: {
     connect: 'Conectar billetera',
+    connectShort: 'Conectar',
+    showBalance: 'Mostrar saldo',
+    hideBalance: 'Ocultar saldo',
   },
+  common: {
+    copy: 'Copiar',
+    copied: 'Copiado',
+    tryAgain: 'Reintentar',
+    onChain: 'En la cadena',
+    simulated: 'Simulado',
+    offChain: 'Fuera de la cadena',
+    onChainDetails: 'Detalles en la cadena',
+    openInExplorer: (value: string) => `${value}, abrir en el explorador de bloques`,
+    simulatedPayment: 'Pago simulado',
+    minToPay: (minutes: number) => `${minutes} min para pagar`,
+    buy: 'Comprar',
+    sell: 'Vender',
+  },
+  offers: offers.es,
   landing: {
     title: 'Compra o vende Bitcoin Cash directamente con otra persona',
     lead: 'Ninguna plataforma guarda tu dinero. Un contrato en la red de Bitcoin Cash bloquea las monedas del vendedor hasta que se completa el pago.',
@@ -246,3 +285,16 @@ const es: Messages = {
 };
 
 export const MESSAGES: Record<Lang, Messages> = { en, es };
+
+// The language for code outside components (format.ts, trade.ts…), set by lang.ts. English until then, so the
+// unit tests read English. Components that show such text also call useMessages(), which re-renders them on a switch.
+let active: Lang = 'en';
+
+export function setActiveLang(lang: Lang): void {
+  active = lang;
+}
+
+/** The interface text in the current language, for code that is not a component. */
+export function text(): Messages {
+  return MESSAGES[active];
+}

@@ -1,9 +1,11 @@
 import { useEffect, useState } from 'react';
+import { useMessages } from '../lang';
 
 // Copies a value to the clipboard and confirms for a moment. Small by default (.cf-copy);
 // pass `block` for a full-width button.
-export function CopyButton({ value, label = 'Copy', block = false }: { value: string; label?: string; block?: boolean }) {
+export function CopyButton({ value, label, block = false }: { value: string; label?: string; block?: boolean }) {
   const [copied, setCopied] = useState(false);
+  const t = useMessages().common;
 
   useEffect(() => {
     if (!copied) return;
@@ -23,7 +25,7 @@ export function CopyButton({ value, label = 'Copy', block = false }: { value: st
         );
       }}
     >
-      {copied ? 'Copied' : label}
+      {copied ? t.copied : (label ?? t.copy)}
     </button>
   );
 }

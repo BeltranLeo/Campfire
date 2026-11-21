@@ -4,6 +4,7 @@ import type { AssetInfo } from '../assets';
 import { CoinIcon } from './CoinIcon';
 import { ProvenanceTag } from './Provenance';
 import { Skeleton } from './States';
+import { useMessages } from '../lang';
 
 // The offer list as a table: who, price, limits, payment, action. The same columns on both sides of the market, so
 // a buyer and a seller read one layout. On a computer one header names the columns; on a phone each row becomes a
@@ -50,10 +51,11 @@ export interface OfferRowProps {
 
 /** The column names, shown once above the rows on a computer. Hidden from screen readers: each cell says it. */
 export function OfferHeader({ columns }: { columns: OfferColumns }) {
+  const t = useMessages().offers;
   return (
     <div className="o-thead" aria-hidden="true">
       <span>{columns.party}</span>
-      <span>Price</span>
+      <span>{t.price}</span>
       <span>{columns.limits}</span>
       <span>{columns.payment}</span>
       <span />
@@ -62,6 +64,7 @@ export function OfferHeader({ columns }: { columns: OfferColumns }) {
 }
 
 export function OfferRow(props: OfferRowProps) {
+  const t = useMessages().offers;
   return (
     <li>
       {/* The whole row is the link: a bigger target on a phone, and one stop per offer for the keyboard. */}
@@ -79,10 +82,10 @@ export function OfferRow(props: OfferRowProps) {
             </span>
           </span>
         </span>
-        <Cell label="Price">
+        <Cell label={t.price}>
           <span className="o-value">{props.price ?? '—'}</span>
           <span className="o-sub">
-            per{' '}
+            {t.per}{' '}
             <span className="o-coin">
               <CoinIcon asset={props.asset} />
               {props.asset.symbol}

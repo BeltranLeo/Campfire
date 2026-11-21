@@ -1,5 +1,7 @@
 // Number and date formats used across pages. BCH amounts are always shown in BCH, never in sats.
-// No DOM here, so the unit tests in test/format.test.ts can run them under Node.
+// No DOM here, so the unit tests in test/format.test.ts can run them under Node. Words come from messages.ts.
+
+import { text } from './messages';
 
 /** Base units (sats, token base units) to a decimal string with exactly `decimals` digits. Exact: no floats. */
 export function fromBaseUnits(units: string | bigint, decimals: number): string {
@@ -74,12 +76,12 @@ export function describeMargin(marginBps: number): string {
  * would read like an error on its own.
  */
 export function paymentMethodLabel(method: string): string {
-  return method === 'simulated' ? 'Simulated payment' : method;
+  return method === 'simulated' ? text().common.simulatedPayment : method;
 }
 
 /** "5 min to pay": the payment window is always given in minutes. */
 export function formatPaymentWindow(seconds: number): string {
-  return `${Math.round(seconds / 60)} min to pay`;
+  return text().common.minToPay(Math.round(seconds / 60));
 }
 
 /** "14 Nov" from Unix seconds. */
