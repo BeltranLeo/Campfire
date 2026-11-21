@@ -36,6 +36,7 @@ const en = {
   imageFailed: 'The image could not be sent.',
   imageTypes: 'Only JPEG, PNG and WebP images can be sent.',
   notAnImage: 'That file could not be read as an image.',
+  imageTooLarge: (maxKb: number) => `This image is still above ${maxKb} KB after shrinking it, the most a receipt can weigh. Try a screenshot or a crop.`,
 };
 
 const es: typeof en = {
@@ -72,6 +73,7 @@ const es: typeof en = {
   imageFailed: 'No se pudo enviar la imagen.',
   imageTypes: 'Solo se pueden enviar imágenes JPEG, PNG y WebP.',
   notAnImage: 'Ese archivo no se pudo leer como imagen.',
+  imageTooLarge: (maxKb) => `Esta imagen sigue pesando más de ${maxKb} KB después de achicarla, el máximo para un comprobante. Prueba con una captura o un recorte.`,
 };
 
 export const chat = { en, es };

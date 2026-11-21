@@ -27,7 +27,11 @@ export async function prepareChatImage(file: File): Promise<{ bytes: Uint8Array;
     throw new ChatSendError(text().chat.notAnImage);
   }
   try {
-    for (let side = Math.min(MAX_SIDE, Math.max(bitmap.width, bitmap.height)); side >= MIN_SIDE / 2; side = Math.floor(side * 0.75)) {
+    const longest = Math.min(MAX_SIDE, Math.max(bitmap.width, bitmap.height));
+    // An image already smaller than the floor (a logo, an icon) is encoded once at its own size: with a fixed floor
+    // the loop never ran for it, and a 1 KB PNG was reported as too large.
+    const floor = Math.min(MIN_SIDE / 2, longest);
+    for (let side = longest; side >= floor; side = Math.floor(side * 0.75)) {
       const scale = Math.min(1, side / Math.max(bitmap.width, bitmap.height));
       const canvas = document.createElement('canvas');
       canvas.width = Math.max(1, Math.round(bitmap.width * scale));
@@ -46,5 +50,5 @@ export async function prepareChatImage(file: File): Promise<{ bytes: Uint8Array;
   } finally {
     bitmap.close();
   }
-  throw new ChatSendError('The image is too large to send. Try a smaller one.');
+  throw new ChatSendError(text().chat.imageTooLarge(Math.floor(MAX_CHAT_IMAGE_BYTES / 1000)));
 }
