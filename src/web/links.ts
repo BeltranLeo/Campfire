@@ -1,6 +1,7 @@
 // External links shown on every page. A null URL is rendered as plain text, never as a dead link.
 
 export const REPO_URL = 'https://github.com/BeltranLeo/Campfire';
+export const DEMO_URL = 'https://campfire.cash/';
 export const PROTOCOL_SPEC_URL = `${REPO_URL}/blob/master/docs/protocol.md`;
 
 // Hackathon banner: the code and demo at the start of the judged window and at the end.
@@ -11,7 +12,7 @@ export const BANNER_LINKS: { label: string; url: string | null }[] = [
   { label: 'Code at Nov 14', url: FIRST_COMMIT_URL },
   { label: 'Demo at Nov 14', url: `${FIRST_COMMIT_URL}/preparation` },
   { label: 'Final code', url: REPO_URL },
-  { label: 'Final demo', url: 'https://campfire-rosy.vercel.app/' },
+  { label: 'Final demo', url: DEMO_URL },
 ];
 
 // CashTokens-aware address for the public vote.
