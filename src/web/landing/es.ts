@@ -27,6 +27,7 @@ export const ES_TEXT: Record<string, string> = {
   Verify: 'Comprueba',
   Transparency: 'Transparencia',
   'Source code': 'Código fuente',
+  'Pitch slides': 'Diapositivas del pitch',
   'Built for BCH BLAZE 2026.': 'Hecho para BCH BLAZE 2026.',
   'Campfire never holds your coins.': 'Campfire nunca guarda tus monedas.',
   'Campfire home': 'Inicio de Campfire',

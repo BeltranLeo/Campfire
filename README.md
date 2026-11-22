@@ -2,7 +2,7 @@
 
 A peer-to-peer, non-custodial exchange of BCH and PUSD for fiat money. Sellers lock coins in an escrow contract, buyers pay in fiat outside the app, and the seller releases. If there is a dispute, an arbiter picks between buyer and seller by signing a decision. The arbiter never holds funds.
 
-Built by Leo and Aye Anto for BCH BLAZE 2026 (Mainnet category). Try it at <https://campfire.cash/>.
+Built by Leo and Aye Anto for BCH BLAZE 2026 (Mainnet category). Try it at <https://campfire.cash/>, or read the [pitch slides](https://docs.google.com/presentation/d/1JjOG33vI3E5cvyn3PTqsU6g8j941THdoC9jt4LnxEsE/edit?usp=sharing).
 
 The protocol, including the contract, the offer format and the trade states, is in [docs/protocol.md](docs/protocol.md). Work done before the build window (November 14–22, 2026) is in [preparation/](preparation/).
 

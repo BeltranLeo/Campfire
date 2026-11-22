@@ -3,6 +3,8 @@
 export const REPO_URL = 'https://github.com/BeltranLeo/Campfire';
 export const DEMO_URL = 'https://campfire.cash/';
 export const PROTOCOL_SPEC_URL = `${REPO_URL}/blob/master/docs/protocol.md`;
+// The pitch deck for BCH BLAZE 2026: a copy of the hackathon's required "Widget Factory" template.
+export const SLIDES_URL = 'https://docs.google.com/presentation/d/1JjOG33vI3E5cvyn3PTqsU6g8j941THdoC9jt4LnxEsE/edit?usp=sharing';
 
 // Hackathon banner: the code and demo at the start of the judged window and at the end.
 // The first commit (Nov 15) holds only the pre-hackathon notes; no demo existed yet,

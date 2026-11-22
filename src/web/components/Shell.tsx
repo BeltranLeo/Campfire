@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { Link, NavLink, Outlet, useLocation } from 'react-router';
-import { BANNER_LINKS, PROTOCOL_SPEC_URL, REPO_URL, VOTING_ADDRESS } from '../links';
+import { BANNER_LINKS, PROTOCOL_SPEC_URL, REPO_URL, SLIDES_URL, VOTING_ADDRESS } from '../links';
 import { setLang, useLang, useMessages } from '../lang';
 import type { Lang, Messages } from '../messages';
 import { alertsOn, askToNotify, canAskToNotify, setAlertsOn } from '../alerts';
@@ -129,6 +129,7 @@ function Footer() {
         <div className="cf-row" style={{ gap: 'var(--space-4)' }}>
           <a href={REPO_URL}>GitHub</a>
           <a href={PROTOCOL_SPEC_URL}>{t.spec}</a>
+          <a href={SLIDES_URL}>{t.slides}</a>
           <Link to="/roadmap">{t.roadmap}</Link>
           <span>{t.mainnet}</span>
         </div>

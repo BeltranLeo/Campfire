@@ -50,6 +50,7 @@ const en = {
   footer: {
     vote: 'Vote for Campfire with CashTokens',
     spec: 'Protocol spec',
+    slides: 'Pitch slides',
     roadmap: 'Roadmap',
     mainnet: 'Mainnet. Real funds.',
     language: 'Language',
@@ -257,6 +258,7 @@ const es: Messages = {
   footer: {
     vote: 'Vota por Campfire con CashTokens',
     spec: 'Especificación del protocolo',
+    slides: 'Diapositivas del pitch',
     roadmap: 'Hoja de ruta',
     mainnet: 'Mainnet. Fondos reales.',
     language: 'Idioma',
