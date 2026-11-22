@@ -220,17 +220,17 @@ section { position: relative; padding: var(--s9) 0; }
 .scene h3 { font: 700 clamp(24px, 2.4vw, 32px)/1.15 var(--font-display); letter-spacing: -.01em; }
 .scene p { color: var(--pizarra); font-size: 17px; line-height: 27px; max-width: 46ch; }
 /* The stage: everything is placed in % of a 600 x 380 frame, so it scales as one piece. No text sits on the renders. */
-.stage { position: relative; aspect-ratio: 600 / 380; container-type: inline-size; margin-top: var(--s2); }
-.stage > svg { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; z-index: 3; }
-.stage .render { position: absolute; left: 50%; top: 55%; width: 100%; transform: translate(-50%, -50%); z-index: 2; pointer-events: none; filter: drop-shadow(0 24px 30px rgba(11,23,51,.12)); }
+.hold-stage { position: relative; aspect-ratio: 600 / 380; container-type: inline-size; margin-top: var(--s2); }
+.hold-stage > svg { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; z-index: 3; }
+.hold-stage .render { position: absolute; left: 50%; top: 55%; width: 100%; transform: translate(-50%, -50%); z-index: 2; pointer-events: none; filter: drop-shadow(0 24px 30px rgba(11,23,51,.12)); }
 .scene.old .render { width: 92%; }
-.stage .coin-r { position: absolute; left: 9%; top: 55%; width: 8.5%; aspect-ratio: 1; transform: translate(-50%, -50%); filter: drop-shadow(0 6px 12px rgba(10,193,142,.45)); }
+.hold-stage .coin-r { position: absolute; left: 9%; top: 55%; width: 8.5%; aspect-ratio: 1; transform: translate(-50%, -50%); filter: drop-shadow(0 6px 12px rgba(10,193,142,.45)); }
 .scene.old .coin-r { z-index: 1; } .scene.new .coin-r { z-index: 3; }
 /* Usual way: the lines run under the coin, the coin runs under the wall */
-.scene.old .stage > svg { z-index: 0; }
+.scene.old .hold-stage > svg { z-index: 0; }
 /* A thin guide joins each object to the status line under it, like the callouts above */
-.stage::after { content: ""; position: absolute; left: 50%; top: 87%; bottom: calc(-1 * var(--s4)); width: 1px; background: linear-gradient(transparent, var(--niebla)); z-index: 1; }
-.scene.new .stage::after { background: linear-gradient(transparent, var(--azul-300)); }
+.hold-stage::after { content: ""; position: absolute; left: 50%; top: 87%; bottom: calc(-1 * var(--s4)); width: 1px; background: linear-gradient(transparent, var(--niebla)); z-index: 1; }
+.scene.new .hold-stage::after { background: linear-gradient(transparent, var(--azul-300)); }
 /* Callouts: outside the objects, joined to them by a thin guide line */
 .callout { position: absolute; left: 50%; top: 0; transform: translateX(-50%); z-index: 5; display: inline-flex; align-items: center; gap: .6em; white-space: nowrap; padding: .5em 1em; border-radius: 999px; font: 500 max(10px, 2.1cqi)/1 var(--font-mono); letter-spacing: .12em; text-transform: uppercase; background: rgba(255,255,255,.7); border: 1px solid var(--gris-frio); -webkit-backdrop-filter: blur(8px); backdrop-filter: blur(8px); box-shadow: var(--shadow-light); color: var(--pizarra); }
 .callout::after { content: ""; position: absolute; left: 50%; top: 100%; width: 1px; height: var(--lead, 40px); background: linear-gradient(currentColor, transparent); opacity: .5; }
@@ -248,8 +248,8 @@ section { position: relative; padding: var(--s9) 0; }
 .who-lbl.l { left: 9%; } .who-lbl.r { left: 91%; }
 .scene.new .who-lbl { color: var(--brasa-700); }
 .arrow-l { position: absolute; top: 40%; transform: translate(-50%, -50%); z-index: 4; font: 500 max(10px, 2cqi)/1 var(--font-mono); letter-spacing: .12em; text-transform: uppercase; color: var(--azul-700); }
-.stage .flow-line { fill: none; stroke-width: 2.5; stroke-linecap: round; }
-.stage .dashed { stroke-dasharray: 7 7; }
+.hold-stage .flow-line { fill: none; stroke-width: 2.5; stroke-linecap: round; }
+.hold-stage .dashed { stroke-dasharray: 7 7; }
 /* Status: one fixed place under each stage, big enough to read and slow enough not to miss */
 .status { position: relative; height: 44px; display: grid; justify-items: center; }
 .status span { position: absolute; top: 0; display: inline-flex; align-items: center; gap: 8px; padding: 10px 18px; border-radius: 999px; font: 600 15px/20px var(--font-sans); opacity: 0; transform: translateY(6px); white-space: nowrap; }
@@ -739,7 +739,7 @@ body.notes .notes-toggle .sw { background: #8A5A00; } body.notes .notes-toggle .
       <article class="scene old rv">
         <span class="tag">The usual way</span>
         <h3>A middleman holds your coins.</h3>
-        <div class="stage">
+        <div class="hold-stage">
           <svg viewBox="0 0 600 380" preserveAspectRatio="none" aria-hidden="true">
             <path class="flow-line" stroke="#F5A92E" d="M94 209 C 130 209, 150 209, 182 209"/>
             <path class="flow-line dashed" stroke="#A9B0BE" d="M448 209 C 470 209, 485 209, 505 209"/>
@@ -759,7 +759,7 @@ body.notes .notes-toggle .sw { background: #8A5A00; } body.notes .notes-toggle .
       <article class="scene new rv d1">
         <span class="tag">With Campfire</span>
         <h3>A contract goes first.</h3>
-        <div class="stage">
+        <div class="hold-stage">
           <svg viewBox="0 0 600 380" preserveAspectRatio="none" aria-hidden="true">
             <defs>
               <linearGradient id="arrowGrad" x1="0" x2="1"><stop offset="0" stop-color="#F5A92E"/><stop offset=".35" stop-color="#CB374C"/><stop offset=".65" stop-color="#357BC3"/><stop offset="1" stop-color="#0AC18E"/></linearGradient>
@@ -1019,7 +1019,7 @@ body.notes .notes-toggle .sw { background: #8A5A00; } body.notes .notes-toggle .
     rail.classList.toggle('show', scrollY > innerHeight * .5);
     const r = current(railLinks); railLinks.forEach(([a]) => a.classList.toggle('on', a === r));
     const n = current(navMap); navMap.forEach(([a]) => a.classList.toggle('on', a === n));
-    if (!reduce) { const wr = why.getBoundingClientRect(); why.style.setProperty('--o', Math.max(-1, Math.min(1, (innerHeight / 2 - wr.top - wr.height / 2) / innerHeight)).toFixed(3)); const pr = problem.getBoundingClientRect(); const st = problem.querySelector('.stage'), grid = problem.querySelector('.problem-grid'); grid.style.setProperty('--cy', (st.getBoundingClientRect().top - grid.getBoundingClientRect().top + st.offsetHeight * .46) + 'px'); const cr = contractSec.getBoundingClientRect(); contractSec.style.setProperty('--e', Math.max(0, Math.min(1, -cr.top / Math.max(1, cr.height - innerHeight))).toFixed(3)); problem.style.setProperty('--c', Math.max(-1, Math.min(1, (innerHeight / 2 - pr.top - pr.height / 2) / innerHeight)).toFixed(3)); }
+    if (!reduce) { const wr = why.getBoundingClientRect(); why.style.setProperty('--o', Math.max(-1, Math.min(1, (innerHeight / 2 - wr.top - wr.height / 2) / innerHeight)).toFixed(3)); const pr = problem.getBoundingClientRect(); const st = problem.querySelector('.hold-stage'), grid = problem.querySelector('.problem-grid'); grid.style.setProperty('--cy', (st.getBoundingClientRect().top - grid.getBoundingClientRect().top + st.offsetHeight * .46) + 'px'); const cr = contractSec.getBoundingClientRect(); contractSec.style.setProperty('--e', Math.max(0, Math.min(1, -cr.top / Math.max(1, cr.height - innerHeight))).toFixed(3)); problem.style.setProperty('--c', Math.max(-1, Math.min(1, (innerHeight / 2 - pr.top - pr.height / 2) / innerHeight)).toFixed(3)); }
     if (!reduce && finePointer) hero.style.setProperty('--sy', Math.min(scrollY / innerHeight, 1).toFixed(3));
     if (desk.matches) { if (live(ecoMap.closest('section'))) syncEco(); }
   };

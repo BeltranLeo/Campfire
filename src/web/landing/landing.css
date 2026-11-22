@@ -215,18 +215,18 @@
 .lp .scene h3 { font: 700 clamp(24px, 2.4vw, 32px)/1.15 var(--font-display); letter-spacing: -.01em; }
 .lp .scene p { color: var(--slate); font-size: 17px; line-height: 27px; max-width: 46ch; }
 /* The stage: everything is placed in % of a 600 x 380 frame, so it scales as one piece. No text sits on the renders. */
-.lp .stage { position: relative; aspect-ratio: 600 / 380; container-type: inline-size; margin-top: var(--s2); }
-.lp .stage > svg { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; z-index: 3; }
-.lp .stage .render { position: absolute; left: 50%; top: 55%; width: 100%; transform: translate(-50%, -50%); z-index: 2; pointer-events: none; filter: drop-shadow(0 24px 30px rgba(11,23,51,.12)); }
+.lp .hold-stage { position: relative; aspect-ratio: 600 / 380; container-type: inline-size; margin-top: var(--s2); }
+.lp .hold-stage > svg { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; z-index: 3; }
+.lp .hold-stage .render { position: absolute; left: 50%; top: 55%; width: 100%; transform: translate(-50%, -50%); z-index: 2; pointer-events: none; filter: drop-shadow(0 24px 30px rgba(11,23,51,.12)); }
 .lp .scene.old .render { width: 92%; }
-.lp .stage .coin-r { position: absolute; left: 9%; top: 55%; width: 8.5%; aspect-ratio: 1; transform: translate(-50%, -50%); filter: drop-shadow(0 6px 12px rgba(10,193,142,.45)); }
+.lp .hold-stage .coin-r { position: absolute; left: 9%; top: 55%; width: 8.5%; aspect-ratio: 1; transform: translate(-50%, -50%); filter: drop-shadow(0 6px 12px rgba(10,193,142,.45)); }
 .lp .scene.old .coin-r { z-index: 1; }
 .lp .scene.new .coin-r { z-index: 3; }
 /* Usual way: the lines run under the coin, the coin runs under the wall */
-.lp .scene.old .stage > svg { z-index: 0; }
+.lp .scene.old .hold-stage > svg { z-index: 0; }
 /* A thin guide joins each object to the status line under it, like the callouts above */
-.lp .stage::after { content: ""; position: absolute; left: 50%; top: 87%; bottom: calc(-1 * var(--s4)); width: 1px; background: linear-gradient(transparent, var(--mist)); z-index: 1; }
-.lp .scene.new .stage::after { background: linear-gradient(transparent, var(--blue-300)); }
+.lp .hold-stage::after { content: ""; position: absolute; left: 50%; top: 87%; bottom: calc(-1 * var(--s4)); width: 1px; background: linear-gradient(transparent, var(--mist)); z-index: 1; }
+.lp .scene.new .hold-stage::after { background: linear-gradient(transparent, var(--blue-300)); }
 /* Callouts: outside the objects, joined to them by a thin guide line */
 .lp .callout { position: absolute; left: 50%; top: 0; transform: translateX(-50%); z-index: 5; display: inline-flex; align-items: center; gap: .6em; white-space: nowrap; padding: .5em 1em; border-radius: 999px; font: 500 max(10px, 2.1cqi)/1 var(--font-mono); letter-spacing: .12em; text-transform: uppercase; background: rgba(255,255,255,.7); border: 1px solid var(--cool-grey); -webkit-backdrop-filter: blur(8px); backdrop-filter: blur(8px); box-shadow: var(--shadow-light); color: var(--slate); }
 .lp .callout::after { content: ""; position: absolute; left: 50%; top: 100%; width: 1px; height: var(--lead, 40px); background: linear-gradient(currentColor, transparent); opacity: .5; }
@@ -246,8 +246,8 @@
 .lp .who-lbl.r { left: 91%; }
 .lp .scene.new .who-lbl { color: var(--ember-700); }
 .lp .arrow-l { position: absolute; top: 40%; transform: translate(-50%, -50%); z-index: 4; font: 500 max(10px, 2cqi)/1 var(--font-mono); letter-spacing: .12em; text-transform: uppercase; color: var(--blue-700); }
-.lp .stage .flow-line { fill: none; stroke-width: 2.5; stroke-linecap: round; }
-.lp .stage .dashed { stroke-dasharray: 7 7; }
+.lp .hold-stage .flow-line { fill: none; stroke-width: 2.5; stroke-linecap: round; }
+.lp .hold-stage .dashed { stroke-dasharray: 7 7; }
 /* Status: one fixed place under each stage, big enough to read and slow enough not to miss */
 .lp .status { position: relative; height: 44px; display: grid; justify-items: center; }
 .lp .status span { position: absolute; top: 0; display: inline-flex; align-items: center; gap: 8px; padding: 10px 18px; border-radius: 999px; font: 600 15px/20px var(--font-sans); opacity: 0; transform: translateY(6px); white-space: nowrap; }
