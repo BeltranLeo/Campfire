@@ -3,7 +3,7 @@
 
 const en = {
   title: 'About Campfire',
-  lead: 'Campfire lets two people trade Bitcoin Cash or PUSD for pesos, dollars or any other money, with no exchange in the middle. This page explains how, step by step. Nothing here needs crypto experience.',
+  lead: 'Campfire lets two people trade Bitcoin Cash or PUSD for fiat money, with no exchange in the middle. This page explains how, step by step. Nothing here needs crypto experience.',
   getWallet: 'Get a wallet',
   walletIntro:
     'A wallet is a free app on your phone. Only you control it: Campfire never holds your money, and your BCH goes straight to your own wallet.',
@@ -104,7 +104,7 @@ const en = {
 
 const es: typeof en = {
   title: 'Acerca de Campfire',
-  lead: 'Campfire permite que dos personas intercambien Bitcoin Cash o PUSD por pesos, dólares o cualquier otra moneda, sin una plataforma en el medio. Esta página explica cómo, paso a paso. No hace falta saber de criptomonedas.',
+  lead: 'Campfire permite que dos personas intercambien Bitcoin Cash o PUSD por dinero fíat, sin una plataforma en el medio. Esta página explica cómo, paso a paso. No hace falta saber de criptomonedas.',
   getWallet: 'Consigue una billetera',
   walletIntro:
     'Una billetera es una aplicación gratuita para tu teléfono. Solo tú la controlas: Campfire nunca guarda tu dinero, y tus BCH van directo a tu propia billetera.',
