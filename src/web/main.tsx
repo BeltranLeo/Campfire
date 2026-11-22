@@ -3,7 +3,7 @@ import { createRoot } from 'react-dom/client';
 import { HashRouter } from 'react-router';
 import { App } from './App';
 import { readLang } from './lang';
-import { startWallet } from './wallet';
+import { startWallet, walletPageShown } from './wallet';
 import './styles/tokens.css';
 import './styles/components.css';
 import './styles/screens.css';
@@ -22,6 +22,10 @@ import './styles/brand.css';
 
 // Resume a wallet paired on an earlier visit before the first render.
 startWallet();
+// A phone pauses a hidden page; a pairing that waited while the wallet app was open resumes when the page is back.
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'visible') walletPageShown();
+});
 // Pick the interface language (a ?lang= link, then this browser's choice, then English) before the first render.
 readLang();
 

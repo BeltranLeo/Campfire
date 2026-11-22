@@ -125,6 +125,7 @@ const en = {
     qrCopy: 'Pairing QR code. Click to copy the link.',
     qrCopied: 'Link copied',
     phoneHint: 'Open your wallet app on this phone to pair. If it keeps saying it is connecting, come back to this tab.',
+    comeBack: 'Approved in the wallet? Come back to this tab: the connection finishes here, and only while this tab is in view.',
     copyPairingLink: 'Copy pairing link',
     showQr: 'Show QR code for another device',
     waiting: 'Waiting for the wallet…',
@@ -330,6 +331,7 @@ const es: Messages = {
     qrCopied: 'Enlace copiado',
     phoneHint:
       'Abre la aplicación de tu billetera en este teléfono para emparejarla. Si se queda en «Conectando», vuelve a esta pestaña.',
+    comeBack: '¿Ya aprobaste en la billetera? Vuelve a esta pestaña: la conexión termina aquí, y solo mientras la pestaña está a la vista.',
     copyPairingLink: 'Copiar enlace de emparejamiento',
     showQr: 'Mostrar código QR para otro dispositivo',
     waiting: 'Esperando a la billetera…',

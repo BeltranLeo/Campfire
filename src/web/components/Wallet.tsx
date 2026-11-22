@@ -255,6 +255,7 @@ function PairingDialog({ uri, qrUri, onClose }: { uri: string; qrUri: string; on
   const dialogRef = useRef<HTMLDivElement>(null);
   const [onPhone] = useState(() => window.matchMedia('(hover: none) and (pointer: coarse)').matches);
   const [slow, setSlow] = useState(false);
+  const [opened, setOpened] = useState(false);
   const t = useMessages().pairing;
 
   useEffect(() => {
@@ -291,9 +292,16 @@ function PairingDialog({ uri, qrUri, onClose }: { uri: string; qrUri: string; on
         </div>
         {onPhone ? (
           <>
-            {/* The phone may pause this page while the wallet is open; coming back lets it finish the pairing. */}
-            <p className="cf-small cf-muted">{t.phoneHint}</p>
-            <a className="cf-btn" data-variant="primary" data-block href={uri}>
+            {/* The phone pauses this page while the wallet is open, and the pairing finishes only once the page is in
+                view again. After the wallet opens, that is the one thing to say, so it replaces the hint. */}
+            {opened ? (
+              <p className="cf-notice" role="status">
+                {t.comeBack}
+              </p>
+            ) : (
+              <p className="cf-small cf-muted">{t.phoneHint}</p>
+            )}
+            <a className="cf-btn" data-variant="primary" data-block href={uri} onClick={() => setOpened(true)}>
               {t.openInWallet}
             </a>
             <CopyButton value={uri} label={t.copyPairingLink} block />

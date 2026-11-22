@@ -156,6 +156,14 @@ class WalletController {
     this.startPairingTimer();
   }
 
+  /**
+   * The page is in view again. A phone pauses a hidden page, and the relay only reconnects once it is visible, so a
+   * pairing that waited while the wallet app was open gets its full time from here, not from when it started.
+   */
+  pageShown() {
+    if (this.state.status === 'pairing') this.startPairingTimer();
+  }
+
   private startPairingTimer() {
     clearTimeout(this.pairingTimer);
     this.pairingTimer = setTimeout(() => {
@@ -398,6 +406,9 @@ const wait = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, 
 const controller = new WalletController();
 
 export const startWallet = () => controller.restore();
+
+/** Called by main.tsx whenever the page is in view again. */
+export const walletPageShown = () => controller.pageShown();
 
 // Created once, so components can pass these to effects without re-running them on every render.
 const actions = {
