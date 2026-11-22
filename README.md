@@ -75,3 +75,7 @@ npm test        # type checks and tests
 ```
 
 The escrow contract and its tests are in [contracts/](contracts/).
+
+## License
+
+[MIT](LICENSE). Anyone may use, copy, modify and redistribute the code, including the protocol and the escrow contract, as long as the copyright notice stays with it.
