@@ -22,6 +22,9 @@ imgs = {
     "BEN2": ("ben2.jpg", "image/jpeg"),
     "BEN3": ("ben3.jpg", "image/jpeg"),
     "BEN4": ("ben4.jpg", "image/jpeg"),
+    "WALL": ("wall.png", "image/png"),
+    "BOOK": ("book.png", "image/png"),
+    "COIN_BCH": ("coin-bch.png", "image/png"),
 }
 for src, outs in [("landing.src.html", ["Campfire landing sketch.html", "index.html"]), ("icons.src.html", ["Campfire icon system.html"])]:
     html = (proto / src).read_text(encoding="utf-8").replace("{{SPRITE}}", sprite)

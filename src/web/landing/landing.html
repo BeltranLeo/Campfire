@@ -37,7 +37,7 @@
 <nav class="rail" id="rail" aria-label="Page sections">
   <a href="#top"><span>Start</span></a>
   <a href="#why"><span>Why Campfire?</span></a>
-  <a href="#problem"><span>Who goes first?</span></a>
+  <a href="#problem"><span>Who holds your coins?</span></a>
   <a href="#contract"><span>How does it work?</span></a>
   <a href="#how"><span>Try a trade</span></a>
   <a href="#faq"><span>Questions?</span></a>
@@ -77,6 +77,7 @@
 </section>
 
 <section class="why" id="why" aria-labelledby="h-why">
+  <div class="horizon" aria-hidden="true"></div>
   <div class="wrap">
     <svg class="orbit-line" viewBox="0 0 1500 560" preserveAspectRatio="none" aria-hidden="true">
       <defs><linearGradient id="orbitGrad" x1="0" x2="1"><stop offset="0" stop-color="#F07A2E"/><stop offset=".35" stop-color="#AB3B86" stop-opacity=".7"/><stop offset=".7" stop-color="#357BC3" stop-opacity=".8"/><stop offset="1" stop-color="#42BFAE"/></linearGradient></defs>
@@ -102,7 +103,7 @@
       <article class="ben rv d2" style="--dot: var(--green-500)">
         <div class="ben-img"><img src="{{BEN3}}" alt=""></div>
         <h3>Check it yourself.</h3>
-        <p>Your browser verifies the deposit on its own. Every contract exit is listed on the Transparency page.</p>
+        <p>Your browser verifies the deposit on its own. Every contract exit that has run is listed on the Transparency page.</p>
         <p class="gain">Trust you can verify, not trust you're asked for.</p>
       </article>
       <article class="ben rv d3" style="--dot: var(--ember-500)">
@@ -115,30 +116,68 @@
   </div>
 </section>
 
+<div class="band n2i" aria-hidden="true"></div>
+
 <section class="light" id="problem" aria-labelledby="h-problem">
   <div class="wrap">
     <div class="sec-head">
-      <h2 id="h-problem" class="big rv">Who goes first?</h2>
+      <h2 id="h-problem" class="big rv">Who holds your coins?</h2>
       <p class="lead rv d1">Trading with a stranger, someone has to go first. Either you send the money and hope, or you hand your coins to a platform and trust it. Campfire changes who goes first.</p>
     </div>
     <div class="problem-grid">
-      <article class="scene old gpanel lightp rv">
-        <div><span class="eyebrow">The usual way</span><h3>A middleman holds your coins.</h3></div>
-        <div class="flow">
-          <div class="who"><span class="emb neutral"><svg class="ic"><use href="#i-seller"/></svg></span>You</div>
-          <div class="middle box">A platform's wallet<span class="badge frozen"><svg class="ic"><use href="#i-alert"/></svg>Frozen</span></div>
-          <div class="who"><span class="emb neutral"><svg class="ic"><use href="#i-buyer"/></svg></span>The other person</div>
-          <span class="coin c-old"></span>
+      <svg class="current" viewBox="0 0 1600 220" preserveAspectRatio="none" aria-hidden="true">
+        <defs><linearGradient id="currentGrad" x1="0" x2="1"><stop offset="0" stop-color="#F8D234"/><stop offset=".22" stop-color="#E77937"/><stop offset=".42" stop-color="#AB3B86"/><stop offset=".64" stop-color="#357BC3"/><stop offset=".84" stop-color="#42BFAE"/><stop offset="1" stop-color="#0AC18E"/></linearGradient></defs>
+        <path class="glow" d="M-40 120 C 300 80, 560 160, 820 110 S 1360 80, 1640 120"/>
+        <path class="core" d="M-40 120 C 300 80, 560 160, 820 110 S 1360 80, 1640 120"/>
+        <path class="core thin" d="M-40 138 C 320 100, 580 178, 840 130 S 1380 100, 1640 142"/>
+      </svg>
+      <article class="scene old rv">
+        <span class="tag">The usual way</span>
+        <h3>A middleman holds your coins.</h3>
+        <div class="stage">
+          <svg viewBox="0 0 600 380" preserveAspectRatio="none" aria-hidden="true">
+            <path class="flow-line" stroke="#F5A92E" d="M94 209 C 130 209, 150 209, 182 209"/>
+            <path class="flow-line dashed" stroke="#A9B0BE" d="M448 209 C 470 209, 485 209, 505 209"/>
+          </svg>
+          <span class="callout" style="--lead: 13cqi">Platform wallet</span>
+          <img class="render" src="{{WALL}}" alt="">
+          <img class="coin-r c-old" src="{{COIN_BCH}}" alt="">
+          <span class="cap grey l"><svg viewBox="0 0 24 24"><circle cx="12" cy="8" r="4"/><path d="M4.5 20c.8-4 3.8-6 7.5-6s6.7 2 7.5 6"/></svg></span><span class="who-lbl l">Seller</span>
+          <span class="cap grey r"><svg viewBox="0 0 24 24"><circle cx="12" cy="8" r="4"/><path d="M4.5 20c.8-4 3.8-6 7.5-6s6.7 2 7.5 6"/></svg></span><span class="who-lbl r">Buyer</span>
+        </div>
+        <div class="status" aria-hidden="true">
+          <span class="st-neutral s-old1">The seller sends the coins to the platform</span>
+          <span class="st-frozen s-old2"><svg class="ic"><use href="#i-alert"/></svg>Frozen · the buyer gets nothing</span>
         </div>
         <p>You can't see what happens to the coins. If the platform freezes, fails or disappears, you wait — or you lose them.</p>
       </article>
-      <article class="scene new gpanel bluep rv d1">
-        <div><span class="eyebrow" style="color:var(--blue-300)">With Campfire</span><h3>A contract goes first.</h3></div>
-        <div class="flow">
-          <div class="who"><span class="emb ember"><svg class="ic"><use href="#i-seller"/></svg></span>Seller</div>
-          <div class="middle contract"><span><svg class="ic" style="display:block;margin:0 auto 6px"><use href="#i-contract"/></svg>Contract on the blockchain</span></div>
-          <div class="who"><span class="emb ember"><svg class="ic"><use href="#i-buyer"/></svg></span>Buyer<span class="badge got">✓ Received</span></div>
-          <span class="coin c-new"></span>
+      <article class="scene new rv d1">
+        <span class="tag">With Campfire</span>
+        <h3>A contract goes first.</h3>
+        <div class="stage">
+          <svg viewBox="0 0 600 380" preserveAspectRatio="none" aria-hidden="true">
+            <defs>
+              <linearGradient id="arrowGrad" x1="0" x2="1"><stop offset="0" stop-color="#F5A92E"/><stop offset=".35" stop-color="#CB374C"/><stop offset=".65" stop-color="#357BC3"/><stop offset="1" stop-color="#0AC18E"/></linearGradient>
+              <linearGradient id="returnGrad" x1="1" x2="0"><stop offset="0" stop-color="#357BC3"/><stop offset=".6" stop-color="#AB3B86"/><stop offset="1" stop-color="#F5A92E"/></linearGradient>
+              <marker id="headR" viewBox="0 0 10 10" refX="7" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M1 1 L8 5 L1 9" fill="none" stroke="#0AC18E" stroke-width="2" stroke-linecap="round"/></marker>
+              <marker id="headL" viewBox="0 0 10 10" refX="7" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M1 1 L8 5 L1 9" fill="none" stroke="#F5A92E" stroke-width="2" stroke-linecap="round"/></marker>
+            </defs>
+            <path class="flow-line" stroke="url(#arrowGrad)" d="M94 209 C 130 209, 150 211, 175 213"/>
+            <path class="flow-line" stroke="url(#arrowGrad)" marker-end="url(#headR)" d="M325 228 C 390 165, 455 170, 500 204"/>
+            <path class="flow-line dashed" stroke="url(#returnGrad)" marker-end="url(#headL)" d="M275 228 C 210 165, 145 170, 100 204"/>
+          </svg>
+          <span class="callout" style="--lead: 7cqi"><svg class="ic"><use href="#i-contract"/></svg>Contract on the blockchain</span>
+          <img class="render" src="{{BOOK}}" alt="">
+          <img class="coin-r c-new" src="{{COIN_BCH}}" alt="">
+          <span class="arrow-l" style="left:31%">Return</span>
+          <span class="arrow-l" style="left:69%">Release</span>
+          <span class="cap l"><svg viewBox="0 0 24 24"><circle cx="12" cy="8" r="4"/><path d="M4.5 20c.8-4 3.8-6 7.5-6s6.7 2 7.5 6"/></svg></span><span class="who-lbl l">Seller</span>
+          <span class="cap r"><svg viewBox="0 0 24 24"><circle cx="12" cy="8" r="4"/><path d="M4.5 20c.8-4 3.8-6 7.5-6s6.7 2 7.5 6"/></svg></span><span class="who-lbl r">Buyer</span>
+        </div>
+        <div class="status" aria-hidden="true">
+          <span class="st-act s-new1">The seller locks the coins</span>
+          <span class="st-lock s-new2"><svg class="ic"><use href="#i-contract"/></svg>Funds locked in the contract</span>
+          <span class="st-got s-new3">✓ Received by the buyer</span>
         </div>
         <p>The seller locks the coins in a contract anyone can inspect. It can only pay the buyer or give them back to the seller. Nobody else — not even Campfire — can take them.</p>
       </article>
@@ -173,12 +212,12 @@
         <div class="eco-step" data-eco="3">
           <span class="pill chain">The network</span>
           <h3>The network verifies every move.</h3>
-          <p>Your browser rebuilds the contract and checks the deposit on its own, without trusting Campfire. Every move is a real transaction anyone can look up.</p>
+          <p>Your browser rebuilds the contract and checks the deposit on its own, without trusting Campfire. Every coin movement is a real transaction anyone can look up.</p>
         </div>
         <div class="eco-step" data-eco="4">
           <span class="pill arb">The arbiter</span>
           <h3>If something goes wrong, someone mediates.</h3>
-          <p>Either person can open a dispute. An arbiter named in the offer decides who gets the coins: the buyer or the seller. The arbiter can never keep them.</p>
+          <p>Either person can open a dispute. An arbiter named in the offer decides who gets the coins: the buyer or the seller. If the time to pay ends unpaid, the arbiter returns them to the seller on its own. The arbiter can never keep them.</p>
         </div>
         <div class="eco-step" data-eco="5">
           <span class="pill wait">Four ways out</span>
@@ -203,6 +242,7 @@
       </div>
       <div class="eco-stick">
         <div class="eco-map" id="ecoMap" data-step="1">
+          <svg class="eco-orbit" viewBox="0 0 600 460" preserveAspectRatio="none" aria-hidden="true"><defs><linearGradient id="ecoGrad" x1="0" x2="1"><stop offset="0" stop-color="#F8D234"/><stop offset=".25" stop-color="#E77937"/><stop offset=".45" stop-color="#AB3B86"/><stop offset=".7" stop-color="#357BC3"/><stop offset=".88" stop-color="#42BFAE"/><stop offset="1" stop-color="#0AC18E"/></linearGradient></defs><ellipse class="glow" cx="300" cy="230" rx="290" ry="200"/><ellipse class="core" cx="300" cy="230" rx="290" ry="200"/></svg>
           <svg viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true">
             <path class="ln flow-line" data-s="1" d="M20 50 L80 50" stroke="#6BB2DE" vector-effect="non-scaling-stroke"/>
             <path class="ln" data-s="3" d="M50 50 L50 84" stroke="#0AC18E" vector-effect="non-scaling-stroke"/>
@@ -213,40 +253,34 @@
             <path class="xp" data-exit="reclaim" d="M50 50 C46 76 24 76 15 56" stroke="#8A96B3" vector-effect="non-scaling-stroke"/>
           </svg>
           <div class="eco-ghost" aria-hidden="true">?</div>
-          <div class="node glass n-seller" data-s="1" style="left:15%;top:50%"><span class="emb ember"><svg class="ic"><use href="#i-seller"/></svg></span><b>Seller</b><small>Has BCH</small></div>
-          <div class="node glass n-buyer" data-s="1" style="left:85%;top:50%"><span class="emb ember"><svg class="ic"><use href="#i-buyer"/></svg></span><b>Buyer</b><small>Has fiat money</small></div>
-          <div class="node glass contract" data-s="2" style="left:50%;top:50%"><span class="emb lg blue"><svg class="ic"><use href="#i-contract"/></svg></span><b>Contract</b><small style="color:var(--blue-300)">Holds the coins</small></div>
-          <div class="node glass" data-s="3" style="left:50%;top:86%"><span class="emb green"><svg class="ic"><use href="#i-network"/></svg></span><b>BCH network</b><small style="color:var(--green-500)">Verifies every move</small></div>
-          <div class="node glass n-arb" data-s="4" style="left:50%;top:14%"><span class="emb violet"><svg class="ic"><use href="#i-arbiter"/></svg></span><b>Arbiter</b><small style="color:var(--violet-300)">Disputes and time-outs</small></div>
-          <span class="map-coin" id="mapCoin"></span>
+          <div class="node n-seller" data-s="1" style="left:13%;top:50%;--c:var(--ember-300)"><span class="gcap ember"><svg viewBox="0 0 24 24"><circle cx="12" cy="8" r="4"/><path d="M4.5 20c.8-4 3.8-6 7.5-6s6.7 2 7.5 6"/></svg></span><b>Seller</b><small>Has BCH</small></div>
+          <div class="node n-buyer" data-s="1" style="left:87%;top:50%;--c:var(--ember-300)"><span class="gcap ember"><svg viewBox="0 0 24 24"><circle cx="12" cy="8" r="4"/><path d="M4.5 20c.8-4 3.8-6 7.5-6s6.7 2 7.5 6"/></svg></span><b>Buyer</b><small>Has fiat money</small></div>
+          <div class="node contract" data-s="2" style="left:50%;top:50%;--c:var(--blue-300)"><span class="book"></span><b>Contract</b><small>Holds the coins</small></div>
+          <div class="node" data-s="3" style="left:50%;top:87%;--c:var(--green-500)"><span class="gcap green"><svg class="ic"><use href="#i-network"/></svg></span><b>BCH network</b><small>Verifies every move</small></div>
+          <div class="node n-arb" data-s="4" style="left:50%;top:13%;--c:var(--violet-300)"><span class="gcap violet"><svg class="ic"><use href="#i-arbiter"/></svg></span><b>Arbiter</b><small>Disputes and time-outs</small></div>
+          <img class="map-coin" id="mapCoin" src="{{COIN_BCH}}" alt="">
         </div>
       </div>
     </div>
   </div>
 </section>
 
-<div class="band n2i" aria-hidden="true"></div>
+<div class="band i2n flip" aria-hidden="true"></div>
 
-<section class="light" id="how" aria-labelledby="h-how">
+<section class="light" id="how" data-way="sell" aria-labelledby="h-how">
   <div class="wrap">
-    <div class="how-top">
-      <div class="sec-head" style="margin:0">
-        <h2 id="h-how" class="big rv">Want to try a trade?</h2>
-        <p class="lead rv d1">Pick a side. Scroll to follow the trade, or tap the phone to play it yourself. Nothing here touches the network.</p>
-      </div>
-      <div class="info-panel gpanel lightp rv d2">
-        <span class="eyebrow" style="margin:0">Choose a side</span>
-        <div class="switch" id="simSwitch" data-way="sell" role="group" aria-label="Choose a side">
-          <span class="knob" aria-hidden="true"></span>
-          <button type="button" data-way="sell" aria-pressed="true"><svg class="ic"><use href="#i-out"/></svg>Sell</button>
-          <button type="button" data-way="buy" aria-pressed="false"><svg class="ic"><use href="#i-in"/></svg>Buy</button>
-        </div>
-        <dl class="summary" id="summary"></dl>
-      </div>
+    <div class="sec-head">
+      <h2 id="h-how" class="big rv">Want to try a trade?</h2>
+      <p class="lead rv d1">Choose a side and how you trade: take someone's offer or publish your own. Then tap the phone to play each step. Nothing here touches the network.</p>
     </div>
-    <div class="walk">
-      <div class="walk-steps" id="walkSteps"></div>
-      <div class="walk-stick">
+    <div class="ways rv" role="group" aria-label="Choose a side">
+      <button class="way" type="button" data-way="sell" aria-pressed="true"><span class="gcap ember"><svg class="ic"><use href="#i-out"/></svg></span><h3>I want to sell</h3><span class="go">BCH → fiat</span></button>
+      <button class="way" type="button" data-way="buy" aria-pressed="false"><span class="gcap ember"><svg class="ic"><use href="#i-in"/></svg></span><h3>I want to buy</h3><span class="go">Fiat → BCH</span></button>
+    </div>
+    <div class="modes rv" id="modes" role="group" aria-label="How do you want to trade?"><button type="button" data-mode="take" aria-pressed="true">Take an offer</button><button type="button" data-mode="publish" aria-pressed="false">Publish an offer</button></div>
+    <div class="trade-grid">
+      <ol class="stepper" id="stepper"></ol>
+      <div class="phone-col" id="phoneCol">
         <div class="sim-ribbon" style="background-image:url({{SIM_RIBBON}})" aria-hidden="true"></div>
         <span class="sim-tag">Simulated · example data</span>
         <div class="sim-phone"><div class="sim-screen" id="simScreen" aria-live="polite"></div></div>

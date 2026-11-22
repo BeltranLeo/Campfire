@@ -12,6 +12,8 @@ import '../landing/landing.css';
 import bandI2n from '../landing/img/band-i2n.webp';
 import bandN2i from '../landing/img/band-n2i.webp';
 import bannerGlass from '../landing/img/banner-glass.webp';
+import book from '../landing/img/book.png';
+import coinBch from '../landing/img/coin-bch.png';
 import ben1 from '../landing/img/ben1.webp';
 import ben2 from '../landing/img/ben2.webp';
 import ben3 from '../landing/img/ben3.webp';
@@ -22,6 +24,7 @@ import panelLight from '../landing/img/panel-light.webp';
 import simRibbon from '../landing/img/sim-ribbon.webp';
 import symbol from '../landing/img/symbol.webp';
 import texture from '../landing/img/texture.webp';
+import wall from '../landing/img/wall.png';
 
 // The front page for a visitor, exactly as Aye designed it (design/landing.src.html on the design branch): the
 // markup and styles are hers, kept in src/web/landing/, and only the buttons are wired to the app's pages.
@@ -36,12 +39,15 @@ const IMAGES: Record<string, string> = {
   BEN2: ben2,
   BEN3: ben3,
   BEN4: ben4,
+  BOOK: book,
+  COIN_BCH: coinBch,
   LOGO_DARK: logoDark,
   PANEL_BLUE: panelBlue,
   PANEL_LIGHT: panelLight,
   SIM_RIBBON: simRibbon,
   SYMBOL: symbol,
   TEXTURE: texture,
+  WALL: wall,
 };
 
 export function Landing() {
