@@ -73,7 +73,7 @@ export function Shell() {
   );
 }
 
-// The hackathon banner is on every page, in English in both languages: it is for the judges. On a phone the four
+// The hackathon banner is on every page, in English in both languages: it is for the judges. On a phone the five
 // links fold behind one line, so the banner takes one row instead of four; it never disappears. The CashTokens
 // address for the vote has a row of its own, in full and with a copy button, on every screen size.
 function Banner() {
@@ -96,7 +96,7 @@ function Banner() {
         <strong>BCH BLAZE 2026 · Mainnet track</strong>
         <span className="s-desktoponly">{links}</span>
         <details className="s-bannerfold">
-          <summary>Code &amp; demo</summary>
+          <summary>Slides, code &amp; demo</summary>
           {links}
         </details>
       </div>
