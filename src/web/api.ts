@@ -1,6 +1,8 @@
 // Typed access to the Campfire API on the same origin. Errors arrive as { error } with a message
 // that is already written for display, so ApiError carries it unchanged.
 
+import type { TradeFee } from '../protocol/fees.js';
+
 export class ApiError extends Error {
   constructor(
     readonly status: number,
@@ -10,6 +12,13 @@ export class ApiError extends Error {
     this.name = 'ApiError';
   }
 }
+
+// Session token from the wallet sign-in (docs/protocol.md, section 1). Requests that act for the identity need
+// it; it travels in a header on every request, so pages never pass it around.
+let sessionToken: string | null = null;
+export const setSessionToken = (token: string | null) => {
+  sessionToken = token;
+};
 
 // A request that never answers would leave a page loading forever. Writes get longer: taking a demo
 // offer waits for the demo seller's on-chain deposit.
@@ -21,6 +30,7 @@ async function request<T>(method: 'GET' | 'POST', path: string, body?: unknown, 
   const headers: Record<string, string> = {};
   if (body !== undefined) headers['content-type'] = 'application/json';
   if (token) headers.authorization = `Bearer ${token}`;
+  if (sessionToken) headers['x-campfire-session'] = sessionToken;
   try {
     res = await fetch(path, {
       method,
@@ -47,6 +57,43 @@ async function request<T>(method: 'GET' | 'POST', path: string, body?: unknown, 
 
 export const apiGet = <T>(path: string, token?: string) => request<T>('GET', path, undefined, token);
 export const apiPost = <T>(path: string, body: unknown, token?: string) => request<T>('POST', path, body, token);
+
+/** The fee rates new trades use, as GET /api/fees returns them. */
+export interface FeeRatesInfo {
+  arbiterBps: number;
+  oracleBps: number;
+  maxBps: number;
+  dustLimitSats: number;
+}
+
+/** One of the service's own accounts, as GET /api/admin/accounts returns it (src/server/accounts.ts). */
+export interface AccountBalance {
+  address: string;
+  tokenAddress: string;
+  /** Base units as strings: sats and PUSD cents. */
+  bchSats: string;
+  pusdUnits: string;
+}
+
+/** An account whose lookup failed; the others are still shown. */
+export interface AccountError {
+  address: string;
+  error: string;
+}
+
+export interface BotAccount extends AccountBalance {
+  addressCount: number;
+  canFundMax: { BCH: boolean | null; PUSD: boolean | null };
+  maxBchSats: string;
+  maxPusdUnits: string;
+}
+
+export interface ServiceAccounts {
+  bchUsd: string | null;
+  bot: BotAccount | AccountError | null;
+  oracle: AccountBalance | AccountError;
+  arbiter: AccountBalance | AccountError;
+}
 
 // --- Shapes used by the web app (see src/server/http.ts and src/server/service.ts) ---
 
@@ -85,12 +132,16 @@ export interface Reputation {
 export interface RegisteredIdentity {
   identity: string;
   reputation: Reputation;
+  /** Session token for the requests that act for this identity. */
+  session: string;
 }
 
 export interface ApiConfig {
   arbiterPk: string;
   oraclePk: string;
   pusdCategory: string;
+  /** The token category of NFT offer markers (protocol section 3.4); null while offers use the 1,000-sat marker. */
+  offerCategory?: string | null;
   bchDecimals: number;
   pusdDecimals: number;
   demoSellerIdentity: string | null;
@@ -130,6 +181,8 @@ export interface Offer {
   markerVout?: number;
   /** The receive index of the marker's address in the publisher's wallet, when the service recorded it. */
   markerReceiveIndex?: number;
+  /** Set when the marker is an NFT of this category (format 2): closing burns it. */
+  markerCategory?: string;
   closeTxid?: string;
   /** Published and paid for by Campfire (buy offers). */
   sponsored?: boolean;
@@ -193,6 +246,8 @@ export interface Trade extends TradeSummary {
   sellerPayoutPkh?: string;
   arbiterPk: string;
   oraclePk?: string;
+  /** Service fees the seller pays in the deposit, fixed when the trade was requested (protocol section 5.1). */
+  fees?: TradeFee[];
   refundTime?: number;
   termsJson?: string;
   escrowAddress?: string;
@@ -209,6 +264,8 @@ export interface Trade extends TradeSummary {
   paidAt?: number;
   disputedBy?: 'buyer' | 'seller';
   disputedAt?: number;
+  /** The requester took the request back before it was accepted (status Dropped). */
+  withdrawnAt?: number;
   disputeReason?: string;
   verdict?: '01' | '02';
   verdictReason?: string;
@@ -218,6 +275,71 @@ export interface Trade extends TradeSummary {
   createdAt: number;
   updatedAt: number;
   completedAt?: number;
+  /**
+   * Set on the public view, which is what anyone but the two parties and the arbiter reads (src/server/tradeViews.ts):
+   * identities, keys, payout addresses, fiat terms and the dispute reason are left out.
+   */
+  public?: true;
+}
+
+/** The public view of a trade: only what does not name anyone or a fiat sum (src/server/tradeViews.ts). */
+export type PublicTrade = Pick<
+  Trade,
+  | 'id'
+  | 'side'
+  | 'status'
+  | 'asset'
+  | 'assetDecimals'
+  | 'amount'
+  | 'arbiterPk'
+  | 'tradeId'
+  | 'escrowAddress'
+  | 'escrowTokenAddress'
+  | 'refundTime'
+  | 'fundingDeadline'
+  | 'fundingTxid'
+  | 'fundingVout'
+  | 'fundingConfirmations'
+  | 'fundedAt'
+  | 'paymentDeadline'
+  | 'paidAt'
+  | 'disputedAt'
+  | 'verdict'
+  | 'verdictIssuedAt'
+  | 'settlementTxid'
+  | 'isDemo'
+  | 'createdAt'
+  | 'updatedAt'
+  | 'completedAt'
+> & { public: true };
+
+/** GET /api/trades without `identity`: one page of the public list, newest change first, and totals over every trade. */
+export interface PublicTradePage {
+  trades: PublicTrade[];
+  /** Pass as `cursor` for the next page; null on the last one. */
+  nextCursor: number | null;
+  stats: {
+    /** Trades whose coins went to the buyer: released, or decided for the buyer. */
+    completed: number;
+    /** BCH those trades moved, in satoshis. */
+    bchSats: string;
+    /** How many of those were against the demo seller. */
+    demo: number;
+  };
+}
+
+/** A chat message as GET /api/trades/:id/chat returns it (src/server/storage.ts, StoredChatMessage): ciphertext only. */
+export interface ChatMessage {
+  id: string;
+  tradeRecordId: string;
+  senderIdentity: string;
+  /** The role whose session key signed it, as the service checked; absent on messages from before signatures. */
+  senderRole?: 'buyer' | 'seller';
+  signature?: string;
+  /** `<iv hex>:<AES-GCM ciphertext hex>`, encrypted with the key buyer and seller share. */
+  ciphertext: string;
+  /** Unix seconds, on the service's clock. */
+  createdAt: number;
 }
 
 /** GET /api/trades/:id/chat?arbiter=true: the messages as the arbiter reads them after a party handed over the key. */
@@ -230,14 +352,16 @@ export interface ArbiterChat {
     /** Who signed the message with their session key; absent when the signature is missing or wrong. */
     senderRole?: 'buyer' | 'seller';
     verified?: boolean;
-    plaintext: string;
+    /** Null when this one message does not decrypt with the handed-over key. */
+    plaintext: string | null;
     createdAt: number;
   }[];
 }
 
+/** GET /api/demo. Without a demo seller the service answers `{ enabled: false }` and nothing else. */
 export interface DemoInfo {
   enabled: boolean;
   identity: string;
   /** Amounts come as strings in base units (sats, PUSD cents). */
-  limits: { maxActiveTrades: number; maxDailyFundings: number; minBchSats?: string; maxBchSats?: string };
+  limits: { maxActiveTrades: number; maxDailyFundings: number; minBchSats?: string; maxBchSats?: string; minPusdUnits?: string; maxPusdUnits?: string };
 }

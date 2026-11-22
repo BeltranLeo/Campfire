@@ -1,20 +1,41 @@
 /* Page-level glue that the design system leaves to the app. */
 
-:root { color-scheme: light; }
+:root { /* Reading width for the long text of the about page (about 65–70 characters). */ --measure: 640px; }
 
 /* The page behind #root must match the theme, or overscroll and short pages show a white strip. */
 html, body { margin: 0; min-height: 100%; background: var(--bg); }
 
 #root { min-height: 100vh; min-height: 100dvh; }
 
-/* The design draws the pairing dialog and the wallet menu in place on artboards; in the app they float. */
-.s-overlay[data-modal] { position: fixed; inset: 0; z-index: 30; overflow-y: auto; }
+/* The design draws the pairing dialog and the wallet menu in place on artboards; in the app they float. The dialog
+   sits above every header, the landing page's included (z-index 50 in landing.css). */
+.s-overlay[data-modal] { position: fixed; inset: 0; z-index: 100; overflow-y: auto; }
+/* The dialog is mounted on document.body, outside the .cf wrapper that sets the text styles, so it sets them itself
+   (not the background: the overlay has its own scrim). */
+.s-overlay[data-modal] { font-family: var(--font-text); font-size: 16px; line-height: 24px; color: var(--text); -webkit-font-smoothing: antialiased; }
 .s-dialog:focus { outline: none; }
 .s-walletanchor { position: relative; }
 .s-walletanchor > .s-menu { position: absolute; right: 0; top: calc(100% + var(--space-2)); z-index: 20; width: min(320px, calc(100vw - 2 * var(--space-4))); }
+/* The open menu is solid, not glass: it sits inside the header, whose own backdrop blur keeps the menu's blur from
+   reaching the page, so the 7% dark glass let the page read through it. */
+.s-walletanchor > .s-menu { background: var(--surface); -webkit-backdrop-filter: none; backdrop-filter: none; }
+/* On a phone the header is not sticky, so nothing lifted it: its blur makes it a layer of its own and the glass
+   cards after it were drawn over the open menu. */
+@media (max-width: 719px) { .cf-header { position: relative; z-index: 20; } }
+/* Wallet menu: identity in one row, then the balance as the largest thing in it. */
+.s-menu__id { display: flex; align-items: center; gap: var(--space-3); }
+.s-menu__who { display: flex; flex-direction: column; min-width: 0; gap: 2px; }
+.s-menu__who > .s-term > strong { font: 600 16px/22px var(--font-display); }
+/* The name's "?" bubble spans the menu instead of the name, so it never runs off the screen's right edge. */
+.s-menu .s-term > details { position: static; }
+.s-menu .s-term__text { left: var(--space-4); right: var(--space-4); top: 64px; width: auto; }
+.s-menu__balance { display: flex; flex-direction: column; gap: 2px; padding: var(--space-3) var(--space-4); }
+.s-menu__bch { font: 700 28px/34px var(--font-display); font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+.s-menu__links { gap: var(--space-4); font-size: 14px; line-height: 20px; }
+.s-menu__pusd { font: 500 15px/20px var(--font-text); font-variant-numeric: tabular-nums; }
 /* The sticky bottom bar must stay above content that sets its own stacking (the timeline dots). */
 .cf-bottomnav { z-index: 10; }
-.s-walleterror { width: 100%; max-width: var(--content-max); margin: 0 auto; padding: var(--space-4) var(--space-5) 0; }
+.s-walleterror { width: 100%; max-width: var(--layout-site-max-width); margin: 0 auto; padding: var(--space-4) var(--space-6) 0; }
 @media (max-width: 719px) { .s-walleterror { padding: var(--space-4) var(--space-4) 0; } }
 
 /* A coin logo fills the design's 24px coin circle instead of the text glyph. */
@@ -23,3 +44,26 @@ img.s-coin { display: block; flex: none; background: none; object-fit: cover; }
 /* The balance sits in the identity pill; on a phone the pill keeps the balance and drops the identity, which is in the menu. */
 .cf-wallet__bal { white-space: nowrap; }
 @media (max-width: 559px) { .cf-wallet__id { display: none; } }
+
+/* The eye beside the balance's label (wallet menu and Home): a quiet icon button, 32 px to tap, drawn 18 px. */
+.s-balancehead { display: flex; align-items: center; justify-content: space-between; gap: var(--space-2); }
+.s-eye { display: inline-grid; place-items: center; width: 32px; height: 32px; margin: -6px -8px -6px 0; border: 0; border-radius: var(--radius-sm); background: none; color: var(--text-muted); cursor: pointer; }
+.s-eye:hover { color: var(--text); background: var(--bg); }
+.s-eye > .cf-icon { width: 18px; height: 18px; }
+/* The balance while the wallet's coins are read: the running total in the balance's place, then a bar that fills. */
+.s-partial { display: flex; align-items: baseline; flex-wrap: wrap; gap: 0 var(--space-2); }
+.s-partial > strong { color: var(--text-muted); }
+.s-partial__card { font: 700 40px/44px var(--font-display); font-variant-numeric: tabular-nums; }
+.s-scan { display: flex; flex-direction: column; gap: 4px; max-width: 420px; margin-top: var(--space-1); }
+.s-scan__head { display: flex; justify-content: space-between; align-items: baseline; gap: var(--space-2); }
+.s-scan__head > :last-child { white-space: nowrap; }
+.s-scan__bar { display: block; position: relative; height: 6px; border-radius: var(--radius-pill); background: var(--border); overflow: hidden; }
+.s-scan__bar > i { position: absolute; inset: 0 auto 0 0; border-radius: inherit; background: var(--escrow-fill); transition: width 0.4s ease-out; }
+/* While the scan does not know how many addresses there are, a short segment slides instead of a fake percent. */
+.s-scan__bar[data-indeterminate] > i { width: 30%; animation: s-scan-slide 1.4s ease-in-out infinite; }
+@keyframes s-scan-slide { from { left: -30%; } to { left: 100%; } }
+@media (prefers-reduced-motion: reduce) {
+  .s-scan__bar > i { transition: none; }
+  .s-scan__bar[data-indeterminate] > i { animation: none; left: 0; width: 100%; opacity: 0.4; }
+}
+@media (max-width: 719px) { .s-partial__card { font-size: 32px; line-height: 36px; } }

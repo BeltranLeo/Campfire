@@ -1,8 +1,18 @@
 // What the offer lists need besides the offers themselves: the indicative price of each, the quotes it comes from
 // and the seller's or buyer's track record. Shared by Offers and Home.
 
+import { namesSimulatedPayment } from '../protocol/offers.js';
 import { apiGet, type Offer, type PriceQuote, type Reputation } from './api';
 import { applyMargin, formatDayMonth } from './format';
+import { text } from './messages';
+
+/**
+ * The offer's fiat payment is simulated, at least in part: the demo seller's own offers, and buy offers that asked
+ * for a demo answer. The service flags only the first, so the methods decide the rest.
+ */
+export function isSimulatedOffer(offer: Pick<Offer, 'isDemo' | 'document'>): boolean {
+  return offer.isDemo || namesSimulatedPayment(offer.document.paymentMethods);
+}
 
 export function priceOf(offer: Offer, quotes: Map<string, PriceQuote> | undefined): number | null {
   const price = offer.document.price;
@@ -14,8 +24,9 @@ export function priceOf(offer: Offer, quotes: Map<string, PriceQuote> | undefine
 // The count for the role the person has on this offer: sellers on sell offers, buyers on buy offers.
 export function describeReputation(rep: Reputation, offerSide: 'sell' | 'buy'): string {
   const count = offerSide === 'sell' ? rep.completedAsSeller : rep.completedAsBuyer;
-  if (count === 0 || rep.firstCompletedAt === null) return `0 completed · new ${offerSide === 'sell' ? 'seller' : 'buyer'}`;
-  return `${count} completed · since ${formatDayMonth(rep.firstCompletedAt)}`;
+  const t = text().home;
+  if (count === 0 || rep.firstCompletedAt === null) return t.newTrader(offerSide === 'sell');
+  return t.completedSince(count, formatDayMonth(rep.firstCompletedAt));
 }
 
 export async function loadQuotes(pairs: string[]): Promise<{ byPair: Map<string, PriceQuote>; updatedAt: Date | null }> {
@@ -42,4 +53,12 @@ export async function loadReputations(identities: string[]): Promise<Map<string,
 
 export function unique(values: string[]): string[] {
   return [...new Set(values)].sort();
+}
+
+/** The demo offers first (the way in for a first visit), the rest in the service's order. Nothing is removed. */
+export function demoFirst(offers: Offer[]): Offer[] {
+  return offers
+    .map((offer, index) => ({ offer, index }))
+    .sort((a, b) => Number(b.offer.isDemo) - Number(a.offer.isDemo) || a.index - b.index)
+    .map((x) => x.offer);
 }

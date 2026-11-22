@@ -1,0 +1,52 @@
+pragma cashscript ^0.14.0;
+
+// Holds a minting NFT of the Campfire offer category (protocol section 3.4).
+// Anyone may spend it to publish one offer, and the transaction must then:
+//   output 0: the version-2 offer OP_RETURN, without tokens;
+//   output 1: one immutable marker NFT of the category, with the commitment
+//             <side byte> <offer content hash> (the hash from output 0);
+//   output 2: this minting NFT, back at this contract, unchanged;
+//   output 3: optional change, without tokens.
+// The contract has no key: it cannot be stopped, and it cannot mint anything
+// that is not tied to an offer published in the same transaction.
+contract CampfireOfferMinter() {
+    function mint() {
+        // The minter is input 0, so no second minter can join the transaction.
+        require(this.activeInputIndex == 0, "minter must be input 0");
+        bytes minterCategory = tx.inputs[0].tokenCategory;
+        require(minterCategory.length == 33, "minter holds no NFT");
+        bytes category = minterCategory.split(32)[0];
+        require(minterCategory.split(32)[1] == 0x02, "minter NFT must be minting");
+
+        // Output 0: OP_RETURN "CMPF" 0x02 0x01 <arbiter 33> <oracle 33> <hash 32>, 111 bytes.
+        bytes opReturn = tx.outputs[0].lockingBytecode;
+        require(opReturn.length == 111, "output 0 is not an offer OP_RETURN");
+        require(opReturn.split(10)[0] == 0x6a04434d504601020101, "output 0 is not a version-2 offer");
+        bytes hashPush = opReturn.split(78)[1];
+        require(hashPush.split(1)[0] == 0x20, "output 0 has no content hash");
+        bytes offerHash = hashPush.split(1)[1];
+        require(tx.outputs[0].tokenCategory == 0x, "output 0 carries tokens");
+
+        // Output 1: the marker NFT, immutable (a 32-byte category means no capability byte).
+        require(tx.outputs[1].tokenCategory == category, "output 1 is not an immutable marker");
+        require(tx.outputs[1].tokenAmount == 0, "marker carries fungible tokens");
+        bytes commitment = tx.outputs[1].nftCommitment;
+        require(commitment.length == 33, "marker commitment must be 33 bytes");
+        bytes side = commitment.split(1)[0];
+        require(side == 0x01 || side == 0x02, "unknown offer side");
+        require(commitment.split(1)[1] == offerHash, "marker is not tied to this offer");
+
+        // Output 2: the minter comes back unchanged, with at least its value.
+        require(tx.outputs[2].lockingBytecode == tx.inputs[0].lockingBytecode, "minter must return to the contract");
+        require(tx.outputs[2].tokenCategory == minterCategory, "minter category changed");
+        require(tx.outputs[2].nftCommitment == tx.inputs[0].nftCommitment, "minter commitment changed");
+        require(tx.outputs[2].tokenAmount == tx.inputs[0].tokenAmount, "minter token amount changed");
+        require(tx.outputs[2].value >= tx.inputs[0].value, "minter value decreased");
+
+        // Nothing else may carry tokens, so no second NFT of the category is minted.
+        require(tx.outputs.length <= 4, "too many outputs");
+        if (tx.outputs.length == 4) {
+            require(tx.outputs[3].tokenCategory == 0x, "change carries tokens");
+        }
+    }
+}

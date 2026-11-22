@@ -1,12 +1,13 @@
 // Vercel Function entry point: every `/api/*` request is rewritten here (see vercel.json) and routed by path.
 
+import { waitUntil } from '@vercel/functions';
 import { ConfigError, createAppFromEnv } from '../src/server/index.js';
 
 let handlerPromise: Promise<(req: Request) => Promise<Response>> | null = null;
 
 function getHandler(): Promise<(req: Request) => Promise<Response>> {
   if (!handlerPromise) {
-    handlerPromise = createAppFromEnv(process.env).then((app) => app.handler);
+    handlerPromise = createAppFromEnv(process.env, { waitUntil }).then((app) => app.handler);
     // A failed start (for example a database that is still waking up) is retried on the next request.
     handlerPromise.catch(() => {
       handlerPromise = null;

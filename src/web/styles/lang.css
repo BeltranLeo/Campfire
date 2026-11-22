@@ -1,0 +1,11 @@
+/* The few interface words that live in CSS, in Spanish. html[lang] is set by src/web/lang.ts. */
+html[lang="es"] .cf-details > summary::after,
+html[lang="es"] .tr-progress > summary::after { content: "Mostrar"; }
+html[lang="es"] .cf-details[open] > summary::after,
+html[lang="es"] .tr-progress[open] > summary::after { content: "Ocultar"; }
+/* The connect button says "Connect wallet" on a computer and "Connect" on a phone, where the nav shares its row. */
+.s-connect__short { display: none; }
+@media (max-width: 719px) {
+  .s-connect__long { display: none; }
+  .s-connect__short { display: inline; }
+}

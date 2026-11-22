@@ -2,28 +2,33 @@
 // A sell offer is signed and paid for by the seller's wallet; a buy offer is published by Campfire for the buyer.
 // No DOM here, so test/sell.test.ts can check what ends up in the offer.
 
-import { binToHex } from '@bitauth/libauth';
+import { binToHex, hexToBin } from '@bitauth/libauth';
 import type { NetworkProvider } from 'cashscript';
-import { buildCloseOfferTransaction, isPositiveDecimalString, validateOfferDocument, type OfferDocument } from '../protocol/offers.js';
-import { cashAddressToPkh, derivePayoutPkhFromXpub, pkhToLockingBytecode, type WalletSpendableUtxo, type WalletTransactionRequest } from '../protocol/keys.js';
+import { SIMULATED_PAYMENT_METHOD, buildCloseOfferTransaction, isPositiveDecimalString, validateOfferDocument, type OfferDocument } from '../protocol/offers.js';
+import { buildCloseNftOfferTransaction } from '../protocol/marker.js';
+import { cashAddressToPkh, derivePayoutPkhFromXpub, pkhToCashAddress, pkhToLockingBytecode, type WalletSpendableUtxo, type WalletTransactionRequest } from '../protocol/keys.js';
 import type { Offer as ListedOffer, OfferDocument as ListedOfferDocument } from './api';
-import { applyMargin, formatBch, formatFiat } from './format';
+import { applyMargin, formatBch, formatFiat, fromBaseUnits } from './format';
+import { canonicalMethod, findMethod, isSuggestedAnywhere, methodsFor } from './paymentMethods';
 import { parseAmount } from './take';
 import { TradeActionError } from './trade';
+import { text } from './messages';
 
 export type PriceType = 'market' | 'fixed';
 
 /** What the form holds, exactly as typed. */
 export interface OfferForm {
-  /** "sell": I give BCH and get money. "buy": I give money and get BCH. */
+  /** "sell": I give coins and get money. "buy": I give money and get coins. */
   side: 'sell' | 'buy';
+  /** The coin traded: BCH or the PUSD dollar token. Optional so older saved forms still read as BCH. */
+  coin?: OfferCoin;
   fiat: string;
   priceType: PriceType;
-  /** Percent over the market price, e.g. "2.5". */
+  /** Percent over the market price, e.g. "2.5", or under it with a minus sign, e.g. "-2". */
   margin: string;
   /** Fiat per whole coin, for a fixed price. */
   fixedPrice: string;
-  /** Smallest and largest trade in BCH, as typed ("0.001"). */
+  /** Smallest and largest trade in the coin, as typed ("0.001" BCH, "5.00" PUSD). */
   min: string;
   max: string;
   /** Payment method names separated by commas. */
@@ -35,7 +40,7 @@ export interface OfferForm {
 }
 
 /** The payment method the demo seller answers to (src/server/demo.ts). The fiat payment is simulated. */
-export const DEMO_METHOD = 'simulated';
+export const DEMO_METHOD = SIMULATED_PAYMENT_METHOD;
 
 export type FormField = 'margin' | 'fixedPrice' | 'min' | 'max' | 'methods';
 export type FormErrors = Partial<Record<FormField, string>>;
@@ -45,6 +50,20 @@ export const SELL_FIATS = [
   { code: 'ARS', label: 'Pesos', name: 'Argentine pesos' },
   { code: 'USD', label: 'Dollars', name: 'US dollars' },
 ] as const;
+
+export type OfferCoin = 'BCH' | 'PUSD';
+export const OFFER_COINS: readonly OfferCoin[] = ['BCH', 'PUSD'];
+/** Decimals of each coin's base units: satoshis, and PUSD cents. */
+export const COIN_DECIMALS: Record<OfferCoin, number> = { BCH: 8, PUSD: 2 };
+/** The amounts a new form starts from, per coin. */
+export const DEFAULT_RANGE: Record<OfferCoin, { min: string; max: string }> = { BCH: { min: '0.001', max: '0.02' }, PUSD: { min: '1.00', max: '20.00' } };
+/** A PUSD trade carries its own BCH to the buyer (6,000 sats), so one cent is already a trade that pays out. */
+export const MIN_TRADE_PUSD_UNITS = 1n;
+
+/** "0.001 BCH" or "1.00 PUSD", from base units. */
+export function formatCoin(units: bigint, coin: OfferCoin): string {
+  return coin === 'BCH' ? formatBch(units) : `${fromBaseUnits(units, COIN_DECIMALS.PUSD)} PUSD`;
+}
 
 export const PAYMENT_WINDOWS_SEC = [3600, 1800, 900] as const;
 export const EXPIRIES_SEC = [7 * 86_400, 86_400] as const;
@@ -79,13 +98,8 @@ export function parseMethods(input: string): string[] | null {
 
 // --- Payment method chips (the wizard writes them into `form.methods`, so the document builder is unchanged) ---
 
-const METHOD_CHIPS: Record<string, readonly string[]> = {
-  ARS: ['Bank transfer', 'Mercado Pago', 'Ualá', 'Brubank', 'Cash in person'],
-  USD: ['Bank transfer', 'Zelle', 'Wise', 'Cash in person'],
-};
-
-/** The suggested payment methods for a currency. */
-export const methodChips = (fiat: string): readonly string[] => METHOD_CHIPS[fiat] ?? METHOD_CHIPS.ARS;
+/** The suggested payment method names for a currency, most used first (src/web/paymentMethods.ts). */
+export const methodChips = (fiat: string): string[] => methodsFor(fiat).map((m) => m.name);
 
 const sameName = (a: string, b: string) => a.toLowerCase() === b.toLowerCase();
 
@@ -105,26 +119,28 @@ export function toggleMethod(methods: string, name: string): string {
   return (names.some((n) => sameName(n, name)) ? names.filter((n) => !sameName(n, name)) : [...names, name]).join(', ');
 }
 
-/** Adds the comma-separated names someone typed in "Other". */
-export function addMethods(methods: string, typed: string): string {
-  return selectedMethods(`${methods},${typed}`).join(', ');
+/**
+ * Adds the comma-separated names someone typed in "Other". A name that is a suggestion in this currency, however
+ * it was written ("zelle", "transferencia por alias"), is stored as the suggestion, so the offer filter finds it.
+ */
+export function addMethods(methods: string, typed: string, fiat: string): string {
+  const added = selectedMethods(typed).map((name) => canonicalMethod(name, fiat));
+  return selectedMethods([methods, ...added].join(',')).join(', ');
 }
 
 /** Drops the suggested names of another currency (Zelle on a peso offer) and keeps what was typed by hand. */
 export function keepMethodsFor(methods: string, fiat: string): string {
-  const here = methodChips(fiat);
-  const known = Object.values(METHOD_CHIPS).flat();
   return selectedMethods(methods)
-    .filter((n) => here.some((h) => sameName(h, n)) || !known.some((k) => sameName(k, n)))
+    .filter((n) => findMethod(n, fiat) !== undefined || !isSuggestedAnywhere(n))
     .join(', ');
 }
 
 /** What is wrong with the chosen payment methods, in words that fit chips. Null if nothing. */
 export function methodsProblem(methods: string, reserved = 0): string | null {
   const names = selectedMethods(methods);
-  if (names.length === 0 && reserved === 0) return 'Choose at least one way to pay.';
-  if (names.length > MAX_METHODS - reserved) return `Choose up to ${MAX_METHODS - reserved} ways to pay.`;
-  if (names.some((n) => n.length > MAX_METHOD_LENGTH)) return `Each name can have up to ${MAX_METHOD_LENGTH} characters.`;
+  if (names.length === 0 && reserved === 0) return text().create.chooseOne;
+  if (names.length > MAX_METHODS - reserved) return text().create.chooseUpTo(MAX_METHODS - reserved);
+  if (names.some((n) => n.length > MAX_METHOD_LENGTH)) return text().create.nameTooLong(MAX_METHOD_LENGTH);
   return null;
 }
 
@@ -132,19 +148,26 @@ export function methodsProblem(methods: string, reserved = 0): string | null {
  * "Market + 2.5%", "market − 1%" or "market price", and the price today; or "368,765 ARS per BCH" for a fixed price.
  * Null while there is nothing to say yet (no valid margin or price, or no market price).
  */
-export function describeYourPrice(p: { priceType: PriceType; marginBps: number | null; fixedPrice: string | null; marketPrice: string | null; fiat: string }): string | null {
+export function describeYourPrice(p: {
+  priceType: PriceType;
+  marginBps: number | null;
+  fixedPrice: string | null;
+  marketPrice: string | null;
+  fiat: string;
+  coin?: OfferCoin;
+}): string | null {
+  const coin = p.coin ?? 'BCH';
   const money = (v: number) => formatFiat(v, p.fiat).replace('.00 ', ' ');
-  if (p.priceType === 'fixed') return p.fixedPrice === null ? null : `Your price: ${money(Number(p.fixedPrice))} per BCH`;
+  const t = text().create;
+  if (p.priceType === 'fixed') return p.fixedPrice === null ? null : t.yourPricePrefix + t.yourFixedPrice(money(Number(p.fixedPrice)), coin);
   if (p.marginBps === null || p.marketPrice === null) return null;
-  const percent = Math.abs(p.marginBps) / 100;
-  const label = p.marginBps === 0 ? 'market price' : `market ${p.marginBps > 0 ? '+' : '−'} ${percent}%`;
-  return `Your price: ${label} (1 BCH ≈ ${money(applyMargin(p.marketPrice, p.marginBps))} today)`;
+  return t.yourPricePrefix + t.yourMarketPrice(p.marginBps, coin, money(applyMargin(p.marketPrice, p.marginBps)));
 }
 
 export type OfferBuild = { ok: true; document: OfferDocument; json: string } | { ok: false; errors: FormErrors };
 
 /**
- * The offer document for a BCH sell offer, or what is wrong with the form. The document is validated with the
+ * The offer document for a BCH or PUSD offer, or what is wrong with the form. The document is validated with the
  * same function the service runs, so a rejection there cannot come as a surprise after the wallet signed.
  */
 export function buildOfferDocument(params: {
@@ -155,47 +178,54 @@ export function buildOfferDocument(params: {
   now: number;
   /** The longest expiry Campfire pays for, for buy offers. */
   maxExpirySec?: number;
-  /** The largest trade the demo seller takes, in sats: above it the demo seller silently skips the offer. */
-  demoMaxSats?: bigint;
+  /** The largest trade the demo seller takes, in the coin's base units: above it the demo seller silently skips the offer. */
+  demoMaxUnits?: bigint;
+  /** The PUSD token category the service names; needed for a PUSD offer. */
+  pusdCategory?: string;
 }): OfferBuild {
   const { form } = params;
+  const coin = form.coin ?? 'BCH';
+  const decimals = COIN_DECIMALS[coin];
   const errors: FormErrors = {};
 
   let price: OfferDocument['price'] | undefined;
   if (form.priceType === 'market') {
     const marginBps = parseMarginBps(form.margin);
-    if (marginBps === null) errors.margin = 'Enter a percentage between -50 and 100, with up to two decimals.';
-    else price = { type: 'floating', pair: `BCH/${form.fiat}`, marginBps };
+    if (marginBps === null) errors.margin = text().create.badMargin;
+    else price = { type: 'floating', pair: `${coin}/${form.fiat}`, marginBps };
   } else {
     const value = parseFixedPrice(form.fixedPrice);
-    if (value === null) errors.fixedPrice = 'Enter the price with digits and a dot for decimals, for example 480000.50.';
+    if (value === null) errors.fixedPrice = text().create.badFixed;
     else price = { type: 'fixed', value };
   }
 
-  const min = parseAmount(form.min, 8);
-  const max = parseAmount(form.max, 8);
-  if (min === null || min < MIN_TRADE_SATS) errors.min = `The smallest trade must be at least ${formatBch(MIN_TRADE_SATS)}.`;
-  if (max === null || max <= 0n) errors.max = 'Enter the largest trade in BCH, for example 0.02.';
-  else if (min !== null && max < min) errors.max = 'The largest trade cannot be below the smallest.';
+  const min = parseAmount(form.min, decimals);
+  const max = parseAmount(form.max, decimals);
+  const minUnits = coin === 'BCH' ? MIN_TRADE_SATS : MIN_TRADE_PUSD_UNITS;
+  if (min === null || min < minUnits) errors.min = text().create.minTooSmall(formatCoin(minUnits, coin));
+  if (max === null || max <= 0n) errors.max = text().create.badMax(coin, DEFAULT_RANGE[coin].max);
+  else if (min !== null && max < min) errors.max = text().create.maxBelowMin;
 
   // A demo buy offer carries the simulated method the demo seller looks for; real methods are optional then.
   const demo = form.side === 'buy' && form.demo === true;
   const typed = demo && form.methods.trim() === '' ? [] : parseMethods(form.methods);
   const methods = typed && demo && !typed.includes(DEMO_METHOD) ? [...typed, DEMO_METHOD] : typed;
   if (!methods || methods.length > MAX_METHODS) {
-    errors.methods = `Name 1 to ${MAX_METHODS - (demo ? 1 : 0)} payment methods, separated by commas, up to ${MAX_METHOD_LENGTH} characters each.`;
+    errors.methods = text().create.badMethods(MAX_METHODS - (demo ? 1 : 0), MAX_METHOD_LENGTH);
   }
-  if (demo && params.demoMaxSats !== undefined && min !== null && min > params.demoMaxSats && !errors.min) {
-    errors.min = `For a demo answer, keep the smallest trade at ${formatBch(params.demoMaxSats)} or less.`;
+  if (demo && params.demoMaxUnits !== undefined && min !== null && min > params.demoMaxUnits && !errors.min) {
+    errors.min = text().create.demoMin(formatCoin(params.demoMaxUnits, coin));
   }
+  // Without the service's PUSD category there is no token to name: the form waits for the configuration.
+  if (coin === 'PUSD' && !params.pusdCategory) errors.min ??= text().create.pusdLoading;
 
   if (Object.keys(errors).length > 0 || !price || min === null || max === null || !methods) return { ok: false, errors };
 
   const document: OfferDocument = {
     v: 1,
     side: form.side,
-    asset: 'BCH',
-    assetDecimals: 8,
+    asset: coin === 'BCH' ? 'BCH' : params.pusdCategory!.toLowerCase(),
+    assetDecimals: decimals,
     fiat: form.fiat,
     price,
     min: min.toString(),
@@ -212,7 +242,7 @@ export function buildOfferDocument(params: {
     validateOfferDocument(document);
   } catch (err) {
     // The form checks everything the protocol does, so this means the service's keys are unusable.
-    return { ok: false, errors: { margin: err instanceof Error ? err.message : 'The offer is not valid.' } };
+    return { ok: false, errors: { margin: err instanceof Error ? err.message : text().create.invalidOffer } };
   }
   return { ok: true, document, json: JSON.stringify(document) };
 }
@@ -225,9 +255,11 @@ export function marginRange(
   offers: { document: ListedOfferDocument }[],
   fiat: string,
   side: 'sell' | 'buy' = 'sell',
+  /** "BCH" or the token category. */
+  asset = 'BCH',
 ): { low: number; high: number } | null {
   const margins = offers
-    .filter((o) => o.document.side === side && o.document.asset === 'BCH' && o.document.fiat === fiat && o.document.price.type === 'floating')
+    .filter((o) => o.document.side === side && o.document.asset.toLowerCase() === asset.toLowerCase() && o.document.fiat === fiat && o.document.price.type === 'floating')
     .map((o) => (o.document.price.type === 'floating' ? o.document.price.marginBps : 0));
   return margins.length === 0 ? null : { low: Math.min(...margins), high: Math.max(...margins) };
 }
@@ -239,17 +271,21 @@ const MARKER_SEARCH_LIMIT = 200;
 
 /**
  * The transaction that closes an offer: it spends the 1,000-sat marker back to the same address (minus the network
- * fee), and the service sees the marker gone. The marker sits on a `receive` address of this wallet, found by
+ * fee), and the service sees the marker gone. A format-2 marker also carries an NFT, which the close burns. The marker sits on a `receive` address of this wallet, found by
  * deriving the path, because the service does not keep the index. Anything that does not fit stops here with a
  * sentence, before the wallet is asked to sign.
+ *
+ * Null when the marker is already spent: by the protocol a spent marker is a closed offer, so there is nothing to
+ * sign and the caller only asks the service to record it. This happens when the wallet itself spent the marker as
+ * an ordinary coin, which the wallet app outside Campfire may do.
  */
 export async function buildCloseOffer(params: {
-  offer: Pick<ListedOffer, 'offerTxid' | 'markerAddress' | 'markerVout' | 'markerReceiveIndex'>;
+  offer: Pick<ListedOffer, 'offerTxid' | 'markerAddress' | 'markerVout' | 'markerReceiveIndex' | 'markerCategory'>;
   provider: NetworkProvider;
   receiveXpub: string;
-}): Promise<WalletTransactionRequest> {
+}): Promise<WalletTransactionRequest | null> {
   const { offer } = params;
-  if (!offer.markerAddress) throw new TradeActionError('This offer has no marker to spend.');
+  if (!offer.markerAddress) throw new TradeActionError(text().create.noMarker);
   const wanted = binToHex(cashAddressToPkh(offer.markerAddress));
   // The service records the index for offers published since buy offers exist; older offers are searched for.
   const recorded = offer.markerReceiveIndex;
@@ -257,10 +293,10 @@ export async function buildCloseOffer(params: {
   for (let i = 0; i < MARKER_SEARCH_LIMIT && index < 0; i++) {
     if (binToHex(derivePayoutPkhFromXpub(params.receiveXpub, i)) === wanted) index = i;
   }
-  if (index < 0) throw new TradeActionError("This offer's marker does not belong to the connected wallet. Connect the wallet that published it.");
+  if (index < 0) throw new TradeActionError(text().create.foreignMarker);
   const utxos = await params.provider.getUtxos(offer.markerAddress);
   const marker = utxos.find((u) => u.txid === offer.offerTxid && u.vout === (offer.markerVout ?? 1));
-  if (!marker) throw new TradeActionError('The marker of this offer is already spent. Reload the page to see its state.');
+  if (!marker) return null;
   const markerUtxo = {
     ...marker,
     lockingBytecode: binToHex(pkhToLockingBytecode(wanted)),
@@ -268,5 +304,10 @@ export async function buildCloseOffer(params: {
     keyIndex: index,
     address: offer.markerAddress,
   } as WalletSpendableUtxo;
+  // A format-2 marker is an NFT: the close burns it and keeps its BCH at the plain (q…) form of the same address.
+  if (offer.markerCategory) {
+    const destinationAddress = pkhToCashAddress(hexToBin(wanted));
+    return buildCloseNftOfferTransaction({ provider: params.provider, markerUtxo, destinationAddress, category: offer.markerCategory });
+  }
   return buildCloseOfferTransaction({ provider: params.provider, markerUtxo, destinationAddress: offer.markerAddress });
 }

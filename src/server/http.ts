@@ -3,16 +3,24 @@
 import { timingSafeEqual } from 'node:crypto';
 import {
   BCH_DECIMALS,
+  FEE_DUST_LIMIT_SATS,
+  MAX_FEE_BPS,
   PUSD_CATEGORY,
   PUSD_DECIMALS,
   VERDICT_BUYER,
   VERDICT_SELLER,
+  type FeeRates,
   type VerdictHex,
 } from '../protocol/index.js';
+import { readServiceAccounts } from './accounts.js';
 import { DemoLimitError, type DemoAsset, type DemoSeller } from './demo.js';
 import type { OracleService } from './oracle.js';
-import { SponsorshipLimitError, type CampfireService } from './service.js';
+import { SignInRequiredError, SponsorshipLimitError, type CampfireService, type SignInProof } from './service.js';
 import type { StoredTrade } from './storage.js';
+import { PUBLIC_PAGE_MAX, publicTradePage, publicTradeView, tradeStats, withoutSecrets } from './tradeViews.js';
+
+// Header that carries the session token from sign-in (protocol section 1).
+export const SESSION_HEADER = 'x-campfire-session';
 
 class HttpError extends Error {
   constructor(
@@ -36,6 +44,24 @@ async function readJson<T = Record<string, unknown>>(req: Request): Promise<T> {
   return JSON.parse(text) as T;
 }
 
+// A trade read (or a take of a demo offer) waits this long for the demo seller before it answers with the trade as it
+// stands. The bot's step goes on after the answer; the page polls and shows it when it is done.
+export const DEMO_RECONCILE_WAIT_MS = 4000;
+
+// Waits for `work` at most `ms`. An error within that time is thrown; a later one is left to the work's own logging.
+async function settleWithin<T>(work: Promise<T>, ms: number): Promise<{ done: true; value: T } | { done: false }> {
+  work.catch(() => undefined);
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      work.then((value) => ({ done: true as const, value })),
+      new Promise<{ done: false }>((resolve) => (timer = setTimeout(() => resolve({ done: false }), ms))),
+    ]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 export function createApiHandler(deps: {
   service: CampfireService;
   oracle: OracleService;
@@ -43,8 +69,19 @@ export function createApiHandler(deps: {
   demo?: DemoSeller;
   // Bearer token for arbiter and demo-administration routes; those routes are disabled without it.
   adminToken?: string;
+  // How long a trade read waits for the demo seller to finish a step left behind (see GET /api/trades/:id).
+  reconcileWaitMs?: number;
+  // Keeps the function alive until work that outlives the response is done (Vercel's waitUntil). Without it, a
+  // platform could freeze the bot halfway, holding its lock.
+  waitUntil?: (work: Promise<unknown>) => void;
 }) {
   const { service, oracle, demo, adminToken } = deps;
+  const reconcileWaitMs = deps.reconcileWaitMs ?? DEMO_RECONCILE_WAIT_MS;
+  // Starts the bot's work and waits for it at most reconcileWaitMs; the rest runs after the answer.
+  const demoWork = <T>(work: Promise<T>) => {
+    deps.waitUntil?.(work.catch(() => undefined));
+    return settleWithin(work, reconcileWaitMs);
+  };
 
   const isAdmin = (req: Request): boolean => {
     if (!adminToken) return false;
@@ -65,10 +102,43 @@ export function createApiHandler(deps: {
   const canActAsArbiter = (req: Request, trade: StoredTrade): boolean =>
     isAdmin(req) || (service.isDemoTrade(trade) && trade.status === 'Disputed');
 
+  // Whether the signed-in identity is the buyer or the seller of the trade.
+  const isParty = (req: Request, trade: StoredTrade): boolean => {
+    const signedIn = service.sessionIdentity(req.headers.get(SESSION_HEADER));
+    return signedIn !== null && (signedIn === trade.buyerIdentity || signedIn === trade.sellerIdentity);
+  };
+
+  // Who reads the whole record (protocol section 6, "Who reads a trade"): the two parties, the admin, and, on a
+  // demo trade that went to dispute, any visitor, because the demo arbiter console is open to everyone (section 8).
+  const canReadTrade = (req: Request, trade: StoredTrade): boolean =>
+    isAdmin(req) || isParty(req, trade) || (service.isDemoTrade(trade) && trade.disputedAt !== undefined);
+
+  // A wrong admin token is an error, not a visitor: the arbiter console would otherwise wait for a record that
+  // never comes.
+  const refuseWrongToken = (req: Request): void => {
+    if (req.headers.has('authorization') && !isAdmin(req)) {
+      throw new HttpError(403, 'The admin token is not valid');
+    }
+  };
+
+  // Every trade an HTTP answer carries goes through here: the whole record without secrets, or the public view.
+  const tradeView = (req: Request, trade: StoredTrade) =>
+    canReadTrade(req, trade) ? withoutSecrets(trade) : publicTradeView(trade);
+
   return async function handleRequest(req: Request): Promise<Response> {
     const url = new URL(req.url, 'http://localhost');
     const path = url.pathname.replace(/\/+$/, '') || '/';
     const method = req.method.toUpperCase();
+    // A request that acts for an identity must carry that identity's session token, issued at sign-in.
+    const requireSession = (identity: string | undefined): void => {
+      const signedIn = service.sessionIdentity(req.headers.get(SESSION_HEADER));
+      if (!signedIn) {
+        throw new HttpError(401, 'Your sign-in is missing or expired. Connect your wallet again.');
+      }
+      if (signedIn !== identity) {
+        throw new HttpError(403, 'This request acts for another identity than the one signed in');
+      }
+    };
 
     try {
       // GET /api/config
@@ -77,22 +147,54 @@ export function createApiHandler(deps: {
           arbiterPk: service.arbiterPublicKeyHex,
           oraclePk: service.oraclePublicKeyHex,
           pusdCategory: PUSD_CATEGORY,
+          offerCategory: service.offerCategory,
           bchDecimals: BCH_DECIMALS,
           pusdDecimals: PUSD_DECIMALS,
           demoSellerIdentity: service.demoSellerIdentity ?? null,
         });
       }
 
-      // POST /api/identities
+      // GET /api/fees: the fee rates new trades use (protocol section 5.1).
+      if (method === 'GET' && path === '/api/fees') {
+        return jsonResponse({ ...(await service.getFeeRates()), maxBps: MAX_FEE_BPS, dustLimitSats: Number(FEE_DUST_LIMIT_SATS) });
+      }
+
+      // POST /api/admin/fees (admin): changes the rates. Trades already requested keep their fees.
+      if (method === 'POST' && path === '/api/admin/fees') {
+        requireAdmin(req);
+        const body = await readJson<FeeRates>(req);
+        const rates = await service.setFeeRates(body);
+        return jsonResponse({ ...rates, maxBps: MAX_FEE_BPS, dustLimitSats: Number(FEE_DUST_LIMIT_SATS) });
+      }
+
+      // GET /api/admin/accounts (admin): addresses and balances of the bot and of the arbiter and oracle fee
+      // addresses. The addresses are public, but each read is a mainnet lookup, so only the admin triggers it.
+      if (method === 'GET' && path === '/api/admin/accounts') {
+        requireAdmin(req);
+        return jsonResponse(await readServiceAccounts({ service, oracle, demo }));
+      }
+
+      // POST /api/identities/challenge: a sign-in challenge for the wallet to sign with defi/0 (protocol section 1).
+      if (method === 'POST' && path === '/api/identities/challenge') {
+        const body = await readJson<{ defiXpub: string; receiveXpub: string }>(req);
+        return jsonResponse({ challenge: service.createSignInChallenge({ defiXpub: body.defiXpub, receiveXpub: body.receiveXpub }) });
+      }
+
+      // POST /api/identities: new keys need `proof`, a signed challenge; without it the answer is 401.
       if (method === 'POST' && path === '/api/identities') {
         const body = await readJson<{
           defiXpub: string;
           receiveXpub: string;
-          changeXpub?: string;
+          proof?: SignInProof;
         }>(req);
-        const record = await service.registerIdentity(body);
+        const { record, sessionToken } = await service.registerIdentity({
+          defiXpub: body.defiXpub,
+          receiveXpub: body.receiveXpub,
+          proof: body.proof,
+          sessionToken: req.headers.get(SESSION_HEADER),
+        });
         const reputation = await service.getReputation(record.identity);
-        return jsonResponse({ identity: record.identity, record, reputation }, 201);
+        return jsonResponse({ identity: record.identity, record, reputation, session: sessionToken }, 201);
       }
 
       // GET /api/identities/:identity/reputation
@@ -138,15 +240,15 @@ export function createApiHandler(deps: {
             offerJson: string;
             offerTxHex: string;
             markerReceiveIndex: number;
-            broadcast?: boolean;
           }>(req);
-          // Fields are copied one by one: whether an offer is a demo offer is decided by the service, never the client.
+          requireSession(body.sellerIdentity);
+          // Fields are copied one by one: whether an offer is a demo offer is decided by the service, never the client,
+          // and the service always broadcasts the offer itself.
           const offer = await service.publishOffer({
             sellerIdentity: body.sellerIdentity,
             offerJson: body.offerJson,
             offerTxHex: body.offerTxHex,
             markerReceiveIndex: body.markerReceiveIndex,
-            broadcast: body.broadcast,
           });
           return jsonResponse({ offer }, 201);
         }
@@ -167,6 +269,7 @@ export function createApiHandler(deps: {
           throw new HttpError(404, 'Paid publication of buy offers is not enabled');
         }
         const body = await readJson<{ buyerIdentity: string; offerJson: string; markerReceiveIndex: number }>(req);
+        requireSession(body.buyerIdentity);
         const result = await demo.publishSponsored({
           buyerIdentity: body.buyerIdentity,
           offerJson: body.offerJson,
@@ -189,6 +292,7 @@ export function createApiHandler(deps: {
       const closeOfferMatch = path.match(/^\/api\/offers\/([0-9a-f]{64})\/close$/i);
       if (method === 'POST' && closeOfferMatch) {
         const body = await readJson<{ sellerIdentity: string; closeTxHex?: string }>(req);
+        requireSession(body.sellerIdentity);
         const offer = await service.closeOffer({
           offerTxid: closeOfferMatch[1].toLowerCase(),
           sellerIdentity: body.sellerIdentity,
@@ -197,13 +301,38 @@ export function createApiHandler(deps: {
         return jsonResponse({ offer });
       }
 
+      // GET /api/admin/trades?status= (admin): whole records for the arbiter console, such as the open disputes.
+      if (method === 'GET' && path === '/api/admin/trades') {
+        requireAdmin(req);
+        const status = url.searchParams.get('status');
+        const trades = (await service.listTrades()).filter((t) => status === null || t.status === status);
+        return jsonResponse({ trades: trades.map(withoutSecrets) });
+      }
+
       // GET /api/trades & POST /api/trades
       if (path === '/api/trades') {
         if (method === 'GET') {
           const identity = url.searchParams.get('identity') ?? undefined;
+          if (identity !== undefined) {
+            // Listing one identity's trades, whole, is for that identity only.
+            requireSession(identity);
+            const trades = await service.listTrades({ identity });
+            return jsonResponse({ trades: trades.map(withoutSecrets) });
+          }
+          // Everyone else reads the public view, a page at a time, with totals over every trade.
+          const limit = url.searchParams.get('limit');
+          const cursor = url.searchParams.get('cursor');
+          const whole = (v: string | null, max: number) => v === null || (/^\d+$/.test(v) && Number(v) <= max);
+          if (!whole(limit, PUBLIC_PAGE_MAX) || !whole(cursor, Number.MAX_SAFE_INTEGER)) {
+            throw new HttpError(400, `limit must be a whole number up to ${PUBLIC_PAGE_MAX}, and cursor a whole number`);
+          }
           const offerTxid = url.searchParams.get('offerTxid') ?? undefined;
-          const trades = await service.listTrades({ identity, offerTxid });
-          return jsonResponse({ trades });
+          const all = await service.listTrades({ offerTxid });
+          const page = publicTradePage(all, {
+            limit: limit === null ? undefined : Number(limit),
+            cursor: cursor === null ? undefined : Number(cursor),
+          });
+          return jsonResponse({ ...page, stats: tradeStats(all) });
         }
         if (method === 'POST') {
           const body = await readJson<{
@@ -228,6 +357,7 @@ export function createApiHandler(deps: {
             if (!body.sellerIdentity && body.buyerIdentity) {
               throw new HttpError(400, 'This is a buy offer: a seller takes it, not a buyer');
             }
+            requireSession(body.sellerIdentity);
             // A seller takes a buy offer. The fields are copied one by one: the record id is the demo seller's alone.
             trade = await service.requestBuyOfferTrade({
               offerTxid: body.offerTxid,
@@ -240,6 +370,7 @@ export function createApiHandler(deps: {
               sellerSessionPk: body.sellerSessionPk,
             });
           } else {
+            requireSession(body.buyerIdentity);
             const isDemoOffer = demo !== undefined && offer?.sellerIdentity === demo.identity;
             if (isDemoOffer) {
               await demo.assertCanTake();
@@ -255,54 +386,69 @@ export function createApiHandler(deps: {
               buyerSessionPk: body.buyerSessionPk,
             });
             if (isDemoOffer) {
-              // The bot accepts and funds a real escrow within this request.
-              trade = await demo.acceptAndFund(trade.id);
+              // The bot accepts and funds a real escrow. The answer waits a few seconds for it, not for the indexer:
+              // a refusal (no funds, too busy) still comes back here, and a deposit still on its way shows on the page.
+              const funded = await demoWork(demo.acceptAndFund(trade.id));
+              if (funded.done) trade = funded.value;
             }
           }
-          return jsonResponse({ trade }, 201);
+          return jsonResponse({ trade: tradeView(req, trade) }, 201);
         }
       }
 
-      // GET /api/trades/:id
+      // GET /api/trades/:id: the whole record for those who may read it, the public view for everyone else.
+      // Who is reading comes from the session token, never from a parameter; the old `viewer` and `arbiter`
+      // parameters change nothing.
       const tradeMatch = path.match(/^\/api\/trades\/([0-9a-f]+)$/i);
       if (method === 'GET' && tradeMatch) {
-        const viewer = url.searchParams.get('viewer') ?? undefined;
-        const asArbiter = url.searchParams.get('arbiter') === 'true';
+        refuseWrongToken(req);
         if (demo) {
-          await demo.reconcile(tradeMatch[1]);
+          // The read waits a little for the bot, never longer: a deposit that keeps failing (or a slow network) must not
+          // hold the page on "Loading" forever. Whatever the bot did not finish yet, a later read picks up.
+          await demoWork(demo.reconcile(tradeMatch[1]));
         }
-        let trade = await service.getTrade(tradeMatch[1], viewer);
+        const trade = await service.getTrade(tradeMatch[1]);
         if (!trade) {
           return jsonResponse({ error: 'Trade not found' }, 404);
         }
-        if (asArbiter) {
-          if (!canActAsArbiter(req, trade)) {
-            throw new HttpError(403, 'The arbiter view is only available to the arbiter');
-          }
-          trade = await service.getTrade(tradeMatch[1], viewer, true);
-        }
-        return jsonResponse({ trade });
+        return jsonResponse({ trade: tradeView(req, trade) });
       }
 
       // POST /api/trades/:id/:action
       const actionMatch = path.match(
-        /^\/api\/trades\/([0-9a-f]+)\/(accept|decline|funding|paid|dispute|verdict|settle|chat)$/i,
+        /^\/api\/trades\/([0-9a-f]+)\/(accept|decline|withdraw|funding|paid|dispute|verdict|settle|chat)$/i,
       );
       if (actionMatch) {
         const id = actionMatch[1];
         const action = actionMatch[2].toLowerCase();
 
         if (action === 'chat' && method === 'GET') {
-          const messages = await service.listChatMessages(id);
+          // `?since=<unix seconds>`: only messages created at or after it (what a polling client has not seen yet).
+          const sinceParam = url.searchParams.get('since');
+          const since = sinceParam === null ? undefined : Number(sinceParam);
+          if (since !== undefined && !(Number.isInteger(since) && since >= 0)) {
+            throw new HttpError(400, 'since must be a whole number of seconds');
+          }
+          refuseWrongToken(req);
           const asArbiter = url.searchParams.get('arbiter') === 'true';
+          const trade = await service.getTrade(id);
+          if (!trade) {
+            throw new HttpError(404, 'Trade not found');
+          }
+          // Ciphertext still says who wrote when, and how much: the parties and the arbiter only.
+          if (asArbiter ? !canActAsArbiter(req, trade) : !(isAdmin(req) || isParty(req, trade))) {
+            if (asArbiter) throw new HttpError(403, 'The decrypted chat is only available to the arbiter');
+            const signedIn = service.sessionIdentity(req.headers.get(SESSION_HEADER)) !== null;
+            throw new HttpError(
+              signedIn ? 403 : 401,
+              signedIn ? 'The chat is only available to the two parties' : 'Your sign-in is missing or expired. Connect your wallet again.',
+            );
+          }
+          const messages = await service.listChatMessages(id, since);
           let decrypted: unknown;
           if (asArbiter) {
-            const trade = await service.getTrade(id);
-            if (!trade || !canActAsArbiter(req, trade)) {
-              throw new HttpError(403, 'The decrypted chat is only available to the arbiter');
-            }
             try {
-              decrypted = await service.decryptDisputedChatForArbiter(id);
+              decrypted = await service.decryptDisputedChatForArbiter(id, since);
             } catch {
               decrypted = undefined;
             }
@@ -325,6 +471,7 @@ export function createApiHandler(deps: {
                 refundTime?: number;
                 nonce?: string;
               }>(req);
+              requireSession(body.buyerIdentity);
               let trade = await service.acceptBuyOfferTrade({ ...body, tradeRecordId: id });
               if (demo && service.isDemoTrade(trade)) {
                 // The demo seller deposits within this request. If that fails, the next read of the trade retries.
@@ -334,7 +481,7 @@ export function createApiHandler(deps: {
                   // The accepted trade is still returned.
                 }
               }
-              return jsonResponse({ trade });
+              return jsonResponse({ trade: tradeView(req, trade) });
             }
             const body = await readJson<{
               sellerIdentity: string;
@@ -347,30 +494,45 @@ export function createApiHandler(deps: {
               refundTime?: number;
               nonce?: string;
             }>(req);
+            requireSession(body.sellerIdentity);
             const trade = await service.acceptTrade({ ...body, tradeRecordId: id });
-            return jsonResponse({ trade });
+            return jsonResponse({ trade: tradeView(req, trade) });
           }
           if (action === 'decline') {
             // The one who published the offer declines: the seller of a sell offer, the buyer of a buy offer.
             const body = await readJson<{ identity?: string; sellerIdentity?: string; buyerIdentity?: string }>(req);
-            const trade = await service.declineTrade({
-              tradeRecordId: id,
-              identity: body.identity ?? body.sellerIdentity ?? body.buyerIdentity ?? '',
-            });
-            return jsonResponse({ trade });
+            const identity = body.identity ?? body.sellerIdentity ?? body.buyerIdentity ?? '';
+            requireSession(identity);
+            const trade = await service.declineTrade({ tradeRecordId: id, identity });
+            return jsonResponse({ trade: tradeView(req, trade) });
+          }
+          if (action === 'withdraw') {
+            // The one who sent the request takes it back: the buyer of a sell offer, the seller of a buy offer.
+            const body = await readJson<{ identity?: string }>(req);
+            const identity = body.identity ?? '';
+            requireSession(identity);
+            const trade = await service.withdrawRequest({ tradeRecordId: id, identity });
+            return jsonResponse({ trade: tradeView(req, trade) });
           }
           if (action === 'funding') {
             const body = await readJson<{
               fundingTxHex?: string;
-              confirmations?: number;
               encryptedPaymentDetails?: string;
               paymentDetailsSignature?: string;
             }>(req);
-            const trade = await service.confirmFunding({ ...body, idOrTradeId: id });
-            return jsonResponse({ trade });
+            // Fields are picked one by one, so a field the service must not take from a caller (such as a number of
+            // confirmations) cannot slip through.
+            const trade = await service.confirmFunding({
+              idOrTradeId: id,
+              fundingTxHex: body.fundingTxHex,
+              encryptedPaymentDetails: body.encryptedPaymentDetails,
+              paymentDetailsSignature: body.paymentDetailsSignature,
+            });
+            return jsonResponse({ trade: tradeView(req, trade) });
           }
           if (action === 'paid') {
             const body = await readJson<{ buyerIdentity: string }>(req);
+            requireSession(body.buyerIdentity);
             let trade = await service.markPaid({
               idOrTradeId: id,
               buyerIdentity: body.buyerIdentity,
@@ -379,7 +541,7 @@ export function createApiHandler(deps: {
               // The bot releases as soon as the visitor marks the simulated payment as sent.
               trade = await demo.release(trade.id);
             }
-            return jsonResponse({ trade });
+            return jsonResponse({ trade: tradeView(req, trade) });
           }
           if (action === 'dispute') {
             const body = await readJson<{
@@ -387,8 +549,9 @@ export function createApiHandler(deps: {
               reason?: string;
               sharedTradeKeyHex?: string;
             }>(req);
+            requireSession(body.callerIdentity);
             const trade = await service.openDispute({ ...body, idOrTradeId: id });
-            return jsonResponse({ trade });
+            return jsonResponse({ trade: tradeView(req, trade) });
           }
           if (action === 'verdict') {
             requireAdmin(req);
@@ -398,7 +561,7 @@ export function createApiHandler(deps: {
               broadcastOnChain?: boolean;
             }>(req);
             const trade = await service.issueArbiterVerdict({ ...body, idOrTradeId: id });
-            return jsonResponse({ trade });
+            return jsonResponse({ trade: tradeView(req, trade) });
           }
           if (action === 'settle') {
             const body = await readJson<{
@@ -406,10 +569,11 @@ export function createApiHandler(deps: {
               signedTxHex?: string;
             }>(req);
             const trade = await service.settleEscrow({ ...body, idOrTradeId: id });
-            return jsonResponse({ trade });
+            return jsonResponse({ trade: tradeView(req, trade) });
           }
           if (action === 'chat') {
             const body = await readJson<{ senderIdentity: string; ciphertext: string; signature?: string }>(req);
+            requireSession(body.senderIdentity);
             const message = await service.postChatMessage({ ...body, idOrTradeId: id });
             return jsonResponse({ message }, 201);
           }
@@ -470,7 +634,7 @@ export function createApiHandler(deps: {
           verdict: body.verdict,
           reason: 'Demo arbiter console: decision taken by the visitor, signed with the service arbiter key',
         });
-        return jsonResponse({ trade: decided, simulatedArbiter: true });
+        return jsonResponse({ trade: withoutSecrets(decided), simulatedArbiter: true });
       }
 
       return jsonResponse({ error: `Route not found: ${method} ${path}` }, 404);
@@ -478,6 +642,9 @@ export function createApiHandler(deps: {
       const message = err instanceof Error ? err.message : String(err);
       if (err instanceof HttpError) {
         return jsonResponse({ error: message }, err.status);
+      }
+      if (err instanceof SignInRequiredError) {
+        return jsonResponse({ error: message }, 401);
       }
       if (err instanceof DemoLimitError || err instanceof SponsorshipLimitError) {
         return jsonResponse({ error: message }, 429);

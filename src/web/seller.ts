@@ -13,6 +13,7 @@ import {
   matchesEscrowFunding,
   type WalletContractSpendRequest,
 } from '../protocol/escrow.js';
+import { gatherFungibleTokenUtxos } from 'cashscript';
 import {
   derivePayoutPkhFromXpub,
   derivePubkeyFromXpub,
@@ -21,10 +22,13 @@ import {
   type WalletSpendableUtxo,
   type WalletTransactionRequest,
 } from '../protocol/keys.js';
+import { MAX_FEE_BPS, totalFeeSats, tradeValueSats, type TradeFee } from '../protocol/fees.js';
+import { PUSD_CATEGORY } from '../protocol/offers.js';
 import { computeTradeId, type TradeTerms } from '../protocol/trades.js';
 import type { OfferDocument, Trade } from './api';
-import { spendableBch } from './coins';
-import { formatBch } from './format';
+import { spendableBch, tokenBalance } from './coins';
+import { formatBch, fromBaseUnits } from './format';
+import { text } from './messages';
 import type { SessionStore } from './take';
 import { TradeActionError, checkForArbiter } from './trade';
 
@@ -32,6 +36,8 @@ import { TradeActionError, checkForArbiter } from './trade';
 const DEPOSIT_FEE_RESERVE_SATS = 500n;
 /** The escrow locks the seller's coins until the buyer takes them or this time passes. Longer than this is not normal. */
 const MAX_REFUND_DELAY_SEC = 30 * 86_400;
+/** How far the BCH price may have moved between the request and the deposit when the fees of a PUSD trade are capped. */
+const PUSD_FEE_PRICE_SLACK_PCT = 20n;
 
 /** What the service needs to accept a request (POST /api/trades/:id/accept). */
 export interface AcceptBody {
@@ -59,7 +65,7 @@ export async function buildAcceptBody(params: {
   details: string;
 }): Promise<AcceptBody> {
   const details = params.details.trim();
-  if (details.length === 0) throw new TradeActionError('Write the payment details the buyer should pay to.');
+  if (details.length === 0) throw new TradeActionError(text().seller.writeDetails);
   return {
     sellerIdentity: params.identity,
     sellerPk: binToHex(derivePubkeyFromXpub(params.defiXpub, params.defiIndex)),
@@ -122,25 +128,77 @@ export async function sealPaymentDetails(params: {
   details: string;
 }): Promise<SealedDetails> {
   const details = params.details.trim();
-  if (details.length === 0) throw new TradeActionError('Write how the buyer should pay you.');
+  if (details.length === 0) throw new TradeActionError(text().seller.writeHow);
   const encryptedPaymentDetails = await encryptPaymentDetails(params.sessionPrivateKey, params.buyerSessionPk, details);
   return { encryptedPaymentDetails, paymentDetailsSignature: signPaymentDetails(params.sessionPrivateKey, params.tradeId, encryptedPaymentDetails) };
 }
 
-/** The coins the wallet must hold to deposit this trade: the escrow's value plus the deposit's own fee. */
-export function depositNeeds(trade: Pick<Trade, 'asset' | 'amount'>): bigint {
-  return expectedEscrowFunding(trade).satoshis + DEPOSIT_FEE_RESERVE_SATS;
+/**
+ * The deposit of a token trade sends this much BCH beyond the escrow value and the fees: the deposit's own network
+ * fee and the dust of the token change output. It must match the margin buildFundEscrowTransaction asks for.
+ */
+const TOKEN_DEPOSIT_EXTRA_SATS = 2000n;
+
+/** The coins the wallet must hold to deposit a BCH trade: the escrow's value, the service fees and the deposit's own fee. */
+export function depositNeeds(trade: Pick<Trade, 'asset' | 'amount' | 'fees'>): bigint {
+  return expectedEscrowFunding(trade).satoshis + totalFeeSats(trade.fees) + DEPOSIT_FEE_RESERVE_SATS;
+}
+
+/** What a deposit takes from the wallet and what the wallet has, for BCH and, on a token trade, for the token. */
+export interface DepositCheck {
+  bch: { need: bigint; have: bigint };
+  token?: { category: string; need: bigint; have: bigint };
+}
+
+/**
+ * Mirrors the coin selection of buildFundEscrowTransaction, so a wallet that passes here can always be built for.
+ * On a token trade the token coins it would pick carry satoshis too, and those count toward the BCH it needs.
+ */
+export function checkDeposit(trade: Pick<Trade, 'asset' | 'amount' | 'fees'>, coins: WalletSpendableUtxo[]): DepositCheck {
+  const expected = expectedEscrowFunding(trade);
+  const plain = spendableBch(coins);
+  if (!expected.token) return { bch: { need: depositNeeds(trade), have: plain } };
+  const { category, amount } = expected.token;
+  const have = tokenBalance(coins, category);
+  const outgoing = expected.satoshis + totalFeeSats(trade.fees) + TOKEN_DEPOSIT_EXTRA_SATS;
+  let tokenSats = 0n;
+  if (have >= amount) {
+    const normalized = coins.map((c) => (c.token ? { ...c, token: { ...c.token, category: c.token.category.toLowerCase() } } : c));
+    tokenSats = gatherFungibleTokenUtxos(normalized, category, amount).utxos.reduce((sum, u) => sum + u.satoshis, 0n);
+  }
+  const need = outgoing > tokenSats ? outgoing - tokenSats : 0n;
+  return { bch: { need, have: plain }, token: { category, need: amount, have } };
+}
+
+/** True when the wallet's coins cover the deposit. */
+export function canDeposit(check: DepositCheck): boolean {
+  return check.bch.have >= check.bch.need && (!check.token || check.token.have >= check.token.need);
+}
+
+/** "PUSD" for the service's dollar token; the shortened category for any other token. */
+function tokenName(category: string): string {
+  return category === PUSD_CATEGORY ? 'PUSD' : `tokens ${category.slice(0, 8)}…`;
+}
+
+/** Fees are equal when they pay the same roles, addresses and amounts, in any order. */
+function sameFees(a: readonly TradeFee[] | undefined, b: readonly TradeFee[] | undefined): boolean {
+  const key = (fees: readonly TradeFee[] | undefined) =>
+    (fees ?? []).map((f) => `${f.role}:${f.pkh.toLowerCase()}:${f.satoshis}`).sort().join('|');
+  return key(a) === key(b);
 }
 
 /** Throws a sentence for the person if the wallet's coins cannot cover the deposit. */
-export function assertCanDeposit(trade: Pick<Trade, 'asset' | 'amount'>, coins: WalletSpendableUtxo[]): void {
-  if (trade.asset !== 'BCH') throw new TradeActionError('Depositing PUSD is not available yet.');
-  const have = spendableBch(coins);
-  const need = depositNeeds(trade);
-  if (have < need) {
+export function assertCanDeposit(trade: Pick<Trade, 'asset' | 'amount' | 'fees'>, coins: WalletSpendableUtxo[]): void {
+  const check = checkDeposit(trade, coins);
+  if (check.token && check.token.have < check.token.need) {
+    const name = tokenName(check.token.category);
+    const decimals = check.token.category === PUSD_CATEGORY ? 2 : 0;
     throw new TradeActionError(
-      `The deposit needs about ${formatBch(need)} and Campfire can see ${formatBch(have)} in this wallet. Send some BCH to it and try again.`,
+      text().seller.depositNeedsToken(fromBaseUnits(check.token.need, decimals), name, fromBaseUnits(check.token.have, decimals)),
     );
+  }
+  if (check.bch.have < check.bch.need) {
+    throw new TradeActionError(text().seller.depositNeedsBch(formatBch(check.bch.need), formatBch(check.bch.have), Boolean(check.token)));
   }
 }
 
@@ -166,47 +224,63 @@ export function checkAcceptedTrade(
     offer: Pick<OfferDocument, 'arbiter' | 'price' | 'oracle'> | undefined;
     /** Unix seconds. */
     now: number;
+    /** A BCH/USD price signed by the service's oracle and checked by the caller, needed to cap the fees of a PUSD trade. */
+    bchUsd?: string | null;
   },
 ): CheckedTrade {
-  const stop = (what: string) => new TradeActionError(`${what} Nothing was deposited.`);
+  const stop = (what: string) => new TradeActionError(text().seller.nothingDeposited(what));
+  const why = text().seller.stop;
   if (!trade.termsJson || !trade.tradeId || !trade.escrowAddress || trade.sellerDefiIndex === undefined || trade.sellerReceiveIndex === undefined) {
-    throw stop('This trade has no escrow yet.');
+    throw stop(why.noEscrow);
   }
   let terms: TradeTerms;
   let contract: Contract;
   try {
     terms = JSON.parse(trade.termsJson) as TradeTerms;
-    if (binToHex(computeTradeId(trade.termsJson)) !== trade.tradeId.toLowerCase()) throw stop('The trade ID is not the hash of the terms.');
+    if (binToHex(computeTradeId(trade.termsJson)) !== trade.tradeId.toLowerCase()) throw stop(why.badId);
     contract = createEscrowContract(terms, trade.tradeId, params.provider);
   } catch (err) {
     if (err instanceof TradeActionError) throw err;
-    throw stop('The terms of this trade are not valid.');
+    throw stop(why.badTerms);
   }
-  if (contract.address !== trade.escrowAddress) throw stop('The escrow address is not the contract these terms make.');
+  if (contract.address !== trade.escrowAddress) throw stop(why.badAddress);
   if (!verifyDerivedPubkey(params.defiXpub, trade.sellerDefiIndex, terms.sellerPk)) {
-    throw stop('The terms name a signing key that does not belong to this wallet. Connect the wallet you accepted with.');
+    throw stop(why.foreignKey);
   }
   if (!verifyDerivedPayoutPkh(params.receiveXpub, trade.sellerReceiveIndex, terms.sellerPayoutPkh)) {
-    throw stop('The terms return the coins to an address that does not belong to this wallet.');
+    throw stop(why.foreignRefund);
   }
   if (terms.amount !== trade.amount || terms.asset !== trade.asset || terms.offerTxid !== trade.offerTxid) {
-    throw stop('The terms do not match the request.');
+    throw stop(why.notRequest);
+  }
+  // The fees were shown with the request; the terms must not charge anything else. Their addresses and the
+  // cap on BCH trades were already checked with the terms (validateTradeFees).
+  if (!sameFees(terms.fees, trade.fees)) {
+    throw stop(why.otherFees);
+  }
+  // The terms do not carry the BCH price a PUSD trade's fees were computed with, so the cap is checked here
+  // against a fresh one, with room for the price to move since the request.
+  if (terms.asset.toLowerCase() === PUSD_CATEGORY && totalFeeSats(terms.fees) > 0n) {
+    if (!params.bchUsd) throw stop(why.noBchPrice);
+    const value = tradeValueSats({ asset: terms.asset, amount: terms.amount, assetDecimals: 2, bchUsd: params.bchUsd }) ?? 0n;
+    const cap = (value * BigInt(MAX_FEE_BPS) * (100n + PUSD_FEE_PRICE_SLACK_PCT)) / (10_000n * 100n);
+    if (totalFeeSats(terms.fees) > cap) throw stop(why.feesTooHigh);
   }
   if (params.offer && terms.arbiterPk.toLowerCase() !== params.offer.arbiter.toLowerCase()) {
-    throw stop('The terms name a different arbiter than your offer.');
+    throw stop(why.otherArbiter);
   }
   if (terms.refundTime > params.now + MAX_REFUND_DELAY_SEC) {
-    throw stop('The refund time is unusually far away, so your coins could stay locked for too long.');
+    throw stop(why.farRefund);
   }
   if (params.sessionPrivateKey) {
     const pk = secp256k1.derivePublicKeyCompressed(hexToBin(params.sessionPrivateKey));
     if (typeof pk === 'string' || binToHex(pk) !== terms.sellerSessionPk.toLowerCase()) {
-      throw stop("The terms name a different chat key than this browser's.");
+      throw stop(why.otherChatKey);
     }
   }
   const prices = checkForArbiter(trade, params.offer);
-  if (prices.quote === 'wrong-signature' || prices.quote === 'other-oracle') throw stop("The price quote is not signed by your offer's oracle.");
-  if (prices.fiat && !prices.fiat.ok) throw stop('The fiat amount does not match the price and the margin.');
+  if (prices.quote === 'wrong-signature' || prices.quote === 'other-oracle') throw stop(why.otherOracle);
+  if (prices.fiat && !prices.fiat.ok) throw stop(why.badFiat);
   return { terms, contract };
 }
 
@@ -216,12 +290,14 @@ export async function findDeposit(contract: Contract, terms: TradeTerms) {
   return utxos.find((u) => matchesEscrowFunding(u, terms));
 }
 
-/** The deposit transaction for the wallet to sign: the escrow's exact value, with the change back to the wallet. */
+/** The deposit transaction for the wallet to sign: the escrow's exact value and tokens, with the change back to the wallet. */
 export function buildDeposit(params: {
   trade: Trade;
   checked: CheckedTrade;
   coins: WalletSpendableUtxo[];
   changeAddress: string;
+  /** The same address in its token-aware form (bitcoincash:z…), where the token change of a token trade goes. */
+  tokenChangeAddress: string;
 }): WalletTransactionRequest {
   assertCanDeposit(params.trade, params.coins);
   return buildFundEscrowTransaction({
@@ -229,6 +305,7 @@ export function buildDeposit(params: {
     terms: params.checked.terms,
     utxos: params.coins,
     changeAddress: params.changeAddress,
+    tokenChangeAddress: params.tokenChangeAddress,
   });
 }
 
@@ -239,19 +316,19 @@ export function buildDeposit(params: {
  */
 export async function buildSellerRelease(trade: Trade, provider: NetworkProvider, sellerDefiXpub: string): Promise<WalletContractSpendRequest> {
   if (!trade.termsJson || !trade.tradeId || !trade.fundingTxid || trade.sellerDefiIndex === undefined) {
-    throw new TradeActionError('There is no deposit to release yet.');
+    throw new TradeActionError(text().seller.noDepositYet);
   }
   const terms = JSON.parse(trade.termsJson) as TradeTerms;
   // The wallet signs with whatever key it is told to and does not compare it with the contract (docs/decisions.md).
   if (!verifyDerivedPubkey(sellerDefiXpub, trade.sellerDefiIndex, terms.sellerPk)) {
-    throw new TradeActionError('This wallet is not the one that accepted this trade. Connect the wallet you used to accept it.');
+    throw new TradeActionError(text().seller.notYourWallet);
   }
   const contract = createEscrowContract(terms, trade.tradeId, provider);
   const utxos = await provider.getUtxos(contract.address);
   const utxo = utxos.find(
     (u) => u.txid === trade.fundingTxid && (trade.fundingVout === undefined || u.vout === trade.fundingVout) && matchesEscrowFunding(u, terms),
   );
-  if (!utxo) throw new TradeActionError('The deposit is not visible on-chain. Try again in a moment.');
+  if (!utxo) throw new TradeActionError(text().seller.depositNotVisible);
   return buildReleaseRequest({ contract, utxo, buyerPayoutPkh: terms.buyerPayoutPkh, sellerDefiIndex: trade.sellerDefiIndex });
 }
 

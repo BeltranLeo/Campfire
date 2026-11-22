@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Link, Navigate } from 'react-router';
+import { Link } from 'react-router';
 import QRCode from 'qrcode';
 import { ApiError, apiGet, type Offer, type PriceQuote, type Trade } from '../api';
 import { assetInfo } from '../assets';
@@ -10,17 +10,20 @@ import { HashLink, ProvenanceTag } from '../components/Provenance';
 import { EmptyState, Notice, Skeleton } from '../components/States';
 import { StatusPill } from '../components/StatusPill';
 import { Countdown } from '../components/Timeline';
+import { HIDDEN_AMOUNT, useHideBalance } from '../hideBalance';
+import { BalanceEye } from '../components/BalanceEye';
+import { BalanceLoading } from '../components/BalanceLoading';
 import { freshReceiveAddress, spendableBch, tokenBalance } from '../coins';
 import { useConfig } from '../config';
 import { formatAmount, formatBchBalance, formatDate, formatFiat, formatFiatAmount, formatRange, fromBaseUnits, paymentMethodLabel } from '../format';
 import { useNow } from '../hooks/useNow';
 import { usePoll } from '../hooks/usePoll';
 import { isActive, nextStep, rowTitle, sortActive, sortHistory, historyNote } from '../mytrades';
-import { describeReputation, loadQuotes, loadReputations, priceOf } from '../offerData';
-import { describePrefs, rankOffers, usePrefs } from '../prefs';
+import { demoFirst, describeReputation, isSimulatedOffer, loadQuotes, loadReputations, priceOf } from '../offerData';
 import { roleOf } from '../trade';
 import { refreshWalletCoins, useWalletCoins } from '../walletCoins';
 import { useWallet } from '../wallet';
+import { useMessages } from '../lang';
 
 // Home (Home-* screens): what a connected person sees at "/". The balance read from the network, the four ways
 // in, the trade that needs them now, a few offers that fit what they said they want, and what happened lately.
@@ -33,9 +36,6 @@ const RECENT = 3;
 
 export function Home() {
   const wallet = useWallet();
-  const prefs = usePrefs();
-  // The first time, the two questions come before anything else. Skipping them counts as an answer.
-  if (prefs === null) return <Navigate to="/welcome" replace />;
   if (!wallet.identity) return null;
   return <HomeBody identity={wallet.identity} receiveXpub={wallet.xpubs?.receive ?? null} />;
 }
@@ -47,20 +47,21 @@ function HomeBody({ identity, receiveXpub }: { identity: string; receiveXpub: st
   const sideOf = (t: Trade) => (roleOf(t, identity) === 'seller' ? 'seller' : 'buyer');
   const active = sortActive(all.filter(isActive).map((trade) => ({ trade, next: nextStep(trade, sideOf(trade), now) })));
   const waiting = active.filter((a) => a.next.turn);
-  const finished = sortHistory(all.filter((t) => !isActive(t)));
+  const finished = sortHistory(all.filter((trade) => !isActive(trade)));
+  const t = useMessages().home;
 
   return (
-    <main className="s-main">
+    <main className="s-main" data-desk="wide">
       <div className="s-pagehead">
-        <h1 className="cf-display">{trades.data && all.length === 0 ? 'Welcome' : 'Welcome back'}</h1>
+        <h1 className="cf-display">{t.welcome(!(trades.data && all.length === 0))}</h1>
       </div>
 
       <WalletCard receiveXpub={receiveXpub} trades={trades.data ? all : null} />
 
       {trades.data && all.length === 0 && (
         <Notice>
-          <strong>No BCH yet? That’s fine.</strong>
-          You can buy without having any: the seller locks the coins for you first.
+          <strong>{t.noBchYet}</strong>
+          {t.noBchYetBody}
         </Notice>
       )}
 
@@ -94,14 +95,28 @@ function WalletCard({ receiveXpub, trades }: { receiveXpub: string | null; trade
   const completed = rep ? rep.completedAsBuyer + rep.completedAsSeller : null;
   const failed = !scan && coins.error !== null;
   const [receiving, setReceiving] = useState(false);
+  const hidden = useHideBalance();
+  const messages = useMessages();
+  const t = messages.home;
 
   return (
-    <section className="cf-card" data-pad>
+    <section className="cf-card cf-glass" data-pad>
       <div className="s-idcard">
         <div>
           <div className="s-balance">
-            <span className="cf-label">Your wallet</span>
-            {sats !== null ? (
+            <span className="s-balancehead">
+              <span className="cf-label">{t.yourWallet}</span>
+              <BalanceEye />
+            </span>
+            {sats !== null && hidden ? (
+              <>
+                {/* Every amount goes, PUSD too: showing it only when there is some would give that away. */}
+                <strong>{HIDDEN_AMOUNT} BCH</strong>
+                <span className="cf-muted">
+                  ≈ {HIDDEN_AMOUNT} USD{config && ` · ${HIDDEN_AMOUNT} PUSD`}
+                </span>
+              </>
+            ) : sats !== null ? (
               <>
                 <strong>{formatBchBalance(sats)} BCH</strong>
                 <span className="cf-muted">
@@ -113,19 +128,17 @@ function WalletCard({ receiveXpub, trades }: { receiveXpub: string | null; trade
             ) : failed ? (
               <>
                 <strong className="cf-muted">— BCH</strong>
-                <span className="cf-small cf-muted">We could not read your balance from the network. Trading still works.</span>
+                <span className="cf-small cf-muted">{t.balanceError}</span>
               </>
             ) : (
-              <>
-                <Skeleton width={180} height={36} />
-                <Skeleton width={120} height={14} />
-              </>
+              // A long-used wallet takes a while to read: say what is happening and how far it has got.
+              <BalanceLoading progress={coins.progress} variant="card" />
             )}
           </div>
           {failed && (
             <div style={{ marginTop: 'var(--space-2)' }}>
               <Button size="sm" onClick={() => void refreshWalletCoins()}>
-                Try again
+                {messages.common.tryAgain}
               </Button>
             </div>
           )}
@@ -133,7 +146,7 @@ function WalletCard({ receiveXpub, trades }: { receiveXpub: string | null; trade
         <div className="cf-stack" data-gap="2">
           <div className="hm-receive">
             <Button size="sm" onClick={() => setReceiving((open) => !open)}>
-              {receiving ? 'Hide' : 'Receive'}
+              {receiving ? t.hide : t.receive}
             </Button>
             {receiving && (
               <div className="cf-well hm-well">
@@ -144,11 +157,11 @@ function WalletCard({ receiveXpub, trades }: { receiveXpub: string | null; trade
                       <HashLink value={address} kind="address" />
                       <CopyButton value={address} />
                     </span>
-                    <span className="cf-small cf-muted">Send BCH to this address. It belongs to your wallet.</span>
+                    <span className="cf-small cf-muted">{t.sendHere}</span>
                   </>
                 ) : (
                   // Invented text: the design always shows an address. One is only shown once the network has said which is unused.
-                  <span className="cf-small cf-muted">Shown once your balance has been read, so it is always an unused one.</span>
+                  <span className="cf-small cf-muted">{t.addressLater}</span>
                 )}
               </div>
             )}
@@ -157,13 +170,13 @@ function WalletCard({ receiveXpub, trades }: { receiveXpub: string | null; trade
             <Skeleton width={160} />
           ) : completed > 0 ? (
             <span className="cf-small">
-              <strong>{completed}</strong> {completed === 1 ? 'trade' : 'trades'} completed
-              {rep?.firstCompletedAt != null && ` · since ${formatDate(rep.firstCompletedAt)}`}
+              <strong>{completed}</strong> {t.completed(completed)}
+              {rep?.firstCompletedAt != null && t.since(formatDate(rep.firstCompletedAt))}
             </span>
           ) : (
-            <span className="cf-small cf-muted">No trades yet</span>
+            <span className="cf-small cf-muted">{t.noTrades}</span>
           )}
-          <span className="cf-small cf-subtle">Read from the network with your wallet’s public key. Campfire never sees your private keys.</span>
+          <span className="cf-small cf-subtle">{t.publicKeyOnly}</span>
         </div>
       </div>
     </section>
@@ -172,6 +185,7 @@ function WalletCard({ receiveXpub, trades }: { receiveXpub: string | null; trade
 
 function AddressQr({ value }: { value: string }) {
   const [src, setSrc] = useState<string | null>(null);
+  const t = useMessages().home;
 
   useEffect(() => {
     let current = true;
@@ -185,28 +199,32 @@ function AddressQr({ value }: { value: string }) {
   }, [value]);
 
   return (
-    <div className="cf-qr hm-qr" role="img" aria-label="Receive address QR code">
+    <div className="cf-qr hm-qr" role="img" aria-label={t.qrLabel}>
       {src && <img src={src} alt="" width={140} height={140} />}
     </div>
   );
 }
 
 function QuickLinks({ activeCount, total }: { activeCount: number | null; total: number | null }) {
-  const tradesNote = activeCount === null ? 'Your trades and offers' : activeCount > 0 ? `${activeCount} active` : total ? 'No active trades' : 'None yet';
+  const t = useMessages().home;
+  const tradesNote = activeCount === null ? t.tradesAndOffers : activeCount > 0 ? t.activeCount(activeCount) : total ? t.noActive : t.noneYet;
   return (
     <div className="s-quick3">
       <Link className="cf-quick" to="/offers?side=buy">
         <Icon name="buy" />
-        Buy BCH<small>With pesos or dollars</small>
+        {t.buyBch}
+        <small>{t.withLocal}</small>
       </Link>
       {/* Same place as "I want to sell" on the landing page: the buy offers, with "Or post your own offer" on top. */}
       <Link className="cf-quick" to="/offers?side=sell">
         <Icon name="sell" />
-        Sell BCH<small>For pesos or dollars</small>
+        {t.sellBch}
+        <small>{t.forLocal}</small>
       </Link>
       <Link className="cf-quick" to="/trades">
         <Icon name="trades" />
-        My trades<small>{tradesNote}</small>
+        {t.myTrades}
+        <small>{tradesNote}</small>
         {activeCount ? <span className="cf-badge">{activeCount}</span> : null}
       </Link>
     </div>
@@ -219,24 +237,25 @@ function Attention({ items, sideOf }: { items: ReturnType<typeof sortActive>; si
   const asset = assetInfo(trade.asset, trade.assetDecimals, config);
   const role = sideOf(trade);
   const title = rowTitle(trade, role, formatAmount(trade.amount, asset), formatFiatAmount(trade.fiatAmount, trade.fiat));
+  const t = useMessages().home;
   return (
     <section className="cf-card s-action" data-flush>
       <div className="cf-card__section cf-stack" data-gap="3">
-        <span className="cf-stepper">Needs your attention</span>
+        <span className="cf-stepper">{t.attention}</span>
         <div className="cf-row" data-between data-nowrap>
           <div className="s-cell">
             <strong>{title}</strong>
-            <span className="cf-small cf-muted">Your turn: {next.step.charAt(0).toLowerCase() + next.step.slice(1)}</span>
+            <span className="cf-small cf-muted">{t.yourTurn(next.step)}</span>
           </div>
           {next.deadline && next.windowSec ? <Countdown deadline={next.deadline} windowSec={next.windowSec} /> : null}
         </div>
         <div className="s-actions">
           <Button variant="primary" to={`/trade/${trade.id}`}>
-            Continue this trade
+            {t.continueTrade}
           </Button>
           {items.length > 1 && (
             <Link to="/trades">
-              {items.length - 1} more {items.length === 2 ? 'trade needs' : 'trades need'} you
+              {t.more(items.length - 1)}
             </Link>
           )}
         </div>
@@ -247,24 +266,24 @@ function Attention({ items, sideOf }: { items: ReturnType<typeof sortActive>; si
 
 function ForYou() {
   const config = useConfig();
-  const prefs = usePrefs();
   const offers = usePoll(() => apiGet<{ offers: Offer[] }>('/api/offers?onlyOpen=true').then((r) => r.offers), 'offers', REFRESH_MS * 3);
-  const ranked = rankOffers(offers.data ?? [], prefs, (o) => assetInfo(o.document.asset, o.document.assetDecimals, config).symbol).slice(0, FOR_YOU);
+  const ranked = demoFirst(offers.data ?? []).slice(0, FOR_YOU);
 
   const pairs = [...new Set(ranked.flatMap((o) => (o.document.price.type === 'floating' ? [o.document.price.pair] : [])))];
   const quotes = usePoll(() => loadQuotes(pairs), pairs.join(','), pairs.length ? 30_000 : undefined);
   const identities = [...new Set(ranked.map((o) => o.sellerIdentity))];
   const reputations = usePoll(() => loadReputations(identities), identities.join(','));
-  const subtitle = describePrefs(prefs);
+  const messages = useMessages();
+  const t = messages.home;
 
   return (
     <section className="cf-card" data-flush>
       <div className="s-sechead">
         <div className="s-cell">
-          <h2 className="cf-heading">For you</h2>
-          <span className="cf-small cf-muted">{subtitle ?? 'The newest open offers'}</span>
+          <h2 className="cf-heading">{t.forYou}</h2>
+          <span className="cf-small cf-muted">{t.newest}</span>
         </div>
-        <Link to="/welcome">Change</Link>
+        <Link to="/offers">{t.seeAll}</Link>
       </div>
       {!offers.data && !offers.error ? (
         <div className="s-item">
@@ -273,21 +292,21 @@ function ForYou() {
       ) : !offers.data ? (
         <div className="s-item">
           <span className="cf-small cf-muted">
-            {offers.error instanceof ApiError ? offers.error.message : 'We could not load the offers.'}{' '}
+            {offers.error instanceof ApiError ? offers.error.message : t.offersError}{' '}
             <button type="button" className="cf-copy" onClick={offers.reload}>
-              Try again
+              {messages.common.tryAgain}
             </button>
           </span>
         </div>
       ) : ranked.length === 0 ? (
         <div className="s-item">
-          <span className="cf-small cf-muted">No open offers right now.</span>
+          <span className="cf-small cf-muted">{t.noOffers}</span>
         </div>
       ) : (
         ranked.map((offer) => {
           const doc = offer.document;
           const asset = assetInfo(doc.asset, doc.assetDecimals, config);
-          const verb = doc.side === 'sell' ? 'Buy' : 'Sell';
+          const verb = t.verb(doc.side === 'sell');
           const price = priceOf(offer, quotes.data?.byPair);
           const rep = reputations.data?.get(offer.sellerIdentity);
           return (
@@ -304,9 +323,9 @@ function ForYou() {
                   {formatRange(doc.min, doc.max, asset)} · {doc.paymentMethods.map(paymentMethodLabel).join(', ')}
                   {rep && ` · ${describeReputation(rep, doc.side)}`}
                 </span>
-                {offer.isDemo && (
+                {isSimulatedOffer(offer) && (
                   <span>
-                    <ProvenanceTag kind="sim">Simulated fiat</ProvenanceTag>
+                    <ProvenanceTag kind="sim">{t.simulatedFiat}</ProvenanceTag>
                   </span>
                 )}
               </span>
@@ -318,7 +337,7 @@ function ForYou() {
         })
       )}
       <Link className="s-item" to="/offers">
-        <span>See all offers</span>
+        <span>{t.seeAllOffers}</span>
         <span aria-hidden="true">→</span>
       </Link>
     </section>
@@ -327,6 +346,8 @@ function ForYou() {
 
 function Activity({ finished, sideOf, failed, loading, retry }: { finished: Trade[]; sideOf: (t: Trade) => 'buyer' | 'seller'; failed: boolean; loading: boolean; retry: () => void }) {
   const config = useConfig();
+  const messages = useMessages();
+  const t = messages.home;
   if (loading) {
     return (
       <section className="cf-card" data-flush aria-busy="true">
@@ -344,8 +365,8 @@ function Activity({ finished, sideOf, failed, loading, retry }: { finished: Trad
   if (failed) {
     return (
       <section className="cf-card">
-        <EmptyState title="We could not load your activity" action={<Button onClick={retry}>Try again</Button>}>
-          Your trades are safe: they live in the contract and the service.
+        <EmptyState title={t.activityError} action={<Button onClick={retry}>{messages.common.tryAgain}</Button>}>
+          {t.activityErrorBody}
         </EmptyState>
       </section>
     );
@@ -353,9 +374,9 @@ function Activity({ finished, sideOf, failed, loading, retry }: { finished: Trad
   if (finished.length === 0) {
     return (
       <section className="cf-card">
-        <div className="cf-empty" style={{ padding: 'var(--space-5) var(--space-4)' }}>
-          <strong>No activity yet</strong>
-          <span>Your finished trades will show up here.</span>
+        <div className="cf-empty" style={{ padding: 'var(--space-6) var(--space-4)' }}>
+          <strong>{t.noActivity}</strong>
+          <span>{t.noActivityBody}</span>
         </div>
       </section>
     );
@@ -363,8 +384,8 @@ function Activity({ finished, sideOf, failed, loading, retry }: { finished: Trad
   return (
     <section className="cf-card" data-flush>
       <div className="s-sechead">
-        <h2 className="cf-heading">Recent activity</h2>
-        <Link to="/trades?tab=history">All trades</Link>
+        <h2 className="cf-heading">{t.recent}</h2>
+        <Link to="/trades?tab=history">{t.allTrades}</Link>
       </div>
       {finished.slice(0, RECENT).map((trade) => {
         const role = sideOf(trade);

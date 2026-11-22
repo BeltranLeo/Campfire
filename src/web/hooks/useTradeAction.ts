@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { ApiError, apiGet, type Trade } from '../api';
-import { WALLET_DECLINED } from '../components/Button';
+import { text } from '../messages';
 import { TradeActionError } from '../trade';
 import { WalletDeclined } from '../wallet';
 
@@ -29,7 +29,7 @@ export function useTradeAction<A extends string>(trade: Trade, identity: string 
       return result;
     } catch (err) {
       if (err instanceof WalletDeclined) {
-        setError({ title: failed, message: WALLET_DECLINED });
+        setError({ title: failed, message: text().trade.walletDeclined });
         return undefined;
       }
       if (err instanceof TradeActionError) {
@@ -43,7 +43,7 @@ export function useTradeAction<A extends string>(trade: Trade, identity: string 
       } catch {
         // Fall through to the original error.
       }
-      setError({ title: failed, message: err instanceof ApiError ? err.message : 'Something went wrong. Try again.' });
+      setError({ title: failed, message: err instanceof ApiError ? err.message : text().trade.somethingWrong });
       return undefined;
     } finally {
       setBusy(null);

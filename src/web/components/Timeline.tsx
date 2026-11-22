@@ -1,5 +1,7 @@
 import { formatCountdown, formatHourMinute } from '../format';
 import { useAdvanced } from '../advanced';
+import { useMessages } from '../lang';
+import { text } from '../messages';
 import { useNow } from '../hooks/useNow';
 import type { Step } from '../trade';
 import { HashLink, ProvenanceTag } from './Provenance';
@@ -9,7 +11,8 @@ export function Timeline({ steps }: { steps: Step[] }) {
   return (
     <ol className="cf-timeline">
       {steps.map((step, i) => (
-        <li key={i} className="cf-step" data-state={step.state}>
+        // A step with a transaction is on the network: green. Other done steps are blue.
+        <li key={i} className="cf-step" data-state={step.state} data-chain={step.txid ? '' : undefined} data-turn={step.turn}>
           <span className="cf-step__dot" aria-hidden="true">
             {step.state === 'done' ? '✓' : step.state === 'failed' ? '×' : i + 1}
           </span>
@@ -27,12 +30,13 @@ export function Timeline({ steps }: { steps: Step[] }) {
 // details on. An on-chain step keeps its On-chain tag either way.
 function StepMeta({ step }: { step: Step }) {
   const advanced = useAdvanced();
+  const t = useMessages().trade;
   const parts = [
     step.at !== undefined && formatHourMinute(new Date(step.at * 1000)),
     step.txid && (advanced ? <HashLink value={step.txid} kind="transaction" /> : <ProvenanceTag kind="chain" />),
     advanced && step.txid && step.confirmations !== undefined && confirmationsText(step.confirmations),
     step.offchain && <ProvenanceTag kind="offchain" />,
-    step.simulated && <ProvenanceTag kind="sim">Simulated fiat</ProvenanceTag>,
+    step.simulated && <ProvenanceTag kind="sim">{t.simulatedFiat}</ProvenanceTag>,
     step.note,
   ].filter(Boolean);
   if (parts.length === 0) return null;
@@ -48,10 +52,9 @@ function StepMeta({ step }: { step: Step }) {
   );
 }
 
-export const confirmationsText = (n: number) =>
-  n === 0 ? 'in the mempool (0-conf)' : `${n} confirmation${n === 1 ? '' : 's'}`;
+export const confirmationsText = (n: number) => text().trade.confirmations(n);
 
-/** Time left until `deadline` (Unix seconds), turning amber under 20 % of the window. Stops at 00:00. */
+/** Time left until `deadline` (Unix seconds), in amber; `data-low` marks the last 20 % of the window. Stops at 00:00. */
 export function Countdown({ deadline, windowSec }: { deadline: number; windowSec: number }) {
   const now = useNow(1000);
   const left = Math.max(0, deadline - now / 1000);

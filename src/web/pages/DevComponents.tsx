@@ -1,4 +1,4 @@
-// Development-only gallery of the base components, to check them against the design in both themes.
+// Development-only gallery of the base components, to check them against the design.
 // The route exists only on the dev server (see App.tsx); it is never part of the deployed app.
 
 import type { ReactNode } from 'react';
@@ -24,7 +24,7 @@ const STATES: TradeState[] = [
   'Dropped',
 ];
 const ROLES: TradeRole[] = ['buyer', 'seller', 'visitor'];
-const ICONS: IconName[] = ['home', 'offers', 'trades', 'chats', 'shield', 'buy', 'sell', 'help'];
+const ICONS: IconName[] = ['home', 'offers', 'trades', 'chats', 'shield', 'transparency', 'buy', 'sell', 'help'];
 
 // Sample values only for this page; they are not real transactions.
 const SAMPLE_TX = '4f1c9a0000000000000000000000000000000000000000000000000000e07b';
@@ -69,7 +69,7 @@ export function DevComponents() {
           <Button variant="primary" note="No signature needed. This step is off-chain.">
             Mark as paid
           </Button>
-          <Button>Open dispute</Button>
+          <Button variant="arbiter">Open dispute</Button>
           <Button variant="danger" signs="Signs in your wallet. Returns the funds to the seller.">
             Cancel trade
           </Button>
@@ -99,13 +99,13 @@ export function DevComponents() {
 
       <Section title="Notices">
         <Notice>Deposit seen, not confirmed yet.</Notice>
-        <Notice tone="warn" title="Payment window ends soon">
+        <Notice tone="attention" title="Payment window ends soon">
           Mark the trade as paid only after sending the money.
         </Notice>
         <Notice tone="danger" title="We could not load the offers">
           The server did not answer. Offers are published on-chain, so nothing is lost.
         </Notice>
-        <Notice tone="chain" title="Completed">
+        <Notice tone="verified" title="Completed">
           The escrow paid the buyer.
         </Notice>
       </Section>

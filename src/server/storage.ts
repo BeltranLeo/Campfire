@@ -1,7 +1,7 @@
 // Storage interface and implementations (in-memory/JSON for local & tests, Postgres for Vercel deployment).
 
 import { readFileSync, writeFileSync, existsSync } from 'node:fs';
-import type { OfferDocument, OfferOnChainRecord, PriceQuote, TradeTerms, VerdictHex } from '../protocol/index.js';
+import type { OfferDocument, OfferOnChainRecord, PriceQuote, TradeFee, TradeTerms, VerdictHex } from '../protocol/index.js';
 
 export type OfferStatus = 'Published' | 'Closed' | 'Expired';
 
@@ -22,7 +22,6 @@ export interface UserIdentityRecord {
   identity: string;
   defiXpub: string;
   receiveXpub: string;
-  changeXpub?: string;
   createdAt: number;
   updatedAt: number;
 }
@@ -40,6 +39,8 @@ export interface StoredOffer {
   markerAddress: string;
   // The receive index of the marker's address, so the publisher's wallet finds it without searching.
   markerReceiveIndex?: number;
+  // Format-2 offers only: the token category of the NFT marker (protocol section 3.4). The address is then `z…`.
+  markerCategory?: string;
   status: 'Published' | 'Closed';
   closeTxid?: string;
   isDemo?: boolean;
@@ -80,6 +81,8 @@ export interface StoredTrade {
   sellerSessionPk?: string;
   arbiterPk: string;
   oraclePk?: string;
+  // Fee outputs fixed when the trade is requested, from the rates in force then, and copied into the terms.
+  fees?: TradeFee[];
   refundTime?: number;
   nonce?: string;
   terms?: TradeTerms;
@@ -100,8 +103,12 @@ export interface StoredTrade {
   paidAt?: number;
   disputedBy?: 'buyer' | 'seller';
   disputeReason?: string;
+  // The first trade key handed to the arbiter, and the one each party handed over (the arbiter tries all of them).
   sharedTradeKeyHex?: string;
+  disputeKeys?: { buyer?: string; seller?: string };
   disputedAt?: number;
+  // When the one who sent the request took it back, before it was accepted (status Dropped).
+  withdrawnAt?: number;
   verdict?: VerdictHex;
   verdictSignature?: string;
   verdictReason?: string;
@@ -138,7 +145,12 @@ export interface StorageAdapter {
   listTrades(filter?: { identity?: string; offerTxid?: string }): Promise<StoredTrade[]>;
 
   addChatMessage(msg: StoredChatMessage): Promise<void>;
-  listChatMessages(tradeRecordId: string): Promise<StoredChatMessage[]>;
+  /** In order of time; with `sinceSeconds`, only messages created at or after it. */
+  listChatMessages(tradeRecordId: string, sinceSeconds?: number): Promise<StoredChatMessage[]>;
+
+  /** Service settings the administrator changes at runtime (the fee rates), stored as JSON by key. */
+  getSetting<T>(key: string): Promise<T | null>;
+  saveSetting(key: string, value: unknown): Promise<void>;
 
   // Runs `fn` while holding a named lock shared by every server instance using this storage.
   // Optional: storage that lives in one process needs no cross-instance lock.
@@ -150,6 +162,7 @@ interface MemorySnapshot {
   offers: [string, StoredOffer][];
   trades: [string, StoredTrade][];
   chat: [string, StoredChatMessage[]][];
+  settings?: [string, unknown][];
 }
 
 export class MemoryStorage implements StorageAdapter {
@@ -157,6 +170,7 @@ export class MemoryStorage implements StorageAdapter {
   private offers = new Map<string, StoredOffer>();
   private trades = new Map<string, StoredTrade>();
   private chat = new Map<string, StoredChatMessage[]>();
+  private settings = new Map<string, unknown>();
   private filePath?: string;
 
   constructor(options?: { filePath?: string }) {
@@ -168,6 +182,7 @@ export class MemoryStorage implements StorageAdapter {
         this.offers = new Map(raw.offers ?? []);
         this.trades = new Map(raw.trades ?? []);
         this.chat = new Map(raw.chat ?? []);
+        this.settings = new Map(raw.settings ?? []);
       } catch {
         // Start with an empty store if the snapshot file cannot be parsed.
       }
@@ -181,6 +196,7 @@ export class MemoryStorage implements StorageAdapter {
       offers: [...this.offers.entries()],
       trades: [...this.trades.entries()],
       chat: [...this.chat.entries()],
+      settings: [...this.settings.entries()],
     };
     writeFileSync(this.filePath, JSON.stringify(snapshot, null, 2), 'utf8');
   }
@@ -258,9 +274,21 @@ export class MemoryStorage implements StorageAdapter {
     this.flush();
   }
 
-  async listChatMessages(tradeRecordId: string): Promise<StoredChatMessage[]> {
+  async listChatMessages(tradeRecordId: string, sinceSeconds = 0): Promise<StoredChatMessage[]> {
     const list = this.chat.get(tradeRecordId) ?? [];
-    return list.map((m) => structuredClone(m)).sort((a, b) => a.createdAt - b.createdAt);
+    return list
+      .filter((m) => m.createdAt >= sinceSeconds)
+      .map((m) => structuredClone(m))
+      .sort((a, b) => a.createdAt - b.createdAt);
+  }
+
+  async getSetting<T>(key: string): Promise<T | null> {
+    return this.settings.has(key) ? (structuredClone(this.settings.get(key)) as T) : null;
+  }
+
+  async saveSetting(key: string, value: unknown): Promise<void> {
+    this.settings.set(key, structuredClone(value));
+    this.flush();
   }
 }
 
@@ -344,6 +372,10 @@ export class PostgresStorage implements StorageAdapter {
         trade_record_id TEXT NOT NULL,
         data JSONB NOT NULL,
         created_at BIGINT NOT NULL
+      );
+      CREATE TABLE IF NOT EXISTS campfire_settings (
+        key TEXT PRIMARY KEY,
+        data JSONB NOT NULL
       );
     `);
     this.initialized = true;
@@ -476,12 +508,27 @@ export class PostgresStorage implements StorageAdapter {
     );
   }
 
-  async listChatMessages(tradeRecordId: string): Promise<StoredChatMessage[]> {
+  async listChatMessages(tradeRecordId: string, sinceSeconds = 0): Promise<StoredChatMessage[]> {
     await this.ensureSchema();
     const { rows } = await this.query(
-      `SELECT data FROM campfire_chat WHERE trade_record_id = $1 ORDER BY created_at ASC`,
-      [tradeRecordId],
+      `SELECT data FROM campfire_chat WHERE trade_record_id = $1 AND created_at >= $2 ORDER BY created_at ASC`,
+      [tradeRecordId, sinceSeconds],
     );
     return rows.map((r) => r.data as StoredChatMessage);
+  }
+
+  async getSetting<T>(key: string): Promise<T | null> {
+    await this.ensureSchema();
+    const { rows } = await this.query(`SELECT data FROM campfire_settings WHERE key = $1 LIMIT 1`, [key]);
+    return rows[0] ? (rows[0].data as T) : null;
+  }
+
+  async saveSetting(key: string, value: unknown): Promise<void> {
+    await this.ensureSchema();
+    await this.query(
+      `INSERT INTO campfire_settings (key, data) VALUES ($1, $2::jsonb)
+       ON CONFLICT (key) DO UPDATE SET data = EXCLUDED.data`,
+      [key, JSON.stringify(value)],
+    );
   }
 }

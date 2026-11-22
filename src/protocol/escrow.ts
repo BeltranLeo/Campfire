@@ -13,11 +13,15 @@ import {
   type Unlocker,
 } from 'cashscript';
 import {
+  binToHex,
   createVirtualMachineBch2026,
+  decodeAuthenticationInstructions,
   decodeTransactionUnsafe,
+  encodeAuthenticationInstructions,
   hexToBin,
   stringify,
 } from '@bitauth/libauth';
+import { totalFeeSats } from './fees.js';
 import artifactJson from '../../contracts/CampfireEscrow.json' with { type: 'json' };
 import {
   formatWalletTransactionRequest,
@@ -257,6 +261,41 @@ export function verifySignedContractSpend(
   }
 }
 
+// The VM check alone proves only that the signed transaction is a valid spend of *some* path of the contract. A
+// party could hand in a `cancel` for a `release`, or spend another coin at the escrow address, and the service
+// would record the wrong outcome. This compares the signed transaction with the one the service built for the
+// path: the same single input (the escrow UTXO), the same function selector and contract in the unlocking script,
+// and the same single payout output. Only the signature (the first push) may differ. Returns null when they match.
+export function settlementMismatch(signedHex: string, expectedUnsignedHex: string): string | null {
+  let signed: ReturnType<typeof decodeTransactionUnsafe>;
+  try {
+    signed = decodeTransactionUnsafe(hexToBin(signedHex));
+  } catch {
+    return 'the signed transaction cannot be decoded';
+  }
+  const expected = decodeTransactionUnsafe(hexToBin(expectedUnsignedHex));
+  if (signed.inputs.length !== 1 || signed.outputs.length !== 1) {
+    return 'it must have exactly one input and one output';
+  }
+  const [input] = signed.inputs;
+  const [expectedInput] = expected.inputs;
+  if (
+    binToHex(input.outpointTransactionHash) !== binToHex(expectedInput.outpointTransactionHash) ||
+    input.outpointIndex !== expectedInput.outpointIndex
+  ) {
+    return 'it does not spend the escrow UTXO of this trade';
+  }
+  // Everything after the signature: the function selector and the redeem script of this contract.
+  const tail = (bytecode: Uint8Array) => encodeAuthenticationInstructions(decodeAuthenticationInstructions(bytecode).slice(1));
+  if (binToHex(tail(input.unlockingBytecode)) !== binToHex(tail(expectedInput.unlockingBytecode))) {
+    return 'it does not use the contract function of this settlement path';
+  }
+  if (binToHex(signed.outputs[0].lockingBytecode) !== binToHex(expected.outputs[0].lockingBytecode)) {
+    return 'it does not pay the payout address of this settlement path';
+  }
+  return null;
+}
+
 export interface DirectEscrowSpend {
   builder: TransactionBuilder;
   hex: string;
@@ -316,7 +355,7 @@ export function buildRefundSpend(params: {
 // Builds the seller's funding transaction for either a BCH or a CashToken (PUSD) escrow (protocol section 5).
 export function buildFundEscrowTransaction(params: {
   contract: Contract;
-  terms: Pick<TradeTerms, 'asset' | 'amount'>;
+  terms: Pick<TradeTerms, 'asset' | 'amount' | 'fees'>;
   utxos: WalletSpendableUtxo[];
   changeAddress: string;
   tokenChangeAddress?: string;
@@ -325,17 +364,21 @@ export function buildFundEscrowTransaction(params: {
 }): WalletTransactionRequest {
   const expected = expectedEscrowFunding(params.terms);
   const feeRate = params.feeRate ?? 1.0;
+  // The service fees are paid in BCH next to the escrow output, whatever the escrowed asset (section 5.1).
+  const feeOutputs = (params.terms.fees ?? []).map((f) => ({ to: pkhToLockingBytecode(f.pkh), amount: BigInt(f.satoshis) }));
+  const feeTotal = totalFeeSats(params.terms.fees);
 
   if (!expected.token) {
     const bchPool = params.utxos.filter((u) => !u.token);
     const totalAvailable = bchPool.reduce((sum, u) => sum + u.satoshis, 0n);
-    const target =
-      totalAvailable >= expected.satoshis + 1000n ? expected.satoshis + 1000n : expected.satoshis + 250n;
+    const outgoing = expected.satoshis + feeTotal;
+    const target = totalAvailable >= outgoing + 1000n ? outgoing + 1000n : outgoing + 250n;
     const { utxos: selected } = gatherBchUtxos(bchPool, target);
 
     const builder = new TransactionBuilder({ provider: params.contract.provider })
       .addInputs(selected.map(toUnlockableWalletUtxo))
       .addOutput({ to: params.contract.address, amount: expected.satoshis })
+      .addOutputs(feeOutputs)
       .addBchChangeOutputIfNeeded({ to: params.changeAddress, feeRate });
 
     return formatWalletTransactionRequest(
@@ -358,8 +401,8 @@ export function buildFundEscrowTransaction(params: {
     expected.token.amount,
   );
   const tokenInputSats = tokenInputs.reduce((sum, u) => sum + u.satoshis, 0n);
-  const neededBchSats = expected.satoshis + 2000n > tokenInputSats
-    ? expected.satoshis + 2000n - tokenInputSats
+  const neededBchSats = expected.satoshis + feeTotal + 2000n > tokenInputSats
+    ? expected.satoshis + feeTotal + 2000n - tokenInputSats
     : 0n;
 
   const bchInputs =
@@ -373,6 +416,7 @@ export function buildFundEscrowTransaction(params: {
       amount: expected.satoshis,
       token: expected.token,
     })
+    .addOutputs(feeOutputs)
     .addTokenChangeOutputIfNeeded({
       category: expected.token.category,
       to: params.tokenChangeAddress,
@@ -387,3 +431,27 @@ export function buildFundEscrowTransaction(params: {
   );
 }
 
+
+/**
+ * Checks that a funding transaction pays every fee of the terms: for each one, an output of at least its
+ * satoshis, without tokens, to its P2PKH address. Returns the problem, or null when every fee is paid.
+ */
+export function missingFundingFees(fundingTxHex: string, fees: TradeTerms['fees']): string | null {
+  if (!fees || fees.length === 0) return null;
+  let outputs: ReturnType<typeof decodeTransactionUnsafe>['outputs'];
+  try {
+    outputs = decodeTransactionUnsafe(hexToBin(fundingTxHex)).outputs;
+  } catch {
+    return 'The funding transaction cannot be decoded';
+  }
+  const used = new Set<number>();
+  for (const fee of fees) {
+    const lockingHex = binToHex(pkhToLockingBytecode(fee.pkh));
+    const index = outputs.findIndex(
+      (o, i) => !used.has(i) && !o.token && binToHex(o.lockingBytecode) === lockingHex && o.valueSatoshis >= BigInt(fee.satoshis),
+    );
+    if (index === -1) return `The funding transaction does not pay the ${fee.role} fee`;
+    used.add(index);
+  }
+  return null;
+}

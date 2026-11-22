@@ -1,0 +1,87 @@
+/* Aye's look for the whole app, taken from her landing page (src/web/landing/landing.css): a night-blue glass
+   header and footer, ivory pages, white cards with a soft shadow, pill labels without an outline, and her
+   buttons, chips and fields. Loaded last, so it adjusts the shared components without rewriting them.
+   One neutral theme: there is no dark mode. */
+
+:root {
+  --brand-gradient: linear-gradient(90deg, #f8d234, #f5a92e, #e77937, #cb374c, #ab3b86, #593b8f, #357bc3, #42bfae, #0ac18e);
+  --shadow-light: 0 1px 2px rgba(11, 23, 51, 0.05), 0 10px 30px rgba(11, 23, 51, 0.08);
+  --line-control: #c9cedb;
+  /* Denser than the landing page's 0.72: there the header starts over the night-blue hero, here over ivory. */
+  --night-glass: rgba(11, 23, 51, 0.92);
+  --on-night: rgba(244, 243, 238, 0.82);
+}
+
+/* ---------- Header: night glass, as on the landing page (sticky on a computer, see components.css) ---------- */
+.cf-header {
+  min-height: 76px;
+  background: var(--night-glass);
+  -webkit-backdrop-filter: blur(20px) saturate(1.2);
+  backdrop-filter: blur(20px) saturate(1.2);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  color: var(--luz-perla);
+}
+.cf-logo > img { height: 36px; }
+.cf-nav a { color: var(--on-night); font: 500 15px/20px var(--font-text); border-radius: var(--radius-sm); }
+.cf-nav a:hover { color: #fff; background: rgba(244, 243, 238, 0.08); }
+.cf-nav a[aria-current="page"] { color: #fff; background: transparent; box-shadow: inset 0 -2px 0 var(--brasa-500); border-radius: 0; }
+.cf-header .cf-btn, .cf-header .cf-wallet { min-height: 40px; background: transparent; border-color: rgba(244, 243, 238, 0.45); color: var(--luz-perla); box-shadow: none; }
+.cf-header .cf-btn:hover, .cf-header .cf-wallet:hover { background: rgba(244, 243, 238, 0.08); }
+.cf-header :focus-visible { outline-color: var(--azul-300); }
+.cf-header .cf-muted, .cf-header .cf-small, .cf-header .cf-subtle { color: var(--noche-niebla); }
+
+/* ---------- Footer: the landing page's night footer ---------- */
+.cf-footer { background: var(--noche-950); color: var(--noche-niebla); border-top: 0; padding: var(--space-12) var(--space-6) var(--space-8); font-size: 14px; line-height: 20px; }
+.cf-footer a { color: var(--noche-niebla); text-decoration: none; }
+.cf-footer a:hover { color: var(--azul-300); }
+.cf-footer .cf-label { color: var(--luz-perla); }
+.cf-footer .cf-mono { color: var(--luz-perla); }
+.cf-footer .cf-seg { background: transparent; border-color: rgba(255, 255, 255, 0.12); }
+.cf-footer .cf-seg > button { color: var(--noche-niebla); }
+.cf-footer .cf-seg > button[aria-pressed="true"] { background: rgba(244, 243, 238, 0.1); color: var(--luz-perla); box-shadow: none; }
+.cf-footer .cf-btn { background: transparent; border-color: rgba(244, 243, 238, 0.35); color: var(--luz-perla); }
+.cf-footer .cf-copy { color: var(--noche-niebla); }
+.cf-footer .cf-copy:hover { background: rgba(244, 243, 238, 0.08); color: var(--luz-perla); }
+.cf-footer :focus-visible { outline-color: var(--azul-300); }
+
+/* ---------- Type: Rubik titles, as large and tight as the landing page's ---------- */
+.cf-display { font-weight: 700; letter-spacing: -0.02em; }
+.cf-title { font-size: clamp(28px, 3.2vw, 40px); line-height: 1.08; font-weight: 700; letter-spacing: -0.01em; }
+.cf-heading { font-weight: 600; letter-spacing: -0.01em; }
+
+/* ---------- Buttons: the landing page's buttons ---------- */
+.cf-btn { min-height: 48px; padding: 0 22px; border-radius: 12px; border-color: var(--line-control); color: var(--noche-900); font: 600 15px/20px var(--font-text); transition: background 140ms, transform 140ms; }
+.cf-btn:hover { background: rgba(11, 23, 51, 0.05); }
+.cf-btn:active { transform: translateY(1px) scale(0.99); }
+.cf-btn[data-variant="primary"], .cf a.cf-btn[data-variant="primary"] { box-shadow: 0 6px 18px rgba(201, 79, 20, 0.28); }
+.cf-btn[data-variant="danger"], .cf a.cf-btn[data-variant="danger"] { background: var(--alerta-700); border-color: var(--alerta-700); }
+.cf-btn[data-variant="ghost"]:hover { background: rgba(11, 23, 51, 0.05); }
+.cf-btn[data-size="sm"] { min-height: 40px; padding: 0 16px; font-size: 14px; border-radius: 12px; }
+
+/* ---------- Pills and tags: soft fill, no outline, a small dot ---------- */
+.cf-pill, .cf-tag { gap: 6px; padding: 4px 10px; border: 0; font: 600 13px/18px var(--font-text); }
+.cf-pill::before, .cf-tag::before { width: 7px; height: 7px; }
+.cf-pill { color: var(--noche-pizarra); background: rgba(91, 103, 133, 0.1); }
+.cf-pill[data-tone="attention"] { color: var(--ambar-700); background: var(--ambar-50); }
+.cf-pill[data-tone="escrow"] { color: var(--azul-700); background: var(--azul-50); }
+.cf-pill[data-tone="verified"] { color: var(--verde-700); background: var(--verde-50); }
+.cf-pill[data-tone="arbiter"] { color: var(--violeta-700); background: var(--violeta-50); }
+.cf-pill[data-tone="danger"] { color: var(--alerta-700); background: var(--alerta-50); }
+.cf-tag[data-kind="chain"] { color: var(--verde-700); background: var(--verde-50); }
+/* Simulated keeps its dashed edge: what is not real must never look like what is. */
+.cf-pill[data-tone="simulated"], .cf-tag[data-kind="sim"] { border: 1px dashed currentColor; background: rgba(91, 103, 133, 0.1); }
+.cf-tag[data-kind="offchain"] { border: 1px solid var(--line-control); }
+
+/* ---------- Surfaces: white cards with the landing page's soft shadow ---------- */
+.cf-card { border-color: var(--luz-gris_frio); border-radius: 18px; box-shadow: var(--shadow-light); }
+.cf-glass, .cf-card.cf-glass { border-radius: 18px; box-shadow: var(--shadow-light); }
+.cf-notice { border-radius: 14px; padding: 12px 14px; }
+
+/* ---------- Fields and choices ---------- */
+.cf-input, .cf-select, .cf-textarea, .cf-inputgroup { border-color: var(--line-control); border-radius: 12px; background: #fff; }
+.cf-seg { border-color: var(--luz-gris_frio); border-radius: 12px; background: #fff; }
+.cf-seg > button { border-radius: 9px; }
+.cf-seg > button[aria-pressed="true"] { background: var(--noche-900); color: var(--luz-perla); box-shadow: none; }
+
+/* ---------- Aye's line icons (Icon.tsx): a 2 px round stroke, no fill ---------- */
+.cf-icon[data-line] { fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }

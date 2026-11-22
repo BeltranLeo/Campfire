@@ -19,6 +19,7 @@ import {
   hexToBin,
   secp256k1,
   sha256,
+  stringify,
   utf8ToBin,
 } from '@bitauth/libauth';
 import {
@@ -36,6 +37,14 @@ import {
   buildCloseOfferTransaction,
   buildFundEscrowTransaction,
   buildPublishOfferTransaction,
+  buildPublishNftOfferTransaction,
+  buildCloseNftOfferTransaction,
+  findMinterUtxos,
+  isMarkerUtxo,
+  markerCommitment,
+  offerMinter,
+  parseMarkerCommitment,
+  FORMAT_VERSION_NFT,
   buildRefundSpend,
   buildReleaseRequest,
   cashAddressToPkh,
@@ -74,6 +83,13 @@ import {
   type OfferDocument,
   type TradeTerms,
 } from '../src/protocol/index.js';
+import {
+  buildSignInRequest,
+  signInCoinTxid,
+  signInNonce,
+  verifySignInTransaction,
+} from '../src/protocol/signin.js';
+import { signSignInLocally } from './signin-helper.js';
 
 function makeWalletFixture(seedLabel: string) {
   const seed = new Uint8Array(64);
@@ -171,6 +187,46 @@ describe('keys and identity (section 1 & 5)', () => {
     if (typeof p2shAddr === 'string') throw new Error(p2shAddr);
     expect(() => cashAddressToPkh(p2shAddr.address)).toThrow(/Expected P2PKH address/);
     expect(() => cashAddressToPkh(qAddr, 'bchtest')).toThrow(/Expected network prefix/);
+  });
+});
+
+describe('sign-in challenge (section 1)', () => {
+  const secret = sha256.hash(utf8ToBin('signin-test-secret'));
+  const nonceFor = (receiveXpub: string) =>
+    signInNonce(secret, { identity: 'ab'.repeat(32), receiveXpub, expiresAt: 1_800_000_000, salt: 'cd'.repeat(16) });
+
+  it('binds the nonce to the receive key, the expiry and the salt', () => {
+    const base = { identity: 'ab'.repeat(32), receiveXpub: buyerWallet.receiveXpub, expiresAt: 1_800_000_000, salt: 'cd'.repeat(16) };
+    const nonce = signInNonce(secret, base);
+    expect(nonce).toMatch(/^[0-9a-f]{64}$/);
+    expect(signInNonce(secret, { ...base, receiveXpub: sellerWallet.receiveXpub })).not.toBe(nonce);
+    expect(signInNonce(secret, { ...base, expiresAt: base.expiresAt + 1 })).not.toBe(nonce);
+    expect(signInNonce(secret, { ...base, salt: 'ce'.repeat(16) })).not.toBe(nonce);
+  });
+
+  it('asks the wallet to sign with defi/0 the same transaction the check accepts once signed', () => {
+    const provider = new MockNetworkProvider();
+    provider.network = Network.MAINNET;
+    const nonce = nonceFor(buyerWallet.receiveXpub);
+    const defiPubkey = derivePubkeyFromXpub(buyerWallet.defiXpub, 0);
+    const { hex, request, inputPaths } = buildSignInRequest(provider, { nonce, defiPubkey });
+    expect(inputPaths).toEqual([[0, 'defi', 0]]);
+    expect(request.transaction).toBe(hex);
+    expect(request.broadcast).toBe(false);
+
+    const unsigned = decodeTransactionUnsafe(hexToBin(hex));
+    const signedHex = signSignInLocally(nonce, buyerWallet.defiPrivKey(0));
+    const signed = decodeTransactionUnsafe(hexToBin(signedHex));
+    // The wallet only fills in the unlocking bytecode: everything it signs is what the dapp asked for.
+    expect(binToHex(unsigned.inputs[0].outpointTransactionHash)).toBe(signInCoinTxid(nonce));
+    expect(unsigned.inputs[0].unlockingBytecode.length).toBe(0);
+    expect(stringify(signed.outputs)).toBe(stringify(unsigned.outputs));
+    expect(signed.locktime).toBe(unsigned.locktime);
+
+    expect(verifySignInTransaction(signedHex, { nonce, defiPubkey })).toBe(true);
+    expect(verifySignInTransaction(hex, { nonce, defiPubkey })).toMatch(/does not match/);
+    expect(verifySignInTransaction(signedHex, { nonce: nonceFor(sellerWallet.receiveXpub), defiPubkey })).toMatch(/does not answer/);
+    expect(verifySignInTransaction(signedHex, { nonce, defiPubkey: derivePubkeyFromXpub(sellerWallet.defiXpub, 0) })).toMatch(/does not match/);
   });
 });
 
@@ -296,6 +352,20 @@ describe('oracle quotes, trade terms, tradeId and arbiter verdicts (section 3.3 
     expect(verifyPriceQuote({ ...quote, price: '485000.51' }, oraclePk)).toBe(false);
     expect(verifyPriceQuote({ ...quote, pair: 'BCH/USD' }, oraclePk)).toBe(false);
     expect(verifyPriceQuote({ ...quote, timestamp: 1_794_900_001 }, oraclePk)).toBe(false);
+  });
+
+  it('accepts a quote signature for one split of pair, price and timestamp only', () => {
+    // The signed message joins the fields with no separator, so these shifted readings have the same bytes. They
+    // are refused because the pair has no digits and the timestamp always has 10.
+    const quote = signPriceQuote(oracleSk, { pair: 'BCH/USD', price: '450.12', timestamp: 1_794_900_000 });
+    expect(verifyPriceQuote(quote, oraclePk)).toBe(true);
+    // A price digit moved into the timestamp: a date thousands of years ahead.
+    expect(verifyPriceQuote({ ...quote, price: '450.1', timestamp: 21_794_900_000 }, oraclePk)).toBe(false);
+    // A timestamp digit moved into the price: a higher price and a date in 1994.
+    expect(verifyPriceQuote({ ...quote, price: '450.121', timestamp: 794_900_000 }, oraclePk)).toBe(false);
+    // A price digit moved into the pair.
+    expect(verifyPriceQuote({ ...quote, pair: 'BCH/USD4', price: '50.12' }, oraclePk)).toBe(false);
+    expect(() => signPriceQuote(oracleSk, { pair: 'BCH/USD', price: '1', timestamp: 999_999_999 })).toThrow(/10-digit/);
   });
 
   it('computes fiat amounts for BCH and PUSD with positive and negative margins', () => {
@@ -674,6 +744,64 @@ describe('escrow contract instantiation, funding check and spend builders (secti
       destinationAddress: changeAddr,
     });
     expect(closeTx.inputPaths).toEqual([[0, 'receive', 1]]);
+    await closeTx.builder.send();
+    expect(await provider.getUtxos(markerAddr)).toHaveLength(0);
+  });
+
+  it('publishes a version-2 offer with an NFT marker from the minter covenant and closes it by burning the NFT', async () => {
+    const provider = new MockNetworkProvider();
+    provider.network = Network.MAINNET;
+    const category = binToHex(sha256.hash(utf8ToBin('campfire-offer-category')));
+    const minting = { category, amount: 0n, nft: { capability: 'minting' as const, commitment: '' } };
+    const minterUtxo = provider.addUtxo(offerMinter(provider).tokenAddress, randomUtxo({ satoshis: 1000n, token: minting }));
+    // A token that is not a minter and a minter of another category sit there too and are never picked.
+    provider.addUtxo(offerMinter(provider).tokenAddress, randomUtxo({ satoshis: 1000n, token: { ...minting, category: '11'.repeat(32) } }));
+    expect(await findMinterUtxos(provider, category)).toEqual([minterUtxo]);
+
+    const addressMap = deriveWalletAddressMap({ receiveXpub: sellerWallet.receiveXpub, count: 5 });
+    const addr0 = pkhToCashAddress(derivePayoutPkhFromXpub(sellerWallet.receiveXpub, 0));
+    const markerAddr = pkhToCashAddress(derivePayoutPkhFromXpub(sellerWallet.receiveXpub, 1), { tokenAware: true });
+    const changeAddr = pkhToCashAddress(derivePayoutPkhFromXpub(sellerWallet.receiveXpub, 2));
+    const rawUtxo = provider.addUtxo(addr0, randomUtxo({ satoshis: 50_000n }));
+    const tagged = tagWalletUtxos([rawUtxo], addressMap).map((u) => ({
+      ...u,
+      signer: new SignatureTemplate(sellerWallet.receivePrivKey(u.keyIndex)),
+    }));
+
+    const doc: OfferDocument = {
+      v: 1, side: 'sell', asset: BCH_ASSET, assetDecimals: BCH_DECIMALS, fiat: 'ARS',
+      price: { type: 'floating', pair: 'BCH/ARS', marginBps: 100 },
+      min: '100000', max: '1000000', paymentMethods: ['bank-transfer'], paymentWindowSec: 3600,
+      expiresAt: 1_795_000_000, arbiter: arbiterPk, oracle: oraclePk,
+    };
+    const pubTx = buildPublishNftOfferTransaction({
+      provider, document: doc, utxos: tagged, minterUtxo, markerAddress: markerAddr, changeAddress: changeAddr,
+    });
+    // The wallet signs only its own coin, which comes after the minter.
+    expect(pubTx.inputPaths).toEqual([[1, 'receive', 0]]);
+
+    const decodedTx = decodeTransactionUnsafe(hexToBin(pubTx.hex));
+    expect(decodedTx.outputs).toHaveLength(4);
+    const verified = verifyOfferAgainstOpReturn(pubTx.offerJson, decodedTx.outputs[0].lockingBytecode);
+    expect(verified.onChain.version).toBe(FORMAT_VERSION_NFT);
+    expect(binToHex(decodedTx.outputs[1].token!.nft!.commitment)).toBe(markerCommitment('sell', verified.contentHash));
+    expect(parseMarkerCommitment(markerCommitment('buy', verified.contentHash))).toEqual({ side: 'buy', contentHash: verified.contentHash });
+
+    await pubTx.builder.send();
+    const [held] = await provider.getUtxos(markerAddr);
+    expect(isMarkerUtxo(held, category)).toBe(true);
+    const [minterBack] = await provider.getUtxos(offerMinter(provider).tokenAddress).then((u) => u.filter((x) => x.token?.category === category));
+    expect(minterBack.token).toEqual(minting);
+
+    const taggedMarker = tagWalletUtxos([held], addressMap).map((u) => ({
+      ...u,
+      signer: new SignatureTemplate(sellerWallet.receivePrivKey(u.keyIndex)),
+    }));
+    const closeTx = buildCloseNftOfferTransaction({ provider, markerUtxo: taggedMarker[0], destinationAddress: changeAddr, category });
+    expect(closeTx.inputPaths).toEqual([[0, 'receive', 1]]);
+    const closed = decodeTransactionUnsafe(hexToBin(closeTx.hex));
+    expect(closed.outputs).toHaveLength(1);
+    expect(closed.outputs[0].token).toBeUndefined();
     await closeTx.builder.send();
     expect(await provider.getUtxos(markerAddr)).toHaveLength(0);
   });

@@ -1,11 +1,13 @@
 import { useState } from 'react';
 import { setArbiterToken } from '../arbiterToken';
+import { useMessages } from '../lang';
 import { Button } from './Button';
 
 // Invented copy: the design has no screen for the real arbiter.
 /** Asks for the admin token and keeps it in memory only (see arbiterToken.ts). */
 export function ArbiterTokenForm() {
   const [value, setValue] = useState('');
+  const t = useMessages().arbiter;
   return (
     <form
       className="cf-stack"
@@ -15,7 +17,7 @@ export function ArbiterTokenForm() {
       }}
     >
       <div className="cf-field">
-        <label htmlFor="arbiter-token">Admin token</label>
+        <label htmlFor="arbiter-token">{t.adminToken}</label>
         <input
           id="arbiter-token"
           className="cf-input"
@@ -25,11 +27,11 @@ export function ArbiterTokenForm() {
           value={value}
           onChange={(e) => setValue(e.target.value)}
         />
-        <span className="cf-hint">Kept in this tab's memory only. It is gone when you reload or close the page.</span>
+        <span className="cf-hint">{t.tokenHint}</span>
       </div>
       <div className="s-actions">
         <Button variant="primary" type="submit" disabled={!value.trim()}>
-          Use token
+          {t.useToken}
         </Button>
       </div>
     </form>

@@ -96,6 +96,13 @@ describe('the offer form', () => {
     expect(JSON.parse(built.json)).toEqual(built.document);
   });
 
+  it('builds a sell offer below the market price', () => {
+    const built = build({ margin: '-2' });
+    if (!built.ok) throw new Error(JSON.stringify(built.errors));
+    expect(() => validateOfferDocument(built.document)).not.toThrow();
+    expect(built.document.price).toEqual({ type: 'floating', pair: 'BCH/ARS', marginBps: -200 });
+  });
+
   it('leaves the oracle out of a fixed-price offer, which the protocol requires', () => {
     const built = build({ priceType: 'fixed', fixedPrice: '480000.5', fiat: 'USD' });
     if (!built.ok) throw new Error(JSON.stringify(built.errors));
@@ -205,6 +212,41 @@ describe('the wallet coins and the publication transaction', () => {
     expect(asked.length - new Set(asked).size).toBeLessThanOrEqual(20);
   }, 30_000);
 
+  it('starts from the remembered last used address and asks the history of the new addresses only', async () => {
+    const base = new MockNetworkProvider();
+    base.network = Network.MAINNET;
+    const usedIndices = Array.from({ length: 101 }, (_, i) => i * 10);
+    base.addUtxo(address(keys.receive, 30), { txid: 'ab'.repeat(32), vout: 0, satoshis: 5_000n });
+    const used = new Set(usedIndices.map((i) => address(keys.receive, i)));
+    const remembered = new Map<string, number>();
+    const memory = { lastUsed: (x: string) => remembered.get(x), remember: (x: string, n: number) => void remembered.set(x, n) };
+    const first = withHistory(base, used);
+    await scanWalletCoins(first.provider, { receive: keys.receive }, { memory });
+    expect(remembered.get(keys.receive)).toBe(1000);
+
+    // Two new addresses were used since: the next scan asks only about the window past 1,000 and then past 1,012.
+    used.add(address(keys.receive, 1005));
+    used.add(address(keys.receive, 1012));
+    const progress: string[] = [];
+    const found: bigint[] = [];
+    const second = withHistory(base, used);
+    const scan = await scanWalletCoins(second.provider, { receive: keys.receive }, {
+      memory,
+      onProgress: (p) => {
+        progress.push(`${p.phase}:${p.done}/${p.total}`);
+        if (p.phase === 'coins') found.push(p.found ?? -1n);
+      },
+    });
+    expect(scan.paths[0].lastUsed).toBe(1012);
+    expect(second.asked.length).toBe(32);
+    expect(spendableBch(scan.coins)).toBe(5_000n);
+    expect(progress.at(-1)).toBe('coins:1013/1013');
+    // The running total starts at nothing, never shrinks, and ends at the balance.
+    expect(found[0]).toBe(0n);
+    expect(found.every((f, i) => i === 0 || f >= found[i - 1])).toBe(true);
+    expect(found.at(-1)).toBe(5_000n);
+  }, 30_000);
+
   it('reads an unused path in one window and stops', async () => {
     const { provider, asked } = withHistory(new MockNetworkProvider(), new Set());
     const scan = await scanWalletCoins(provider, { receive: keys.receive });
@@ -276,7 +318,7 @@ describe('closing an offer', () => {
   }
 
   it('spends the marker back to its own address with the path and index the wallet needs to sign it', async () => {
-    const tx = await buildCloseOffer({ offer: { offerTxid, markerAddress, markerVout: 1 }, provider: chain(), receiveXpub: keys.receive });
+    const tx = (await buildCloseOffer({ offer: { offerTxid, markerAddress, markerVout: 1 }, provider: chain(), receiveXpub: keys.receive }))!;
     expect(tx.inputPaths).toEqual([[0, 'receive', 7]]);
     const outputs = (tx.builder as unknown as { outputs: { to: string; amount: bigint }[] }).outputs;
     expect(outputs).toHaveLength(1);
@@ -286,20 +328,23 @@ describe('closing an offer', () => {
     expect(outputs[0].amount).toBeLessThan(1000n);
   });
 
-  it('refuses a wallet that did not publish the offer, an offer without a marker and a marker already spent', async () => {
+  it('refuses a wallet that did not publish the offer and an offer without a marker', async () => {
     const other = wallet('someone-else');
     await expect(buildCloseOffer({ offer: { offerTxid, markerAddress, markerVout: 1 }, provider: chain(), receiveXpub: other.receive })).rejects.toThrow(/does not belong/);
     await expect(buildCloseOffer({ offer: { offerTxid, markerAddress: undefined, markerVout: 1 }, provider: chain(), receiveXpub: keys.receive })).rejects.toThrow(/no marker/);
+  });
+
+  it('asks for no signature when the marker is already spent, since the offer is then closed on-chain', async () => {
     const empty = new MockNetworkProvider();
     empty.network = Network.MAINNET;
-    await expect(buildCloseOffer({ offer: { offerTxid, markerAddress, markerVout: 1 }, provider: empty, receiveXpub: keys.receive })).rejects.toThrow(/already spent/);
+    await expect(buildCloseOffer({ offer: { offerTxid, markerAddress, markerVout: 1 }, provider: empty, receiveXpub: keys.receive })).resolves.toBeNull();
   });
 });
 
 describe('the demo switch on a buy offer', () => {
   const buy = { side: 'buy' as const, min: '0.0001', max: '0.0002' };
   const demoBuild = (patch: Partial<OfferForm> = {}) =>
-    buildOfferDocument({ form: { ...form, ...buy, demo: true, ...patch }, arbiter, oracle, now: 1_800_000_000, demoMaxSats: 20_000n });
+    buildOfferDocument({ form: { ...form, ...buy, demo: true, ...patch }, arbiter, oracle, now: 1_800_000_000, demoMaxUnits: 20_000n });
 
   it('adds the simulated method the demo seller answers to', () => {
     const built = demoBuild();
@@ -324,16 +369,18 @@ describe('the demo switch on a buy offer', () => {
   });
 
   it('is ignored on a sell offer', () => {
-    const built = buildOfferDocument({ form: { ...form, demo: true }, arbiter, oracle, now: 1_800_000_000, demoMaxSats: 20_000n });
+    const built = buildOfferDocument({ form: { ...form, demo: true }, arbiter, oracle, now: 1_800_000_000, demoMaxUnits: 20_000n });
     expect(built.ok && built.document.paymentMethods).toEqual(['bank-transfer', 'mercadopago']);
   });
 });
 
 describe('payment method chips', () => {
   it('suggests names per currency', () => {
-    expect(methodChips('ARS')).toContain('Mercado Pago');
-    expect(methodChips('USD')).toContain('Zelle');
-    expect(methodChips('USD')).not.toContain('Mercado Pago');
+    expect(methodChips('ARS')).toEqual(['Alias transfer', 'Bank transfer (CBU)']);
+    expect(methodChips('USD').slice(0, 5)).toEqual(['Zelle', 'Bank transfer (ACH)', 'Wise', 'Revolut', 'Cash App']);
+    expect(methodChips('USD')).not.toContain('Alias transfer');
+    // Payment in person is not suggested in either currency.
+    expect([...methodChips('ARS'), ...methodChips('USD')].some((n) => /cash in person/i.test(n))).toBe(false);
   });
 
   it('toggles a name on and off, in order', () => {
@@ -344,14 +391,25 @@ describe('payment method chips', () => {
   });
 
   it('adds typed names without repeats and feeds the document builder', () => {
-    const methods = addMethods('Wise', 'Revolut, wise ,Payoneer');
+    const methods = addMethods('Wise', 'revolut, wise ,Payoneer', 'USD');
     expect(methods).toBe('Wise, Revolut, Payoneer');
     const built = buildOfferDocument({ form: { ...form, methods }, arbiter, oracle, now: 1_800_000_000 });
     expect(built.ok && built.document.paymentMethods).toEqual(['Wise', 'Revolut', 'Payoneer']);
   });
 
   it('drops suggestions of the other currency but keeps typed names', () => {
-    expect(keepMethodsFor('Zelle, Mercado Pago, Revolut', 'ARS')).toBe('Mercado Pago, Revolut');
+    expect(keepMethodsFor('Zelle, Alias transfer, Payoneer', 'ARS')).toBe('Alias transfer, Payoneer');
+    expect(keepMethodsFor('Bank transfer (CBU), Wise', 'USD')).toBe('Wise');
+  });
+
+  it('stores a typed spelling of a suggestion as the suggestion, in that currency only', () => {
+    expect(addMethods('', 'Transferencia por alias, CBU', 'ARS')).toBe('Alias transfer, Bank transfer (CBU)');
+    expect(addMethods('', 'cashapp', 'USD')).toBe('Cash App');
+    // "Bank transfer" means a different method in each currency.
+    expect(addMethods('', 'bank transfer', 'ARS')).toBe('Bank transfer (CBU)');
+    expect(addMethods('', 'bank transfer', 'USD')).toBe('Bank transfer (ACH)');
+    // Already chosen under its canonical name: not added twice.
+    expect(addMethods('Zelle', 'ZELLE', 'USD')).toBe('Zelle');
   });
 
   it('describes what is wrong in words that fit chips', () => {
@@ -362,6 +420,33 @@ describe('payment method chips', () => {
     expect(methodsProblem('a, b, c, d, e', 1)).toMatch(/up to 4/);
     expect(methodsProblem('x'.repeat(31))).toMatch(/30 characters/);
     expect(methodsProblem('Zelle')).toBeNull();
+  });
+
+  it('builds a PUSD offer with the service token, two decimals and the PUSD pair', () => {
+    const pusd = 'ab'.repeat(32);
+    const built = buildOfferDocument({
+      form: { ...form, coin: 'PUSD', fiat: 'USD', min: '1.00', max: '20' },
+      arbiter,
+      oracle,
+      now: 1_800_000_000,
+      pusdCategory: pusd.toUpperCase(),
+    });
+    if (!built.ok) throw new Error(JSON.stringify(built.errors));
+    expect(() => validateOfferDocument(built.document)).not.toThrow();
+    expect(built.document).toMatchObject({ asset: pusd, assetDecimals: 2, price: { type: 'floating', pair: 'PUSD/USD' }, min: '100', max: '2000' });
+    // One cent is the smallest PUSD trade; without the token's category there is nothing to offer.
+    expect(buildOfferDocument({ form: { ...form, coin: 'PUSD', min: '0.001' }, arbiter, oracle, now: 1, pusdCategory: pusd })).toMatchObject({ ok: false, errors: { min: /0.01 PUSD/ } });
+    expect(buildOfferDocument({ form: { ...form, coin: 'PUSD', min: '1', max: '2' }, arbiter, oracle, now: 1 })).toMatchObject({ ok: false, errors: { min: /PUSD token/ } });
+    // The demo seller's PUSD limit is in cents.
+    const demo = buildOfferDocument({ form: { ...form, side: 'buy', demo: true, coin: 'PUSD', min: '0.20', max: '1' }, arbiter, oracle, now: 1, pusdCategory: pusd, demoMaxUnits: 10n });
+    expect(demo).toMatchObject({ ok: false, errors: { min: 'For a demo answer, keep the smallest trade at 0.10 PUSD or less.' } });
+  });
+
+  it('compares margins only with offers of the same coin', () => {
+    const offer = (asset: string, marginBps: number) => ({ document: { side: 'sell', asset, fiat: 'USD', price: { type: 'floating', pair: 'X/USD', marginBps } } as never });
+    const offers = [offer('BCH', 300), offer('CD'.repeat(32), 50)];
+    expect(marginRange(offers, 'USD')).toEqual({ low: 300, high: 300 });
+    expect(marginRange(offers, 'USD', 'sell', 'cd'.repeat(32))).toEqual({ low: 50, high: 50 });
   });
 });
 
@@ -377,5 +462,9 @@ describe('the live price line', () => {
     expect(describeYourPrice({ ...base, priceType: 'fixed', marginBps: null })).toBeNull();
     expect(describeYourPrice({ ...base, marginBps: 250, marketPrice: null })).toBeNull();
     expect(describeYourPrice({ ...base, marginBps: null })).toBeNull();
+  });
+  it('names the coin the price is for', () => {
+    expect(describeYourPrice({ ...base, fiat: 'USD', marketPrice: '1.00', marginBps: 100, coin: 'PUSD' })).toBe('Your price: market + 1% (1 PUSD ≈ 1.01 USD today)');
+    expect(describeYourPrice({ ...base, priceType: 'fixed', marginBps: null, fixedPrice: '1450', coin: 'PUSD' })).toBe('Your price: 1,450 ARS per PUSD');
   });
 });

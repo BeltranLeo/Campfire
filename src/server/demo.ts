@@ -30,25 +30,35 @@ import {
   BCH_DECIMALS,
   PUSD_CATEGORY,
   PUSD_DECIMALS,
+  SIMULATED_PAYMENT_METHOD,
   buildFundEscrowTransaction,
+  buildPublishNftOfferTransaction,
   buildPublishOfferTransaction,
+  cashAddressToPkh,
+  findMinterUtxos,
+  IDENTITY_RECEIVE_INDEX,
   buildReleaseRequest,
   createEscrowContract,
+  deriveSharedTradeKey,
   derivePayoutPkhFromXpub,
   expectedEscrowFunding,
+  totalFeeSats,
   derivePubkeyFromXpub,
+  encryptChatMessage,
   encryptPaymentDetails,
   identityFromDefiXpub,
   matchesEscrowFunding,
   pkhToCashAddress,
   pkhToLockingBytecode,
+  signChatMessage,
   signPaymentDetails,
   toBytes,
   validateOfferDocument,
   type OfferDocument,
   type WalletSpendableUtxo,
 } from '../protocol/index.js';
-import { FUNDING_WINDOW_SEC, SponsorshipLimitError, type CampfireService, type OfferView } from './service.js';
+import { sumCoins } from './accounts.js';
+import { FUNDING_WINDOW_SEC, OfferBroadcastError, SponsorshipLimitError, type CampfireService, type OfferView } from './service.js';
 import type { StoredTrade, TradeState } from './storage.js';
 
 // Same derivation paths as the test wallets; the `defi` branch holds the contract signing keys.
@@ -67,7 +77,9 @@ const BOT_SIGHASH = SighashType.SIGHASH_ALL | SighashType.SIGHASH_UTXOS;
 const ACTIVE_STATES: TradeState[] = ['Requested', 'Accepted', 'Funded', 'Paid', 'Disputed'];
 const SELLER_PAYOUT_STATES: TradeState[] = ['Cancelled', 'ResolvedSeller', 'Refunded'];
 
-export const DEMO_PAYMENT_METHOD = 'simulated';
+export const DEMO_PAYMENT_METHOD = SIMULATED_PAYMENT_METHOD;
+export const DEMO_GREETING =
+  'Automatic message from the demo seller: the coins are locked in the escrow. Send the simulated payment and mark it as paid.';
 export const DEMO_OFFER_TERMS =
   'DEMO OFFER. The fiat payment is simulated: do not send any money, just mark the trade as paid. ' +
   'The escrow, the release and every other on-chain step are real mainnet transactions.';
@@ -85,15 +97,14 @@ export interface DemoSellerLimits {
   offerLifetimeSec: number;
 }
 
-// Identity is a hash of a presented xpub with no proof of possession (D29), so per-wallet limits are
-// trivially bypassed with a fresh wallet. The limits that bound the bot's losses are global.
+// A fresh wallet is a new identity, so per-wallet limits are trivially bypassed. The limits that bound the bot's losses are global.
 export const DEFAULT_DEMO_LIMITS: DemoSellerLimits = {
   minBchSats: 5_000n,
   maxBchSats: 20_000n,
   minPusdUnits: 1n, // 0.01 PUSD
   maxPusdUnits: 10n, // 0.10 PUSD
-  maxActiveTrades: 2,
-  maxDailyFundings: 10,
+  maxActiveTrades: 10,
+  maxDailyFundings: 200,
   paymentWindowSec: 300, // 5 minutes (protocol section 8)
   offerLifetimeSec: 30 * 86_400,
 };
@@ -179,6 +190,21 @@ function compressedPublicKeyHex(privateKey: Uint8Array): string {
   return binToHex(pub);
 }
 
+// The rule the bot funds by: the escrow's sats, the fees and 2,000 sats of margin for the funding fee and the
+// change outputs, plus the tokens of a token trade. Shared by checkBalance and the administration panel.
+// Only the sats the funding transaction can spend count: those of plain coins and, on a token trade, those of the
+// coins that carry the trade's tokens. The sats under an offer NFT (which sits at the bot's main address) or under
+// another token are never selected, so counting them would accept a trade the bot then cannot fund.
+export function hasFundsFor(utxos: readonly Utxo[], trade: Pick<StoredTrade, 'asset' | 'amount' | 'fees'>): boolean {
+  const expected = expectedEscrowFunding(trade);
+  const tradeTokens = expected.token
+    ? utxos.filter((u) => u.token?.category.toLowerCase() === expected.token!.category && !u.token.nft)
+    : [];
+  const sats = [...utxos.filter((u) => !u.token), ...tradeTokens].reduce((sum, u) => sum + u.satoshis, 0n);
+  const tokens = tradeTokens.reduce((sum, u) => sum + u.token!.amount, 0n);
+  return sats >= expected.satoshis + totalFeeSats(trade.fees) + 2000n && (!expected.token || tokens >= expected.token.amount);
+}
+
 export function demoAssetId(asset: DemoAsset): string {
   return asset === 'BCH' ? BCH_ASSET : PUSD_CATEGORY;
 }
@@ -189,6 +215,8 @@ export class DemoSeller {
   // Serialises every action that selects the bot's UTXOs or allocates key indices, so two
   // simultaneous takes on the same instance never spend the same coin twice.
   private queue: Promise<unknown> = Promise.resolve();
+  // The reconcile run of each trade in progress on this instance (see reconcile).
+  private readonly reconciling = new Map<string, Promise<void>>();
 
   constructor(
     private readonly options: {
@@ -232,10 +260,11 @@ export class DemoSeller {
   }
 
   async init(): Promise<void> {
-    await this.options.service.registerIdentity({
-      defiXpub: this.options.wallet.defiXpub,
-      receiveXpub: this.options.wallet.receiveXpub,
-    });
+    // The server holds the demo seller's keys, so it needs no sign-in challenge.
+    await this.options.service.registerIdentity(
+      { defiXpub: this.options.wallet.defiXpub, receiveXpub: this.options.wallet.receiveXpub },
+      { trusted: true },
+    );
   }
 
   // --- Wallet ---
@@ -253,15 +282,20 @@ export class DemoSeller {
     return trades.filter((t) => t.sellerIdentity === this.identity);
   }
 
-  // Spendable coins: the main address plus the payout addresses of trades that paid the bot back
-  // (cancel, arbitrate for the seller, refund). Offer markers are never spent here.
-  async spendableUtxos(): Promise<WalletSpendableUtxo[]> {
+  // The receive indices that hold spendable coins: the main address plus the payout addresses of trades
+  // that paid the bot back (cancel, arbitrate for the seller, refund). Offer markers are never spent here.
+  private async walletIndices(): Promise<Set<number>> {
     const indices = new Set<number>([DEMO_MAIN_INDEX]);
     for (const t of await this.botTrades()) {
       if (SELLER_PAYOUT_STATES.includes(t.status) && t.sellerReceiveIndex !== undefined) {
         indices.add(t.sellerReceiveIndex);
       }
     }
+    return indices;
+  }
+
+  async spendableUtxos(walletIndices?: Set<number>): Promise<WalletSpendableUtxo[]> {
+    const indices = walletIndices ?? (await this.walletIndices());
     const seen = new Set<string>();
     const result: WalletSpendableUtxo[] = [];
     for (const index of indices) {
@@ -355,26 +389,64 @@ export class DemoSeller {
           oracle: service.oraclePublicKeyHex,
         };
 
-        const tx = buildPublishOfferTransaction({
-          provider: this.options.provider,
-          document,
-          utxos: await this.spendableUtxos(),
-          markerAddress: this.options.wallet.receiveAddress(markerIndex),
-          changeAddress: this.mainAddress,
-        });
-        const offer = await service.publishOffer({
-          sellerIdentity: this.identity,
-          offerJson: tx.offerJson,
-          offerTxHex: tx.hex,
-          markerReceiveIndex: markerIndex,
-          broadcast: true,
-        });
-        await this.waitUntilIndexed(tx.hex);
+        // NFT markers all go to the bot's identity address (receive/0); plain markers each take a fresh index.
+        const nft = service.offerCategory !== null;
+        const index = nft ? IDENTITY_RECEIVE_INDEX : markerIndex;
+        const offer = await this.publishOfferTransaction(
+          {
+            document,
+            offerJson: JSON.stringify(document),
+            utxos: await this.spendableUtxos(),
+            markerPkh: cashAddressToPkh(this.options.wallet.receiveAddress(index)),
+          },
+          (tx) =>
+            service.publishOffer({
+              sellerIdentity: this.identity,
+              offerJson: tx.offerJson,
+              offerTxHex: tx.hex,
+              markerReceiveIndex: index,
+            }),
+        );
         published.push(offer);
-        markerIndex += 1;
+        if (!nft) markerIndex += 1;
       }
       return published;
     });
+  }
+
+  // Builds, publishes and waits for an offer transaction paid by the bot's wallet: format 2 with an NFT marker from
+  // the minter covenant once the service has an offer category, format 1 with the 1,000-sat marker before that
+  // (protocol sections 3.1 and 3.4). The minter has several lanes (minting UTXOs), taken in random order. Two
+  // publishers that pick the same lane at the same moment conflict, and only one transaction gets in: when the
+  // network refuses the broadcast, the same offer is built again on the next lane, up to one try per lane.
+  private async publishOfferTransaction(
+    params: { document: OfferDocument; offerJson: string; utxos: WalletSpendableUtxo[]; markerPkh: Uint8Array },
+    publish: (tx: { offerJson: string; hex: string }) => Promise<OfferView>,
+  ): Promise<OfferView> {
+    const category = this.options.service.offerCategory;
+    const common = { provider: this.options.provider, document: params.document, offerJson: params.offerJson, utxos: params.utxos, changeAddress: this.mainAddress };
+    if (!category) {
+      const tx = buildPublishOfferTransaction({ ...common, markerAddress: pkhToCashAddress(params.markerPkh) });
+      const offer = await publish(tx);
+      await this.waitUntilIndexed(tx.hex);
+      return offer;
+    }
+    const lanes = await findMinterUtxos(this.options.provider, category);
+    if (lanes.length === 0) throw new Error('The offer minter has no minting NFT of the Campfire offer category');
+    let lastError: unknown;
+    for (const minterUtxo of lanes) {
+      const tx = buildPublishNftOfferTransaction({ ...common, minterUtxo, markerAddress: pkhToCashAddress(params.markerPkh, { tokenAware: true }) });
+      try {
+        const offer = await publish(tx);
+        await this.waitUntilIndexed(tx.hex);
+        return offer;
+      } catch (err) {
+        // Only a refused broadcast is worth another lane; any other error would repeat on every lane.
+        if (!(err instanceof OfferBroadcastError)) throw err;
+        lastError = err;
+      }
+    }
+    throw lastError;
   }
 
   // --- Limits ---
@@ -400,21 +472,47 @@ export class DemoSeller {
 
   // Declines before accepting when the bot cannot pay the escrow, so an empty bot does not keep
   // trades stuck in Accepted (holding active slots) until the funding window ends.
-  private async checkBalance(trade: Pick<StoredTrade, 'asset' | 'amount'>): Promise<void> {
-    const expected = expectedEscrowFunding(trade);
-    const utxos = await this.spendableUtxos();
-    const sats = utxos.reduce((sum, u) => sum + u.satoshis, 0n);
-    const tokens = expected.token
-      ? utxos
-          .filter((u) => u.token?.category.toLowerCase() === expected.token!.category && !u.token.nft)
-          .reduce((sum, u) => sum + u.token!.amount, 0n)
-      : 0n;
-    // 2,000 sats of margin for the funding fee and the change outputs.
-    if (sats < expected.satoshis + 2000n || (expected.token && tokens < expected.token.amount)) {
+  private async checkBalance(trade: Pick<StoredTrade, 'asset' | 'amount' | 'fees'>): Promise<void> {
+    if (!hasFundsFor(await this.spendableUtxos(), trade)) {
       throw new DemoLimitError(
         'The demo seller has run out of funds for this offer. Please try again later.',
       );
     }
+  }
+
+  // What the bot holds and whether it can fund a trade at its maximum, for the administration panel.
+  // The fees are counted as on the bot's own offers: floating price, so the oracle is paid too.
+  async balance(): Promise<{
+    sats: bigint;
+    pusdUnits: bigint;
+    addressCount: number;
+    canFundMax: Record<DemoAsset, boolean | null>;
+  }> {
+    const service = this.options.service;
+    const indices = await this.walletIndices();
+    const utxos = await this.spendableUtxos(indices);
+    const canFundMax = async (asset: DemoAsset): Promise<boolean | null> => {
+      const isBch = asset === 'BCH';
+      const amount = (isBch ? this.limits.maxBchSats : this.limits.maxPusdUnits).toString();
+      try {
+        const fees = await service.feesFor(
+          {
+            asset: demoAssetId(asset),
+            assetDecimals: isBch ? BCH_DECIMALS : PUSD_DECIMALS,
+            arbiter: service.arbiterPublicKeyHex,
+            oracle: service.oraclePublicKeyHex,
+            price: { type: 'floating' },
+          },
+          amount,
+        );
+        return hasFundsFor(utxos, { asset: demoAssetId(asset), amount, fees });
+      } catch {
+        // A PUSD trade's fees need the BCH/USD price; without it the answer is unknown, not "no".
+        return null;
+      }
+    };
+    const [bch, pusd] = await Promise.all([canFundMax('BCH'), canFundMax('PUSD')]);
+    return { ...sumCoins(utxos), addressCount: indices.size, canFundMax: { BCH: bch, PUSD: pusd } };
   }
 
   // Called before a take on a demo offer is recorded.
@@ -490,9 +588,39 @@ export class DemoSeller {
     });
   }
 
+  // Funds the escrow of an accepted trade and, once it is funded, says so in the chat.
+  private async fundAccepted(tradeRecordId: string): Promise<StoredTrade> {
+    const trade = await this.fundEscrow(tradeRecordId);
+    await this.greet(trade);
+    return trade;
+  }
+
+  // One automatic chat message once the escrow is funded, so a visitor sees the chat working against the bot.
+  // The text says it is automatic: the bot is a demo, never presented as a person. Best effort and posted once:
+  // a failure here never fails the trade, and a message the bot already wrote is not repeated.
+  private async greet(trade: StoredTrade): Promise<void> {
+    if (trade.status !== 'Funded' || !trade.tradeId || !trade.buyerSessionPk) return;
+    const service = this.options.service;
+    try {
+      const messages = await service.listChatMessages(trade.id);
+      if (messages.some((m) => m.senderIdentity === this.identity)) return;
+      const sessionKey = this.options.wallet.sessionPrivateKey(trade.id);
+      const ciphertext = await encryptChatMessage(deriveSharedTradeKey(sessionKey, trade.buyerSessionPk), DEMO_GREETING);
+      await service.postChatMessage({
+        idOrTradeId: trade.id,
+        senderIdentity: this.identity,
+        ciphertext,
+        // The signature covers the contract's trade id, not the record id.
+        signature: signChatMessage(sessionKey, trade.tradeId, ciphertext),
+      });
+    } catch (err) {
+      console.warn(`Demo seller could not post its chat message on ${trade.id}: ${err instanceof Error ? err.message : String(err)}`);
+    }
+  }
+
   // Funds the escrow of an accepted trade. Idempotent: if the escrow already holds the exact funding
   // it records it, and if a funding transaction was already signed it only rebroadcasts that one.
-  private async fundAccepted(tradeRecordId: string): Promise<StoredTrade> {
+  private async fundEscrow(tradeRecordId: string): Promise<StoredTrade> {
     const service = this.options.service;
     const trade = await service.getTrade(tradeRecordId, undefined, true);
     if (!trade || trade.status !== 'Accepted' || !trade.terms || !trade.tradeId) {
@@ -619,24 +747,22 @@ export class DemoSeller {
       if (utxos.reduce((sum, u) => sum + u.satoshis, 0n) < 3_000n) {
         throw new SponsorshipLimitError('Campfire cannot pay for new offers right now. Please try again later.');
       }
-      const tx = buildPublishOfferTransaction({
-        provider: this.options.provider,
-        document,
-        offerJson: params.offerJson,
-        utxos,
-        markerAddress: pkhToCashAddress(derivePayoutPkhFromXpub(buyer.receiveXpub, params.markerReceiveIndex)),
-        changeAddress: this.mainAddress,
-      });
-      const published = await service.publishOffer({
-        sellerIdentity: params.buyerIdentity,
-        offerJson: tx.offerJson,
-        offerTxHex: tx.hex,
-        markerReceiveIndex: params.markerReceiveIndex,
-        broadcast: true,
-        sponsored: true,
-      });
-      await this.waitUntilIndexed(tx.hex);
-      return published;
+      return this.publishOfferTransaction(
+        {
+          document,
+          offerJson: params.offerJson,
+          utxos,
+          markerPkh: derivePayoutPkhFromXpub(buyer.receiveXpub, params.markerReceiveIndex),
+        },
+        (tx) =>
+          service.publishOffer({
+            sellerIdentity: params.buyerIdentity,
+            offerJson: tx.offerJson,
+            offerTxHex: tx.hex,
+            markerReceiveIndex: params.markerReceiveIndex,
+            sponsored: true,
+          }),
+      );
     });
     const trade = offer.document.paymentMethods.includes(DEMO_PAYMENT_METHOD) ? await this.takeBuyOffer(offer) : null;
     return { offer, trade };
@@ -656,7 +782,9 @@ export class DemoSeller {
       if (amount > BigInt(doc.max) || amount > botMax) return null;
       try {
         await this.checkLimits();
-        await this.checkBalance({ asset: doc.asset, amount: amount.toString() });
+        // The fees are counted now: once the buyer accepts, the bot must be able to pay them with the deposit.
+        const fees = await this.options.service.feesFor(doc, amount.toString());
+        await this.checkBalance({ asset: doc.asset, amount: amount.toString(), fees });
         const wallet = this.options.wallet;
         const recordId = binToHex(randomBytes(16));
         const { defiIndex, receiveIndex } = await this.nextIndices();
@@ -681,17 +809,35 @@ export class DemoSeller {
   }
 
   // Finishes any step left behind by a failed request (funding or release). Called on trade reads.
-  async reconcile(tradeRecordId: string): Promise<void> {
+  // A read that finds this trade already being reconciled joins that run instead of queuing another one: a page polls
+  // every few seconds, and when a step keeps failing slowly, one queued run per poll would pile up behind the lock
+  // faster than they finish, and every read would wait on all of them.
+  reconcile(tradeRecordId: string): Promise<void> {
+    const running = this.reconciling.get(tradeRecordId);
+    if (running) return running;
+    const run = this.reconcileOnce(tradeRecordId).finally(() => this.reconciling.delete(tradeRecordId));
+    this.reconciling.set(tradeRecordId, run);
+    return run;
+  }
+
+  private async reconcileOnce(tradeRecordId: string): Promise<void> {
     const trade = await this.options.service.getTrade(tradeRecordId);
     if (!trade || !this.options.service.isDemoTrade(trade)) return;
     try {
       if (trade.status === 'Accepted' || (trade.status === 'Requested' && trade.side !== 'buy')) {
         await this.acceptAndFund(tradeRecordId);
+      } else if (trade.status === 'Funded') {
+        // A greeting lost to a failed request is posted on a later read. Checked outside the lock first, so the
+        // polls of a funded trade do not queue behind the bot's deposits; greet checks again inside it.
+        const messages = await this.options.service.listChatMessages(trade.id);
+        if (!messages.some((m) => m.senderIdentity === this.identity)) await this.exclusive(() => this.greet(trade));
       } else if (trade.status === 'Paid') {
         await this.release(tradeRecordId);
       }
-    } catch {
-      // Best effort: the read that triggered this still returns the current state.
+    } catch (err) {
+      // Best effort: the read that triggered this still returns the current state. Logged, because a step that keeps
+      // failing here (a deposit the bot cannot pay, a refused broadcast) is otherwise invisible.
+      console.warn(`Demo seller could not finish trade ${tradeRecordId}: ${err instanceof Error ? err.message : String(err)}`);
     }
   }
 

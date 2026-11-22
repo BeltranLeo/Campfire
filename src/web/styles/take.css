@@ -2,3 +2,8 @@
 .tk-label { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: var(--space-2); }
 .tk-label > label { font-size: 13px; line-height: 18px; font-weight: 600; }
 .tk-big { font-family: var(--font-display); font-size: 26px; line-height: 32px; font-weight: 600; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+/* The offer at a glance: three short lines instead of a definition list. */
+.tk-summary { display: flex; flex-direction: column; gap: var(--space-2); }
+.tk-terms > summary { cursor: pointer; list-style: none; }
+.tk-terms > summary::-webkit-details-marker { display: none; }
+.tk-terms:not([open]) > summary { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2; overflow: hidden; }

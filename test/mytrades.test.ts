@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { Offer, Trade, TradeState } from '../src/web/api.js';
-import { historyNote, myOffers, nextStep, rowTitle, sortActive, sortHistory, tradesPerOffer } from '../src/web/mytrades.js';
+import { aliasFor } from '../src/web/alias.js';
+import { completedWith, historyNote, myOffers, nextStep, otherParty, rowTitle, sortActive, sortHistory, tradesPerOffer } from '../src/web/mytrades.js';
 
 const trade = (status: TradeState, extra: Partial<Trade> = {}): Trade => ({
   id: status,
@@ -79,6 +80,9 @@ describe('rows', () => {
     expect(how('Refunded', 'seller')).toBe('returned after the refund time');
     expect(how('Dropped', 'buyer')).toBe('not accepted in time');
     expect(how('Dropped', 'seller')).toBe('declined or not locked in time');
+    // A request taken back by the one who sent it says so, on either side and either kind of offer.
+    expect(how('Dropped', 'buyer', { withdrawnAt: 1 })).toBe('request cancelled');
+    expect(how('Dropped', 'seller', { withdrawnAt: 1, side: 'buy' })).toBe('request cancelled');
   });
 
   it('lists finished trades most recent first', () => {
@@ -96,10 +100,45 @@ describe('offers', () => {
     expect(myOffers(list, 'me').map((o) => o.offerTxid)).toEqual(['new-open', 'old-open', 'old-closed']);
   });
 
-  it('counts the trades each offer has had', () => {
-    const counts = tradesPerOffer([{ offerTxid: 'a' }, { offerTxid: 'a' }, { offerTxid: 'b' }]);
-    expect(counts.get('a')).toBe(2);
-    expect(counts.get('b')).toBe(1);
+  it('counts the trades on each offer, the ones still going and the requests waiting', () => {
+    const counts = tradesPerOffer([
+      { offerTxid: 'a', status: 'Requested' },
+      { offerTxid: 'a', status: 'Released' },
+      { offerTxid: 'b', status: 'Funded' },
+    ]);
+    expect(counts.get('a')).toEqual({ total: 2, active: 1, waiting: 1 });
+    expect(counts.get('b')).toEqual({ total: 1, active: 1, waiting: 0 });
     expect(counts.get('c')).toBeUndefined();
+  });
+});
+
+describe('the other person', () => {
+  it('names the other person by alias, and the demo seller by role', () => {
+    expect(otherParty(trade('Released'), 'buyer')).toBe(aliasFor('seller').name);
+    expect(otherParty(trade('Released'), 'seller')).toBe(aliasFor('buyer').name);
+    expect(otherParty(trade('Released', { isDemo: true }), 'buyer')).toBe('Demo seller');
+  });
+
+  it('puts the name between the time and how the trade ended', () => {
+    const note = historyNote(trade('Cancelled', { updatedAt: 1_763_300_000 }), 'buyer', 'Silver Juniper');
+    expect(note).toMatch(/^.+, \d\d:\d\d · Silver Juniper · .+$/);
+  });
+
+  it('counts only the trades completed between the two, either way round', () => {
+    const list = [
+      trade('Released', { buyerIdentity: 'me', sellerIdentity: 'you' }),
+      trade('Released', { buyerIdentity: 'you', sellerIdentity: 'me' }),
+      trade('ResolvedBuyer', { buyerIdentity: 'me', sellerIdentity: 'you' }),
+      trade('ResolvedSeller', { buyerIdentity: 'me', sellerIdentity: 'you', disputedAt: 1 }),
+      // Not completed: the buyer never paid, or it never got going.
+      trade('ResolvedSeller', { buyerIdentity: 'me', sellerIdentity: 'you' }),
+      trade('Cancelled', { buyerIdentity: 'me', sellerIdentity: 'you' }),
+      trade('Funded', { buyerIdentity: 'me', sellerIdentity: 'you' }),
+      // Someone else.
+      trade('Released', { buyerIdentity: 'me', sellerIdentity: 'them' }),
+    ];
+    expect(completedWith(list, 'me', 'you')).toBe(4);
+    expect(completedWith(list, 'me', 'them')).toBe(1);
+    expect(completedWith(list, 'me', 'nobody')).toBe(0);
   });
 });

@@ -1,11 +1,12 @@
 import { useState } from 'react';
-import { Link, useSearchParams } from 'react-router';
+import { useSearchParams } from 'react-router';
+import { SIMULATED_PAYMENT_METHOD } from '../../protocol/offers.js';
 import { aliasFor } from '../alias';
 import { ApiError, apiGet, type Offer, type PriceQuote } from '../api';
-import { assetInfo } from '../assets';
+import { assetInfo, type AssetInfo } from '../assets';
 import { Button } from '../components/Button';
-import { OfferRow, OfferRowSkeleton } from '../components/OfferRow';
-import { ProvenanceTag } from '../components/Provenance';
+import { OfferHeader, OfferRow, OfferRowSkeleton, type OfferColumns } from '../components/OfferRow';
+import { OffersTabs } from '../components/OffersTabs';
 import { EmptyState, Notice } from '../components/States';
 import { useConfig } from '../config';
 import {
@@ -20,8 +21,12 @@ import {
 import { fiatForUnits, parseFiatCents, unitsForFiat } from '../fiatAmount';
 import { parseAmount } from '../take';
 import { usePoll } from '../hooks/usePoll';
-import { usePrefs } from '../prefs';
-import { loadQuotes, loadReputations, priceOf, unique } from '../offerData';
+import { useMessages } from '../lang';
+import type { Messages } from '../messages';
+import { myOffers } from '../mytrades';
+import { isSimulatedOffer, loadQuotes, loadReputations, priceOf, unique } from '../offerData';
+import { filterOptions, offerTakes } from '../paymentMethods';
+import { useWallet } from '../wallet';
 
 // The offer list (Offers-* screens). The visitor starts from an intention: "I want to buy" lists
 // sell offers, "I want to sell" lists buy offers. The choice lives in the URL (?side=sell) so the
@@ -29,18 +34,26 @@ import { loadQuotes, loadReputations, priceOf, unique } from '../offerData';
 
 const QUOTE_INTERVAL_MS = 30_000;
 
+/** How often the list is read again while the page is open. */
+const OFFERS_REFRESH_MS = 30_000;
+
 export function Offers() {
   const [params, setParams] = useSearchParams();
-  // The link decides; without one, what the person said at onboarding does.
-  const prefs = usePrefs();
-  const sideParam = params.get('side');
-  const intent = sideParam === 'sell' || (sideParam === null && prefs?.intent === 'sell') ? 'sell' : 'buy';
+  // The link decides; without one, the list starts on buying.
+  const intent = params.get('side') === 'sell' ? 'sell' : 'buy';
   // Buying means taking someone's sell offer, and the other way round.
   const offerSide = intent === 'buy' ? 'sell' : 'buy';
   const config = useConfig();
+  const m = useMessages();
+  const t = m.offers;
 
-  const offers = usePoll(() => apiGet<{ offers: Offer[] }>('/api/offers?onlyOpen=true').then((r) => r.offers), 'offers');
+  // Read again every 30 s, as on Home, so new offers show up and taken or closed ones leave without a reload.
+  const offers = usePoll(() => apiGet<{ offers: Offer[] }>('/api/offers?onlyOpen=true').then((r) => r.offers), 'offers', OFFERS_REFRESH_MS);
   const all = offers.data ?? [];
+  // With a wallet, a tab leads to the offers it published; its badge counts the open ones, already in this list.
+  const wallet = useWallet();
+  const identity = wallet.status === 'connected' ? wallet.identity : null;
+  const myOpen = identity ? myOffers(all, identity).length : 0;
 
   // One quote per floating pair, refreshed every 30 s. A pair whose quote fails shows no price.
   const pairs = unique(all.flatMap((o) => (o.document.price.type === 'floating' ? [o.document.price.pair] : [])));
@@ -49,12 +62,13 @@ export function Offers() {
   const identities = unique(all.map((o) => o.sellerIdentity));
   const reputations = usePoll(() => loadReputations(identities), identities.join(','));
 
-  // The filters start from the onboarding answers when they name exactly one coin or currency.
-  const [chosenCoin, setCoin] = useState(prefs?.assets.length === 1 ? prefs.assets[0] : '');
-  const [chosenFiat, setFiat] = useState(prefs?.fiat.length === 1 ? prefs.fiat[0] : '');
+  // The filters start empty: every open offer is shown until the visitor narrows the list.
+  const [chosenCoin, setCoin] = useState('');
+  const [chosenFiat, setFiat] = useState('');
   const [chosenMethod, setMethod] = useState('');
   // What the visitor wants to pay (buying) or sell (selling). Component state only: it is a question, not a setting.
   const [amount, setAmount] = useState('');
+  const [filtersOpen, setFiltersOpen] = useState(false);
   const clearFilters = () => {
     setCoin('');
     setFiat('');
@@ -70,15 +84,19 @@ export function Offers() {
 
   const sideOffers = all.filter((o) => o.document.side === offerSide);
 
-  // Filter choices come from the offers on this side, not from a fixed list.
+  // Coin and currency choices come from the offers on this side, not from a fixed list.
   const coinOptions = unique(sideOffers.map((o) => assetInfo(o.document.asset, o.document.assetDecimals, config).symbol));
   const fiatOptions = unique(sideOffers.map((o) => o.document.fiat));
-  const methodOptions = unique(sideOffers.flatMap((o) => o.document.paymentMethods));
   // A choice counts only while it is one of the options. Otherwise the select would show "Any …" while a
-  // value left over from the other side (the back button, an onboarding answer) silently hid every offer.
+  // value left over from the other side (the back button) silently hid every offer.
   const coin = coinOptions.includes(chosenCoin) ? chosenCoin : '';
   const fiat = fiatOptions.includes(chosenFiat) ? chosenFiat : '';
+  // Methods come from Campfire's fixed list, for the chosen currency or all of them, so the choices do not depend on
+  // how each author spelled theirs. Offers whose only methods are typed by hand show with "Any method".
+  const methodOptions = filterOptions(fiat);
   const method = methodOptions.includes(chosenMethod) ? chosenMethod : '';
+
+  const activeFilters = [coin, fiat, method].filter(Boolean).length;
 
   const filtered = sideOffers
     .map((offer) => ({ offer, asset: assetInfo(offer.document.asset, offer.document.assetDecimals, config) }))
@@ -86,7 +104,7 @@ export function Offers() {
       ({ offer, asset }) =>
         (!coin || asset.symbol === coin) &&
         (!fiat || offer.document.fiat === fiat) &&
-        (!method || offer.document.paymentMethods.includes(method)),
+        (!method || offerTakes(offer.document.paymentMethods, offer.document.fiat, method)),
     );
 
   // The pay field needs one currency. Use the filtered one, else the one most listed offers are in.
@@ -102,22 +120,25 @@ export function Offers() {
     const rate = unitRate(offer, quotes.data?.byPair);
     // Fixed order key: what the visitor gets for their amount, or null when the offer cannot answer.
     let result: { text: string; sortKey: number } | null = null;
-    let outside = false;
+    // Which end of the range the typed amount crossed, so the row can name the limit instead of just saying no.
+    let outside: 'below' | 'above' | false = false;
     if (hasAmount && rate) {
       if (payCents !== null && doc.fiat === payFiat) {
         const units = unitsForFiat({ fiatCents: payCents, unitPrice: rate.unitPrice, marginBps: rate.marginBps, assetDecimals: asset.decimals });
         if (units === null) result = null;
-        else if (units < BigInt(doc.min) || units > BigInt(doc.max)) outside = true;
+        else if (units < BigInt(doc.min)) outside = 'below';
+        else if (units > BigInt(doc.max)) outside = 'above';
         else result = { text: `≈ ${formatAmount(units, asset)}`, sortKey: Number(units) / 10 ** asset.decimals };
       } else if (sellUnits !== null && asset.isBch) {
-        if (sellUnits < BigInt(doc.min) || sellUnits > BigInt(doc.max)) outside = true;
+        if (sellUnits < BigInt(doc.min)) outside = 'below';
+        else if (sellUnits > BigInt(doc.max)) outside = 'above';
         else {
           const worth = fiatForUnits({ units: sellUnits, unitPrice: rate.unitPrice, marginBps: rate.marginBps, assetDecimals: asset.decimals });
           if (worth !== null) result = { text: `≈ ${formatFiatAmount(worth, doc.fiat)}`, sortKey: Number(worth) };
         }
       }
     }
-    return { offer, asset, price, result, outside, applies: hasAmount && (payCents !== null ? doc.fiat === payFiat : asset.isBch) };
+    return { offer, asset, price, rate, result, outside, applies: hasAmount && (payCents !== null ? doc.fiat === payFiat : asset.isBch) };
   });
 
   const rows = hasAmount
@@ -125,71 +146,50 @@ export function Offers() {
       [...quoted].sort((a, b) => (b.result?.sortKey ?? -1) - (a.result?.sortKey ?? -1))
     : // Demo offers first (the way in for a first visit), then BCH before tokens; otherwise the service's order.
       [...quoted].sort((a, b) => Number(b.offer.isDemo) - Number(a.offer.isDemo) || Number(b.asset.isBch) - Number(a.asset.isBch));
-  const demo = rows.find(({ offer }) => offer.isDemo)?.offer;
 
   const showSkeleton = offers.loading && !offers.data;
   const failed = !offers.data && Boolean(offers.error);
-  const updated = quotes.data?.updatedAt ? ` · Prices updated ${formatClock(quotes.data.updatedAt)}` : '';
+  const columns: OfferColumns = {
+    party: intent === 'buy' ? t.seller : t.buyer,
+    // Fixed even with an amount typed: "You get …" and "Min …" name themselves, and offers in another currency
+    // keep showing their limits in the same column.
+    limits: t.limits,
+    payment: t.payBy(intent),
+  };
+  const updated = quotes.data?.updatedAt ? t.pricesUpdated(formatClock(quotes.data.updatedAt)) : '';
   const status = showSkeleton
-    ? 'Loading offers…'
+    ? t.loading
     : failed
-      ? 'Offers unavailable'
+      ? t.unavailable
       : hasAmount
-        ? `${rows.length} ${rows.length === 1 ? 'offer' : 'offers'} · most ${intent === 'buy' ? 'BCH' : 'money'} for your ${intent === 'buy' ? 'money' : 'BCH'} first`
-        : `${rows.length} open ${rows.length === 1 ? 'offer' : 'offers'}`;
+        ? t.bestFirst(rows.length, intent)
+        : t.open(rows.length);
 
   return (
-    <main className="s-main">
-      <div className="s-pagehead">
-        <h1 className="cf-display">Offers</h1>
-      </div>
-
-      <div className="s-toolbar">
-        <div className="cf-seg" role="group" aria-label="What do you want to do">
+    // Wide on a computer: the offers are a table, compared by reading down each column.
+    <main className="s-main" data-wide data-desk="wide">
+      {/* Title and side in one row, so the list starts high on a phone. */}
+      <div className="s-pagehead o-head">
+        <h1 className="cf-display">{t.title}</h1>
+        <div className="cf-seg" role="group" aria-label={t.sideGroup}>
           <button type="button" aria-pressed={intent === 'buy'} onClick={() => switchTo('buy')}>
-            I want to buy
+            {m.common.buy}
           </button>
           <button type="button" aria-pressed={intent === 'sell'} onClick={() => switchTo('sell')}>
-            I want to sell
+            {m.common.sell}
           </button>
         </div>
       </div>
-      {/* What the choice means in one sentence: who sends what, and what keeps the visitor safe on that side. */}
-      <p className="s-intent">
-        {intent === 'buy'
-          ? `You send ${fiat || 'money'} directly to the seller. Their ${coin || 'coins'} ${coin ? 'is' : 'are'} locked in a contract before you pay, and ${coin ? 'goes' : 'go'} to your wallet when they confirm your payment.`
-          : `The buyer sends you ${fiat || 'money'} directly. You lock your ${coin || 'coins'} in a contract only after you accept their request, and release ${coin ? 'it' : 'them'} when the payment arrives.`}
+      {identity && <OffersTabs current="all" openCount={myOpen} />}
+      {/* What the choice means in one short sentence: who sends what, and what keeps the visitor safe on that side. */}
+      <p className="s-intent cf-small cf-muted">
+        {intent === 'buy' ? t.intentBuy(coin || null) : t.intentSell(coin || null)}
       </p>
-      {/* Each filter says which side of the trade it describes, in the same words as the columns below. */}
-      <div className="s-filters">
-        <Filter
-          id="offers-coin"
-          label={intent === 'buy' ? 'You get' : 'You give'}
-          any="Any coin"
-          value={coin}
-          options={coinOptions}
-          onChange={setCoin}
-        />
-        <Filter
-          id="offers-fiat"
-          label={intent === 'buy' ? 'You pay in' : 'You get paid in'}
-          any="Any currency"
-          value={fiat}
-          options={fiatOptions}
-          onChange={setFiat}
-        />
-        <Filter
-          id="offers-method"
-          label={intent === 'buy' ? 'You pay by' : 'You get paid by'}
-          any="Any method"
-          value={method}
-          options={methodOptions}
-          optionLabel={paymentMethodLabel}
-          onChange={setMethod}
-        />
+      {/* The amount is the question most visitors have, so it stays out; the three filters fold behind one button. */}
+      <div className="o-ask">
         {!showSkeleton && !failed && sideOffers.length > 0 && (intent === 'sell' || payFiat) && (
           <div className="cf-field o-amount">
-            <label htmlFor="offers-amount">{intent === 'buy' ? 'I want to pay' : 'I want to sell'}</label>
+            <label htmlFor="offers-amount">{intent === 'buy' ? t.wantToPay : t.wantToSell}</label>
             <div className="cf-inputgroup">
               <input
                 id="offers-amount"
@@ -205,44 +205,78 @@ export function Offers() {
             </div>
             {typed && !hasAmount && (
               <span id="offers-amount-hint" className="cf-hint">
-                Enter an amount like {intent === 'buy' ? '10,000' : '0.01'}.
+                {t.amountHint(intent === 'buy' ? '10,000' : '0.01')}
               </span>
             )}
           </div>
         )}
+        <button
+          type="button"
+          className="cf-btn o-filterbtn"
+          aria-expanded={filtersOpen}
+          aria-controls="offers-filters"
+          onClick={() => setFiltersOpen(!filtersOpen)}
+        >
+          {t.filters(activeFilters)}
+        </button>
       </div>
-      {intent === 'sell' && !showSkeleton && !failed && (
-        <Link className="o-postlink" to="/offers/new">
-          Or post your own offer
-        </Link>
-      )}
-      {demo && !showSkeleton && !failed && (
-        <div className="cf-simbox o-demo">
-          <ProvenanceTag kind="sim">Demo</ProvenanceTag>
-          <span className="o-demotext">Try first with simulated {moneyWord(demo.document.fiat)}</span>
-          <Button size="sm" to={`/offers/${demo.offerTxid}`}>
-            Try
-          </Button>
+      {filtersOpen && (
+        // Each filter says which side of the trade it describes, in the same words as the columns below.
+        <div className="s-filters" id="offers-filters">
+          <Filter
+            id="offers-coin"
+            label={t.coinLabel(intent)}
+            any={t.anyCoin}
+            value={coin}
+            options={coinOptions}
+            onChange={setCoin}
+          />
+          <Filter
+            id="offers-fiat"
+            label={t.fiatLabel(intent)}
+            any={t.anyCurrency}
+            value={fiat}
+            options={fiatOptions}
+            onChange={setFiat}
+          />
+          <Filter
+            id="offers-method"
+            label={t.methodLabel(intent)}
+            any={t.anyMethod}
+            value={method}
+            options={methodOptions}
+            optionLabel={paymentMethodLabel}
+            onChange={setMethod}
+          />
         </div>
       )}
-      <span className="cf-small cf-muted">
-        {status}
-        {updated}
-      </span>
+      <div className="o-status">
+        <span className="cf-small cf-muted">
+          {status}
+          {updated}
+        </span>
+        {/* The same place on both sides: no offer fits, so post the one you want. */}
+        <Button size="sm" to={intent === 'buy' ? '/offers/new?side=buy' : '/offers/new'}>
+          {t.createOffer}
+        </Button>
+      </div>
 
       {showSkeleton ? (
         <section className="cf-card" data-flush aria-busy="true">
-          <OfferRowSkeleton />
-          <OfferRowSkeleton />
-          <OfferRowSkeleton />
+          <OfferHeader columns={columns} />
+          <ul className="o-list">
+            <OfferRowSkeleton />
+            <OfferRowSkeleton />
+            <OfferRowSkeleton />
+          </ul>
         </section>
       ) : failed ? (
         <section className="cf-card">
           <div className="cf-stack">
-            <LoadError error={offers.error} />
+            <LoadError error={offers.error} t={t} />
             <div className="s-actions">
               <Button variant="primary" onClick={offers.reload}>
-                Try again
+                {m.common.tryAgain}
               </Button>
             </div>
           </div>
@@ -253,46 +287,62 @@ export function Offers() {
             intent={intent}
             filtered={sideOffers.length > 0}
             onClear={clearFilters}
+            t={t}
           />
         </section>
       ) : (
-        <section className="cf-card" data-flush>
-          {rows.map(({ offer, asset, price, result, outside, applies }) => {
-            const doc = offer.document;
-            const alias = aliasFor(offer.sellerIdentity);
-            const rep = reputations.data?.get(offer.sellerIdentity);
-            const range = formatRange(doc.min, doc.max, asset);
-            // Without a typed amount the headline is the price; with one it is the answer, or why there is none.
-            const priceText = price === null ? '—' : `${formatFiat(price, doc.fiat)}/${asset.symbol}`;
-            const headline = !applies ? priceText : outside ? "Outside this offer's range" : (result?.text ?? '—');
-            return (
-              <OfferRow
-                key={offer.offerTxid}
-                initials={alias.initials}
-                hue={alias.hue}
-                headline={headline}
-                headlineMuted={applies && (outside || !result)}
-                alias={alias.name}
-                trades={rep ? (offerSide === 'sell' ? rep.completedAsSeller : rep.completedAsBuyer) : null}
-                methods={doc.paymentMethods.map(paymentMethodLabel).join(', ')}
-                paymentWindow={formatPaymentWindow(doc.paymentWindowSec)}
-                range={!applies || outside ? range : null}
-                isDemo={offer.isDemo}
-                action={
-                  <Button size="sm" to={`/offers/${offer.offerTxid}`}>
-                    {intent === 'buy' ? 'Buy' : 'Sell'}
-                  </Button>
-                }
-              />
-            );
-          })}
+        <section className="cf-card" data-flush aria-label={t.listLabel(intent)}>
+          <OfferHeader columns={columns} />
+          <ul className="o-list">
+            {rows.map(({ offer, asset, price, rate, result, outside, applies }) => {
+              const doc = offer.document;
+              const alias = aliasFor(offer.sellerIdentity);
+              const rep = reputations.data?.get(offer.sellerIdentity);
+              const trades = rep ? (offerSide === 'sell' ? rep.completedAsSeller : rep.completedAsBuyer) : null;
+              const limits = rangeTexts(doc.min, doc.max, doc.fiat, asset, rate);
+              // Without a typed amount the column shows the limits; with one, the answer or the limit it crossed.
+              let main = limits.fiat ?? limits.coin;
+              let tone: 'answer' | 'outside' | undefined;
+              if (applies && result) {
+                main = t.youGet(result.text);
+                tone = 'answer';
+              } else if (applies && outside) {
+                const edge = outside === 'below' ? t.min : t.max;
+                const fiatEdge = outside === 'below' ? limits.fiatMin : limits.fiatMax;
+                const coinEdge = formatAmount(outside === 'below' ? doc.min : doc.max, asset);
+                main = `${edge} ${intent === 'buy' && fiatEdge ? fiatEdge : coinEdge}`;
+                tone = 'outside';
+              } else if (applies) {
+                main = '—';
+              }
+              return (
+                <OfferRow
+                  key={offer.offerTxid}
+                  to={`/offers/${offer.offerTxid}`}
+                  columns={columns}
+                  party={
+                    offer.isDemo
+                      ? { initials: t.demoSellerInitials, name: t.demoSeller, detail: t.runByCampfire, demo: true }
+                      : { initials: alias.initials, name: alias.name, detail: trades === null ? null : t.trades(trades), demo: false }
+                  }
+                  price={price === null ? null : formatFiat(price, doc.fiat)}
+                  asset={asset}
+                  priceKind={priceKind(doc.price, t)}
+                  limits={main}
+                  limitsTone={tone}
+                  limitsDetail={tone || !limits.fiat ? (limits.fiat ?? limits.coin) : limits.coin}
+                  methods={doc.paymentMethods.filter((m) => m !== SIMULATED_PAYMENT_METHOD).map(paymentMethodLabel)}
+                  simulated={isSimulatedOffer(offer)}
+                  paymentWindow={formatPaymentWindow(doc.paymentWindowSec)}
+                  action={intent === 'buy' ? m.common.buy : m.common.sell}
+                />
+              );
+            })}
+          </ul>
         </section>
       )}
 
-      <p className="cf-small cf-muted">
-        Names like Quiet Ember come from each person's key. Nobody chooses them, and trade counts come from Campfire
-        and can be inflated with a second wallet.
-      </p>
+      <p className="cf-small cf-muted">{t.namesNote}</p>
     </main>
   );
 }
@@ -305,9 +355,45 @@ function unitRate(offer: Offer, quotes: Map<string, PriceQuote> | undefined): { 
   return quote ? { unitPrice: quote.price, marginBps: price.marginBps } : null;
 }
 
-/** "pesos" or "dollars" for the demo strip, so it never names a currency the demo offer does not use. */
-function moneyWord(fiat: string): string {
-  return fiat === 'ARS' ? 'pesos' : fiat === 'USD' ? 'dollars' : fiat;
+/** Whether the price follows the market: "at market", "market +2%", "market −1%", or "fixed price". */
+function priceKind(price: Offer['document']['price'], t: Messages['offers']): string {
+  if (price.type === 'fixed') return t.fixedPrice;
+  if (price.marginBps === 0) return t.atMarket;
+  return t.market(price.marginBps > 0 ? '+' : '−', Math.abs(price.marginBps) / 100);
+}
+
+/**
+ * The offer's limits in the coin ("0.001 – 0.02 BCH") and, when the price is known, in its fiat ("354 – 7,084
+ * ARS"), at the price the trade would use. The fiat ends are kept for the "Min" and "Max" answers.
+ */
+function rangeTexts(
+  min: string,
+  max: string,
+  fiat: string,
+  asset: AssetInfo,
+  rate: { unitPrice: string; marginBps: number } | null,
+): { coin: string; fiat: string | null; fiatMin: string | null; fiatMax: string | null } {
+  const coin = formatRange(min, max, asset);
+  const atPrice = (units: string) =>
+    rate ? fiatForUnits({ units: BigInt(units), unitPrice: rate.unitPrice, marginBps: rate.marginBps, assetDecimals: asset.decimals }) : null;
+  const low = atPrice(min);
+  const high = atPrice(max);
+  if (low === null || high === null) return { coin, fiat: null, fiatMin: null, fiatMax: null };
+  const fiatMin = formatFiatAmount(wholeAbove100(low, 'up'), fiat);
+  const fiatMax = formatFiatAmount(wholeAbove100(high, 'down'), fiat);
+  return { coin, fiat: `${fiatMin.slice(0, -(fiat.length + 1))} – ${fiatMax}`, fiatMin, fiatMax };
+}
+
+/**
+ * Cents add nothing to a limit of hundreds or thousands, and they push the range onto two lines. From 100 up the
+ * limit is a whole number, rounded inwards (the minimum up, the maximum down) so the range shown stays inside the
+ * real one.
+ */
+function wholeAbove100(decimal: string, direction: 'up' | 'down'): string {
+  const [whole, fraction = ''] = decimal.split('.');
+  if (BigInt(whole) < 100n) return decimal;
+  const rest = /[1-9]/.test(fraction);
+  return (direction === 'up' && rest ? BigInt(whole) + 1n : BigInt(whole)).toString();
 }
 
 /** The most common value, or '' for an empty list. */
@@ -344,34 +430,44 @@ function Filter(props: {
   );
 }
 
-function EmptyOffers({ intent, filtered, onClear }: { intent: 'buy' | 'sell'; filtered: boolean; onClear: () => void }) {
+function EmptyOffers({
+  intent,
+  filtered,
+  onClear,
+  t,
+}: {
+  intent: 'buy' | 'sell';
+  filtered: boolean;
+  onClear: () => void;
+  t: Messages['offers'];
+}) {
   if (filtered) {
     return (
-      <EmptyState title="No offers match these filters" action={<Button onClick={onClear}>Clear filters</Button>}>
-        Try another coin, currency or payment method.
+      <EmptyState title={t.noMatch} action={<Button onClick={onClear}>{t.clearFilters}</Button>}>
+        {t.noMatchBody}
       </EmptyState>
     );
   }
   if (intent === 'sell') {
     return (
-      <EmptyState title="No buy offers right now" action={<Button to="/offers/new">Publish an offer</Button>}>
-        Offers to buy appear here as soon as a buyer publishes one on-chain.
+      <EmptyState title={t.noBuyOffers} action={<Button to="/offers/new">{t.publishOffer}</Button>}>
+        {t.noBuyOffersBody}
       </EmptyState>
     );
   }
   return (
-    <EmptyState title="No open offers right now" action={<Button to="/offers/new?side=buy">Publish an offer</Button>}>
-      Offers appear here as soon as a seller publishes one on-chain.
+    <EmptyState title={t.noOffers} action={<Button to="/offers/new?side=buy">{t.publishOffer}</Button>}>
+      {t.noOffersBody}
     </EmptyState>
   );
 }
 
 // A message the server wrote for people (a 4xx) is shown as it is; anything else gets the design's text.
-function LoadError({ error }: { error: unknown }) {
+function LoadError({ error, t }: { error: unknown; t: Messages['offers'] }) {
   const serverMessage = error instanceof ApiError && error.status >= 400 && error.status < 500 ? error.message : null;
   return (
-    <Notice tone="danger" title="We could not load the offers">
-      {serverMessage ?? 'The server did not answer. Offers are published on-chain, so nothing is lost.'}
+    <Notice tone="danger" title={t.loadError}>
+      {serverMessage ?? t.loadErrorBody}
     </Notice>
   );
 }

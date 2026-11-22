@@ -1,5 +1,7 @@
 // Number and date formats used across pages. BCH amounts are always shown in BCH, never in sats.
-// No DOM here, so the unit tests in test/format.test.ts can run them under Node.
+// No DOM here, so the unit tests in test/format.test.ts can run them under Node. Words come from messages.ts.
+
+import { text } from './messages';
 
 /** Base units (sats, token base units) to a decimal string with exactly `decimals` digits. Exact: no floats. */
 export function fromBaseUnits(units: string | bigint, decimals: number): string {
@@ -63,33 +65,34 @@ export function applyMargin(price: string, marginBps: number): number {
 }
 
 /** "Market price", "Market price + 2.5%", "Market price − 1%". */
-export function describeMargin(marginBps: number): string {
-  if (marginBps === 0) return 'Market price';
+export function describeMargin(marginBps: number, base = text().common.marketPrice): string {
+  if (marginBps === 0) return base;
   const percent = Math.abs(marginBps) / 100;
-  return `Market price ${marginBps > 0 ? '+' : '−'} ${percent}%`;
+  return `${base} ${marginBps > 0 ? '+' : '−'} ${percent}%`;
 }
 
 /**
  * A payment method as people read it. Offers store the names their author typed; the demo's "simulated"
- * would read like an error on its own.
+ * would read like an error on its own, and Campfire's own suggestions show in the reader's language.
  */
 export function paymentMethodLabel(method: string): string {
-  return method === 'simulated' ? 'Simulated payment' : method;
+  if (method === 'simulated') return text().common.simulatedPayment;
+  return text().common.methodNames[method] ?? method;
 }
 
 /** "5 min to pay": the payment window is always given in minutes. */
 export function formatPaymentWindow(seconds: number): string {
-  return `${Math.round(seconds / 60)} min to pay`;
+  return text().common.minToPay(Math.round(seconds / 60));
 }
 
 /** "14 Nov" from Unix seconds. */
 export function formatDayMonth(seconds: number): string {
-  return new Date(seconds * 1000).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' });
+  return new Date(seconds * 1000).toLocaleDateString(text().common.dateLocale, { day: 'numeric', month: 'short' });
 }
 
 /** "15 Nov 2026" from Unix seconds. */
 export function formatDate(seconds: number): string {
-  return new Date(seconds * 1000).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' });
+  return new Date(seconds * 1000).toLocaleDateString(text().common.dateLocale, { day: 'numeric', month: 'short', year: 'numeric' });
 }
 
 /** "16 Nov 2026, 14:04" from Unix seconds. */

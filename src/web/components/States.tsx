@@ -9,7 +9,8 @@ export function Notice({
   title,
   children,
 }: {
-  tone?: 'warn' | 'danger' | 'chain';
+  /** Without a tone, information (blue). attention = a deadline, verified = on-chain, arbiter = a dispute, danger = stop. */
+  tone?: 'attention' | 'verified' | 'arbiter' | 'danger';
   title?: ReactNode;
   children?: ReactNode;
 }) {

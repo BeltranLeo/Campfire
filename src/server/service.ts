@@ -1,43 +1,69 @@
 // Campfire protocol service: identity, offers, trade state machine, automatic expiry arbiter, chat and reputation.
 
-import { randomBytes } from 'node:crypto';
+import { randomBytes, timingSafeEqual } from 'node:crypto';
 import {
   binToHex,
   decodeTransactionUnsafe,
+  hashTransaction,
   hexToBin,
+  hmacSha256,
   secp256k1,
   sha256,
+  utf8ToBin,
 } from '@bitauth/libauth';
-import type { NetworkProvider } from 'cashscript';
+import type { NetworkProvider, SpendableUtxo, Utxo } from 'cashscript';
 import {
   BCH_ASSET,
+  DEFAULT_FEE_RATES,
+  FORMAT_VERSION_NFT,
   MARKER_SATOSHIS,
   PUSD_CATEGORY,
+  markerCommitment,
+  IDENTITY_RECEIVE_INDEX,
+  onlySimulatedPayment,
   VERDICT_BUYER,
   VERDICT_SELLER,
   buildArbitrateSpend,
   buildCancelRequest,
   buildRefundSpend,
+  chatClosesAt,
   buildReleaseRequest,
   computeFiatAmount,
+  computeTradeFees,
   computeTradeId,
   createEscrowContract,
   decryptChatMessage,
+  derivePubkeyFromXpub,
+  derivePayoutPkhFromXpub,
   identityFromDefiXpub,
   isCompressedPubkeyHex,
+  MAX_CHAT_CIPHERTEXT_LENGTH,
+  MAX_CHAT_IMAGE_BYTES,
+  MAX_CHAT_MESSAGE_CHARS,
   matchesEscrowFunding,
+  missingFundingFees,
   pkhToCashAddress,
   pkhToLockingBytecode,
+  SIGNIN_LIFETIME_SEC,
+  signInNonce,
   signVerdict,
   toBytes,
+  tradeValueSats,
+  validateFeeRates,
   verifyDerivedPayoutPkh,
   verifyDerivedPubkey,
   verifyOfferAgainstOpReturn,
   verifyChatMessageSignature,
   verifyPaymentDetailsSignature,
+  QUOTE_MAX_CLOCK_SKEW_SEC,
   verifyPriceQuote,
+  verifySignInTransaction,
+  settlementMismatch,
   verifySignedContractSpend,
+  type FeeRates,
   type OfferDocument,
+  type SignInChallenge,
+  type TradeFee,
   type TradeTerms,
   type VerdictHex,
 } from '../protocol/index.js';
@@ -48,6 +74,7 @@ import type {
   StoredChatMessage,
   StoredOffer,
   StoredTrade,
+  TradeState,
   UserIdentityRecord,
 } from './storage.js';
 
@@ -56,10 +83,26 @@ export const FUNDING_WINDOW_SEC = 1800; // 30 minutes (protocol section 2.2)
 export const DEFAULT_REFUND_DELAY_SEC = 14 * 86_400; // 14 days (protocol section 2.2)
 export const MIN_REFUND_DELAY_SEC = 7 * 86_400;
 export const MAX_REFUND_DELAY_SEC = 30 * 86_400;
+const FEE_RATES_SETTING = 'feeRates';
+/**
+ * Spending an offer's marker closes the offer (protocol section 2.1), whoever spends it and however: the publisher's
+ * wallet may sweep it as an ordinary coin. The service looks for the marker again at most this often per offer.
+ */
+export const MARKER_RECHECK_SEC = 60;
+/** A marker this new is not looked for yet: the indexer may not list the publication transaction at once. */
+export const MARKER_GRACE_SEC = 120;
+/** At most this many transactions of a marker address are read to find the one that spent the marker. */
+export const MARKER_SPENDER_LOOKUPS = 25;
+/** At most this many closed offers without a closing txid are looked up in one marker check. */
+export const MARKER_BACKFILL_PER_SWEEP = 5;
+/** How long a listing waits for those lookups; slower ones finish in the background and count on the next listing. */
+const MARKER_CHECK_BUDGET_MS = 3000;
 
-// What the service pays for when it publishes a buy offer on the buyer's behalf (section 2.2). Identities are
-// hashes of a presented key with no proof of possession, so the limit per identity is easy to get around with a
-// fresh wallet; the daily limit across everyone is the one that bounds what the service can spend.
+/** A provider that can list an address's history (Electrum can; the offline test provider cannot). */
+type WithHistory = { performRequest: (method: string, ...params: unknown[]) => Promise<unknown> };
+
+// What the service pays for when it publishes a buy offer on the buyer's behalf (section 2.2). A fresh wallet is
+// a new identity, so the limit per identity is easy to get around; the daily limit across everyone is the one that bounds what the service can spend.
 export interface SponsorshipLimits {
   /** Paid publications in any 24 hours, across all identities. */
   dailyOffers: number;
@@ -77,6 +120,24 @@ export const DEFAULT_SPONSORSHIP_LIMITS: SponsorshipLimits = {
 /** A limit on paid publications was reached; the HTTP layer answers 429. */
 export class SponsorshipLimitError extends Error {}
 
+/** Registering these keys needs a signed sign-in challenge (protocol section 1); the HTTP layer answers 401. */
+export class SignInRequiredError extends Error {}
+
+// The offer passed every check, but the network did not accept its transaction (for example, a coin it spends
+// was just spent by another transaction). Nothing was listed.
+export class OfferBroadcastError extends Error {}
+
+// How long a session token lasts. A visitor who comes back later signs the challenge again.
+export const SESSION_LIFETIME_SEC = 30 * 86_400;
+const SESSION_TOKEN_RE = /^([0-9a-f]{64})\.([0-9]{1,12})\.([0-9a-f]{64})$/;
+
+/** A signed sign-in challenge sent back with `POST /api/identities`. */
+export interface SignInProof {
+  expiresAt: number;
+  salt: string;
+  signedTransaction: string;
+}
+
 export interface SponsorshipStatus extends SponsorshipLimits {
   usedToday: number;
   remainingToday: number;
@@ -86,13 +147,17 @@ export interface SponsorshipStatus extends SponsorshipLimits {
   openNow: number;
 }
 
+// States in which the trade is over: its chat takes messages for seven more days (chatClosesAt), then closes.
+const TRADE_ENDED_STATES: ReadonlySet<TradeState> = new Set(['Released', 'ResolvedBuyer', 'ResolvedSeller', 'Cancelled', 'Refunded', 'Dropped']);
+
 export interface DecryptedChatMessage {
   id: string;
   senderIdentity: string;
   /** Present only when the message carries a valid signature by that role's session key. */
   senderRole?: 'buyer' | 'seller';
   verified: boolean;
-  plaintext: string;
+  /** Null when the message does not decrypt with the key the party handed over; the rest of the chat still does. */
+  plaintext: string | null;
   createdAt: number;
 }
 
@@ -111,11 +176,45 @@ export interface OfferView extends Omit<StoredOffer, 'status'> {
   status: OfferStatus;
 }
 
+// The coin a settlement spends: the deposit recorded when the trade was funded, never just any coin of the right
+// value at the escrow address (anyone can send one there). Trades recorded before the outpoint was kept fall back
+// to the first coin that matches the terms.
+function escrowUtxoOf<U extends SpendableUtxo>(trade: StoredTrade, utxos: U[]): U | undefined {
+  if (trade.fundingTxid !== undefined && trade.fundingVout !== undefined) {
+    return utxos.find((u) => u.txid === trade.fundingTxid && u.vout === trade.fundingVout && matchesEscrowFunding(u, trade.terms!));
+  }
+  return utxos.find((u) => matchesEscrowFunding(u, trade.terms!));
+}
+
+// The receive extended public key must derive addresses: every payout and marker address comes from it, and an
+// identity registered with one that does not would be unusable. (verifyDerivedPayoutPkh returns false instead of
+// throwing, so it cannot check this on its own.)
+function assertReceiveXpub(receiveXpub: string): void {
+  try {
+    derivePayoutPkhFromXpub(receiveXpub.trim(), 0);
+  } catch {
+    throw new Error('receiveXpub is not a valid extended public key');
+  }
+}
+
 export class CampfireService {
   readonly arbiterPublicKeyHex: string;
+
+  /** The token category of format-2 offer markers, or null while the service accepts only format 1. */
+  get offerCategory(): string | null {
+    return this.options.offerCategory?.toLowerCase() ?? null;
+  }
   readonly sponsorshipLimits: SponsorshipLimits;
   private readonly arbiterPrivateKey: Uint8Array;
+  // Key of the sign-in challenge MACs, derived from the arbiter key so every instance shares it without new config.
+  private readonly signInSecret: Uint8Array;
+  // Key of the session token MACs, derived the same way: tokens are checked, never stored.
+  private readonly sessionSecret: Uint8Array;
   private readonly nowSeconds: () => number;
+  // When each open offer's marker was last found unspent, so listings do not ask the network every time.
+  private readonly markerCheckedAt = new Map<string, number>();
+  private markerSweep: Promise<void> | null = null;
+  private readonly spenderLookedUp = new Set<string>();
 
   constructor(
     private readonly options: {
@@ -129,6 +228,8 @@ export class CampfireService {
       // Delay between escrow lookups after broadcasting a funding transaction (the indexer may lag the mempool).
       fundingLookupDelayMs?: number;
       sponsorshipLimits?: Partial<SponsorshipLimits>;
+      // The token category of format-2 offer markers (protocol section 3.4). Without it only format 1 is accepted.
+      offerCategory?: string;
     },
   ) {
     this.arbiterPrivateKey = toBytes(options.arbiterPrivateKey, 'arbiterPrivateKey');
@@ -140,6 +241,8 @@ export class CampfireService {
       throw new Error(`Failed to derive arbiter public key: ${pub}`);
     }
     this.arbiterPublicKeyHex = binToHex(pub).toLowerCase();
+    this.signInSecret = sha256.hash(Uint8Array.from([...utf8ToBin('CMPF-SIGNIN-KEY-v1'), ...this.arbiterPrivateKey]));
+    this.sessionSecret = sha256.hash(Uint8Array.from([...utf8ToBin('CMPF-SESSION-KEY-v1'), ...this.arbiterPrivateKey]));
     this.nowSeconds = options.nowSeconds ?? (() => Math.floor(Date.now() / 1000));
     this.sponsorshipLimits = { ...DEFAULT_SPONSORSHIP_LIMITS, ...options.sponsorshipLimits };
   }
@@ -152,6 +255,11 @@ export class CampfireService {
     return this.options.demoSellerIdentity;
   }
 
+  // Coins at an address, for the balances of the service's own accounts (accounts.ts).
+  getAddressUtxos(address: string): Promise<Utxo[]> {
+    return this.options.provider.getUtxos(address);
+  }
+
   // A trade is a demo trade only when the demo seller bot is its seller; clients cannot claim it.
   isDemoTrade(trade: Pick<StoredTrade, 'sellerIdentity'>): boolean {
     return this.options.demoSellerIdentity !== undefined && trade.sellerIdentity === this.options.demoSellerIdentity;
@@ -159,29 +267,87 @@ export class CampfireService {
 
   // --- Identity & Reputation (Section 1) ---
 
-  async registerIdentity(params: {
-    defiXpub: string;
-    receiveXpub: string;
-    changeXpub?: string;
-  }): Promise<UserIdentityRecord> {
+  // A challenge for the wallet to sign with defi/0 (protocol section 1). It is bound to both keys, so the
+  // signed answer registers exactly these keys, and it expires after a few minutes.
+  createSignInChallenge(params: { defiXpub: string; receiveXpub: string }): SignInChallenge {
     const identity = identityFromDefiXpub(params.defiXpub);
-    // Validate receiveXpub (and optional changeXpub) by deriving index 0.
-    verifyDerivedPayoutPkh(params.receiveXpub, 0, new Uint8Array(20));
-    if (params.changeXpub) {
-      verifyDerivedPayoutPkh(params.changeXpub, 0, new Uint8Array(20));
-    }
+    assertReceiveXpub(params.receiveXpub);
+    const expiresAt = this.nowSeconds() + SIGNIN_LIFETIME_SEC;
+    const salt = randomBytes(16).toString('hex');
+    const nonce = signInNonce(this.signInSecret, { identity, receiveXpub: params.receiveXpub, expiresAt, salt });
+    return { nonce, expiresAt, salt };
+  }
+
+  // Every dapp a wallet connects to receives the same extended public keys, so presenting them proves nothing.
+  // Signing in takes either a signed sign-in challenge or a session token from an earlier sign-in with the same
+  // keys, so a returning visitor is not asked to sign again on the same browser. Either way the answer carries a
+  // fresh session token, which every request that acts for the identity must carry (protocol section 1).
+  // `trusted` is for the service's own demo seller, whose keys the server holds and which never uses HTTP.
+  async registerIdentity(
+    params: { defiXpub: string; receiveXpub: string; proof?: SignInProof; sessionToken?: string | null },
+    options: { trusted?: boolean } = {},
+  ): Promise<{ record: UserIdentityRecord; sessionToken?: string }> {
+    const identity = identityFromDefiXpub(params.defiXpub);
+    assertReceiveXpub(params.receiveXpub);
     const now = this.nowSeconds();
     const existing = await this.options.storage.getIdentity(identity);
+    if (!options.trusted) {
+      const unchanged = existing?.receiveXpub === params.receiveXpub.trim();
+      const resumed = unchanged && this.sessionIdentity(params.sessionToken) === identity;
+      if (params.proof || !resumed) {
+        this.checkSignInProof(identity, params);
+      }
+    }
     const record: UserIdentityRecord = {
       identity,
       defiXpub: params.defiXpub.trim(),
       receiveXpub: params.receiveXpub.trim(),
-      changeXpub: params.changeXpub?.trim(),
       createdAt: existing?.createdAt ?? now,
       updatedAt: now,
     };
     await this.options.storage.saveIdentity(record);
-    return record;
+    return options.trusted ? { record } : { record, sessionToken: this.issueSessionToken(identity) };
+  }
+
+  // A session token is `identity.expiresAt.mac`, with an HMAC by a key only the service has. It is checked by
+  // recomputing the MAC, so the service stores no sessions and every instance accepts the tokens of the others.
+  issueSessionToken(identity: string): string {
+    const expiresAt = this.nowSeconds() + SESSION_LIFETIME_SEC;
+    return `${identity}.${expiresAt}.${this.sessionMac(identity, expiresAt)}`;
+  }
+
+  /** The identity a session token was issued to, or null when it is missing, forged or expired. */
+  sessionIdentity(token: string | null | undefined): string | null {
+    const match = typeof token === 'string' ? SESSION_TOKEN_RE.exec(token.trim()) : null;
+    if (!match) return null;
+    const [, identity, expiresText, mac] = match;
+    const expiresAt = Number(expiresText);
+    if (this.nowSeconds() > expiresAt) return null;
+    const expected = Buffer.from(this.sessionMac(identity, expiresAt), 'hex');
+    const given = Buffer.from(mac, 'hex');
+    return expected.length === given.length && timingSafeEqual(expected, given) ? identity : null;
+  }
+
+  private sessionMac(identity: string, expiresAt: number): string {
+    return binToHex(hmacSha256(this.sessionSecret, utf8ToBin(`CMPF-SESSION-v1|${identity}|${expiresAt}`)));
+  }
+
+  private checkSignInProof(identity: string, params: { defiXpub: string; receiveXpub: string; proof?: SignInProof }): void {
+    const proof = params.proof;
+    if (!proof) {
+      throw new SignInRequiredError('Confirm the sign-in in your wallet to continue');
+    }
+    if (!Number.isInteger(proof.expiresAt) || typeof proof.salt !== 'string' || typeof proof.signedTransaction !== 'string') {
+      throw new Error('Invalid sign-in proof');
+    }
+    if (this.nowSeconds() > proof.expiresAt) {
+      throw new SignInRequiredError('The sign-in request expired. Connect your wallet again.');
+    }
+    const nonce = signInNonce(this.signInSecret, { identity, receiveXpub: params.receiveXpub, expiresAt: proof.expiresAt, salt: proof.salt });
+    const verdict = verifySignInTransaction(proof.signedTransaction, { nonce, defiPubkey: derivePubkeyFromXpub(params.defiXpub, 0) });
+    if (verdict !== true) {
+      throw new SignInRequiredError(verdict);
+    }
   }
 
   async getIdentityRecord(identity: string): Promise<UserIdentityRecord | null> {
@@ -243,10 +409,21 @@ export class CampfireService {
     offerJson: string;
     offerTxHex: string;
     markerReceiveIndex: number;
-    broadcast?: boolean;
     // Set only by the service's own paid publication of a buy offer, never from a request.
     sponsored?: boolean;
   }): Promise<OfferView> {
+    // Every listed offer is broadcast by the service itself, so a listing always matches a transaction the network
+    // has seen. An offer transaction that is already listed is returned as it is: publishing it again (a retry after
+    // a lost answer) must never overwrite the record, which would reopen an offer that was closed.
+    const offerTxid = hashTransaction(hexToBin(params.offerTxHex));
+    const known = await this.options.storage.getOffer(offerTxid);
+    if (known) {
+      if (known.sellerIdentity !== params.sellerIdentity) {
+        throw new Error('This offer transaction is already listed for another identity');
+      }
+      return this.toOfferView(known);
+    }
+
     const seller = await this.options.storage.getIdentity(params.sellerIdentity);
     if (!seller) {
       throw new Error('Seller identity is not registered');
@@ -282,18 +459,43 @@ export class CampfireService {
       throw new Error('Offer marker output does not belong to the seller receive path at the stated index');
     }
 
+    // Format 2: the marker is an NFT of the Campfire offer category tied to this offer (section 3.4). The minter
+    // covenant enforces the same rules on-chain; the service checks them again so that a marker of another category,
+    // or one minted for another offer, is never listed.
+    const nft = verified.onChain.version === FORMAT_VERSION_NFT;
+    if (nft) {
+      const category = this.options.offerCategory?.toLowerCase();
+      if (!category) {
+        throw new Error('This service does not accept NFT-marker offers yet');
+      }
+      const token = markerOut.token;
+      if (!token || binToHex(token.category) !== category || token.amount !== 0n || token.nft?.capability !== 'none') {
+        throw new Error('Offer marker output 1 must hold an immutable NFT of the Campfire offer category');
+      }
+      if (binToHex(token.nft.commitment) !== markerCommitment(verified.document.side, verified.contentHash)) {
+        throw new Error('Offer marker NFT commitment does not match the offer side and hash');
+      }
+      // Every NFT marker goes to the publisher's identity address, so that all of their offers are linked.
+      if (params.markerReceiveIndex !== IDENTITY_RECEIVE_INDEX) {
+        throw new Error('An NFT offer marker must go to the publisher identity address (receive/0)');
+      }
+    } else if (markerOut.token) {
+      throw new Error('A format-1 offer marker must not carry tokens');
+    }
+
     // Checked before broadcasting, so the publisher never pays for an offer the service then refuses to list.
     if (this.nowSeconds() >= verified.document.expiresAt) {
       throw new Error('Offer expiresAt is already in the past');
     }
 
-    let offerTxid: string;
-    if (params.broadcast ?? true) {
-      offerTxid = await this.options.provider.sendRawTransaction(params.offerTxHex);
-    } else {
-      // Double SHA-256 reversed txid
-      const hash = sha256.hash(sha256.hash(hexToBin(params.offerTxHex)));
-      offerTxid = binToHex(Uint8Array.from([...hash].reverse()));
+    let broadcastTxid: string;
+    try {
+      broadcastTxid = await this.options.provider.sendRawTransaction(params.offerTxHex);
+    } catch (err) {
+      throw new OfferBroadcastError(`The network refused the offer transaction: ${err instanceof Error ? err.message : String(err)}`);
+    }
+    if (broadcastTxid.toLowerCase() !== offerTxid) {
+      throw new Error('The network returned another txid for the offer transaction');
     }
 
     const now = this.nowSeconds();
@@ -305,8 +507,9 @@ export class CampfireService {
       document: verified.document,
       onChain: verified.onChain,
       markerVout: 1,
-      markerAddress: pkhToCashAddress(markerPkhHex),
+      markerAddress: pkhToCashAddress(markerPkhHex, { tokenAware: nft }),
       markerReceiveIndex: params.markerReceiveIndex,
+      ...(nft ? { markerCategory: this.options.offerCategory!.toLowerCase() } : {}),
       status: 'Published',
       isDemo: this.isDemoTrade({ sellerIdentity: params.sellerIdentity }),
       ...(params.sponsored ? { sponsored: true } : {}),
@@ -398,17 +601,22 @@ export class CampfireService {
 
     let closeTxid: string | undefined;
     if (params.closeTxHex) {
+      // A transaction that spends the marker closes the offer once the network takes it, so its txid is recorded
+      // right away: the indexer may list the spent marker only seconds later.
+      if (!this.spendsMarker(params.closeTxHex, offer)) {
+        throw new Error('Close transaction does not spend the offer marker');
+      }
       closeTxid = await this.options.provider.sendRawTransaction(params.closeTxHex);
-    }
-
-    // Verify on-chain that the marker UTXO is no longer unspent.
-    const utxos = await this.options.provider.getUtxos(offer.markerAddress);
-
-    const markerStillUnspent = utxos.some(
-      (u) => u.txid === offer.offerTxid && u.vout === offer.markerVout,
-    );
-    if (markerStillUnspent) {
-      throw new Error('Offer marker output is still unspent on-chain');
+    } else {
+      // Without a transaction, verify on-chain that the marker UTXO is no longer unspent.
+      const utxos = await this.options.provider.getUtxos(offer.markerAddress);
+      const markerStillUnspent = utxos.some(
+        (u) => u.txid === offer.offerTxid && u.vout === offer.markerVout,
+      );
+      if (markerStillUnspent) {
+        throw new Error('Offer marker output is still unspent on-chain');
+      }
+      closeTxid = await this.findMarkerSpender(offer);
     }
 
     offer.status = 'Closed';
@@ -416,6 +624,40 @@ export class CampfireService {
     offer.updatedAt = this.nowSeconds();
     await this.options.storage.saveOffer(offer);
     return this.toOfferView(offer);
+  }
+
+  private spendsMarker(txHex: string, offer: Pick<StoredOffer, 'offerTxid' | 'markerVout'>): boolean {
+    try {
+      return decodeTransactionUnsafe(hexToBin(txHex)).inputs.some(
+        (i) => binToHex(i.outpointTransactionHash) === offer.offerTxid && i.outpointIndex === offer.markerVout,
+      );
+    } catch {
+      return false;
+    }
+  }
+
+  /**
+   * The txid of the transaction that spent the offer's marker, read from the marker address's history; undefined
+   * when the provider keeps no history or the lookup fails. Only the transactions after the offer's are read, the
+   * newest first, at most MARKER_SPENDER_LOOKUPS of them.
+   */
+  private async findMarkerSpender(offer: Pick<StoredOffer, 'offerTxid' | 'markerAddress' | 'markerVout'>): Promise<string | undefined> {
+    const provider = this.options.provider as NetworkProvider & Partial<WithHistory>;
+    if (typeof provider.performRequest !== 'function') return undefined;
+    try {
+      const history = await provider.performRequest('blockchain.address.get_history', offer.markerAddress);
+      if (!Array.isArray(history)) return undefined;
+      const txids = (history as { tx_hash?: unknown }[])
+        .map((h) => h.tx_hash)
+        .filter((h): h is string => typeof h === 'string');
+      const after = txids.slice(txids.indexOf(offer.offerTxid) + 1).reverse().slice(0, MARKER_SPENDER_LOOKUPS);
+      for (const txid of after) {
+        if (this.spendsMarker(await provider.getRawTransaction(txid), offer)) return txid;
+      }
+    } catch {
+      // A missing link is better than a failed close.
+    }
+    return undefined;
   }
 
   async getOffer(offerTxid: string): Promise<OfferView | null> {
@@ -429,7 +671,81 @@ export class CampfireService {
     return offer ? offer.offerJson : null;
   }
 
+  /**
+   * Null when the lookup failed: an unreachable indexer must never close an offer. Grouped by address, so each
+   * address is asked once however many offers it holds.
+   */
+  private async spentMarkers(offers: Pick<StoredOffer, 'offerTxid' | 'markerAddress' | 'markerVout'>[]): Promise<Set<string> | null> {
+    const spent = new Set<string>();
+    try {
+      const byAddress = new Map<string, typeof offers>();
+      for (const o of offers) byAddress.set(o.markerAddress, [...(byAddress.get(o.markerAddress) ?? []), o]);
+      await Promise.all(
+        [...byAddress].map(async ([address, group]) => {
+          const utxos = await this.options.provider.getUtxos(address);
+          for (const o of group) {
+            if (!utxos.some((u) => u.txid === o.offerTxid && u.vout === o.markerVout)) spent.add(o.offerTxid);
+          }
+        }),
+      );
+    } catch {
+      return null;
+    }
+    return spent;
+  }
+
+  /** Records as closed the offers whose marker is gone, among those not looked at for a while. */
+  private async closeOffersWithSpentMarkers(): Promise<void> {
+    const now = this.nowSeconds();
+    const offers = await this.options.storage.listOffers();
+    // Offers closed before their closing txid was recorded get it filled in, each tried once per process.
+    const unlinked = offers
+      .filter((o) => o.status === 'Closed' && o.markerAddress && !o.closeTxid && !this.spenderLookedUp.has(o.offerTxid))
+      .slice(0, MARKER_BACKFILL_PER_SWEEP);
+    for (const offer of unlinked) {
+      this.spenderLookedUp.add(offer.offerTxid);
+      const closeTxid = await this.findMarkerSpender(offer);
+      if (closeTxid) await this.options.storage.saveOffer({ ...offer, closeTxid });
+    }
+    const due = offers.filter(
+      (o) =>
+        o.status !== 'Closed' &&
+        o.markerAddress &&
+        now - o.createdAt >= MARKER_GRACE_SEC &&
+        now - (this.markerCheckedAt.get(o.offerTxid) ?? 0) >= MARKER_RECHECK_SEC,
+    );
+    if (due.length === 0) return;
+    const spent = await this.spentMarkers(due);
+    if (!spent) return;
+    for (const offer of due) {
+      if (!spent.has(offer.offerTxid)) {
+        this.markerCheckedAt.set(offer.offerTxid, now);
+        continue;
+      }
+      this.markerCheckedAt.delete(offer.offerTxid);
+      offer.status = 'Closed';
+      offer.closeTxid = await this.findMarkerSpender(offer);
+      offer.updatedAt = now;
+      await this.options.storage.saveOffer(offer);
+    }
+  }
+
+  /** Runs the marker check, joined if one is under way, and waits for it at most the listing's budget. */
+  private async refreshOfferMarkers(): Promise<void> {
+    if (!this.markerSweep) {
+      this.markerSweep = this.closeOffersWithSpentMarkers()
+        .catch(() => undefined)
+        .finally(() => {
+          this.markerSweep = null;
+        });
+    }
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    await Promise.race([this.markerSweep, new Promise<void>((r) => (timer = setTimeout(r, MARKER_CHECK_BUDGET_MS)))]);
+    clearTimeout(timer);
+  }
+
   async listOffers(options?: { onlyOpen?: boolean }): Promise<OfferView[]> {
+    await this.refreshOfferMarkers();
     const all = await this.options.storage.listOffers();
     const views = all.map((o) => this.toOfferView(o));
     if (options?.onlyOpen) {
@@ -459,6 +775,7 @@ export class CampfireService {
     // The shared trade key is only visible to the arbiter in a dispute (section 6).
     if (!isArbiter) {
       delete copy.sharedTradeKeyHex;
+      delete copy.disputeKeys;
       delete copy.pendingFundingTxHex;
     }
     return copy;
@@ -525,7 +842,7 @@ export class CampfireService {
     try {
       const contract = createEscrowContract(trade.terms, trade.tradeId, this.options.provider);
       const utxos = await contract.getUtxos();
-      const escrowUtxo = utxos.find((u) => matchesEscrowFunding(u, trade.terms!));
+      const escrowUtxo = escrowUtxoOf(trade, utxos);
       if (!escrowUtxo) {
         return undefined;
       }
@@ -568,14 +885,58 @@ export class CampfireService {
     }
   }
 
+  // --- Service fees (protocol section 5.1) ---
+
+  async getFeeRates(): Promise<FeeRates> {
+    const stored = await this.options.storage.getSetting<FeeRates>(FEE_RATES_SETTING);
+    return stored ? { arbiterBps: stored.arbiterBps, oracleBps: stored.oracleBps } : { ...DEFAULT_FEE_RATES };
+  }
+
+  // Only new trades use the new rates: a trade keeps the fees fixed when it was requested.
+  async setFeeRates(rates: FeeRates): Promise<FeeRates> {
+    const next = { arbiterBps: rates?.arbiterBps, oracleBps: rates?.oracleBps };
+    validateFeeRates(next);
+    await this.options.storage.saveSetting(FEE_RATES_SETTING, { ...next, updatedAt: this.nowSeconds() });
+    return next;
+  }
+
+  // The oracle is paid only when the offer floats with the market, so it signed the trade's price. Public so the
+  // demo seller can count the fees before it takes a buy offer, or before a trade it might fund.
+  async feesFor(
+    doc: Pick<OfferDocument, 'asset' | 'assetDecimals' | 'arbiter' | 'oracle'> & { price: Pick<OfferDocument['price'], 'type'> },
+    amount: string,
+  ): Promise<TradeFee[]> {
+    const rates = await this.getFeeRates();
+    const oraclePk = doc.price.type === 'floating' ? doc.oracle?.toLowerCase() : undefined;
+    if (rates.arbiterBps === 0 && (rates.oracleBps === 0 || !oraclePk)) return [];
+    const isPusd = doc.asset.toLowerCase() === PUSD_CATEGORY;
+    const bchUsd = isPusd ? (await this.options.oracle.createQuote('BCH/USD')).price : undefined;
+    const valueSats = tradeValueSats({ asset: doc.asset, amount, assetDecimals: doc.assetDecimals, bchUsd });
+    return computeTradeFees({ valueSats, rates, arbiterPk: doc.arbiter.toLowerCase(), oraclePk });
+  }
+
   // The open offer a trade is requested from, with the amount checked against its range.
-  private async offerToTake(offerTxid: string, side: 'sell' | 'buy', amount: string): Promise<OfferView> {
+  private async offerToTake(offerTxid: string, side: 'sell' | 'buy', amount: string, takerIdentity: string): Promise<OfferView> {
     const offerView = await this.getOffer(offerTxid);
     if (!offerView) {
       throw new Error('Offer not found');
     }
+    // The page hides the button on one's own offer, but another tab or a direct request would get past it. Checked
+    // here too: a trade with oneself would count twice towards reputation without anyone else taking part.
+    if (offerView.sellerIdentity === takerIdentity) {
+      throw new Error('This is your own offer: someone else has to take it');
+    }
     if (offerView.status !== 'Published') {
       throw new Error(`Offer is not open (status: ${offerView.status})`);
+    }
+    // A listing may be up to a minute old: the marker is looked for once more before anyone commits to a trade.
+    if (offerView.markerAddress && this.nowSeconds() - offerView.createdAt >= MARKER_GRACE_SEC) {
+      const spent = await this.spentMarkers([offerView]);
+      if (spent?.has(offerTxid)) {
+        const stored = await this.options.storage.getOffer(offerTxid);
+        if (stored) await this.options.storage.saveOffer({ ...stored, status: 'Closed', updatedAt: this.nowSeconds() });
+        throw new Error('Offer is not open (status: Closed)');
+      }
     }
     if (offerView.document.side !== side) {
       throw new Error(
@@ -622,7 +983,7 @@ export class CampfireService {
     buyerReceiveIndex: number;
     buyerSessionPk: string;
   }): Promise<StoredTrade> {
-    const offerView = await this.offerToTake(params.offerTxid, 'sell', params.amount);
+    const offerView = await this.offerToTake(params.offerTxid, 'sell', params.amount, params.buyerIdentity);
     await this.verifyParty('buyer', {
       identity: params.buyerIdentity,
       pk: params.buyerPk,
@@ -653,6 +1014,7 @@ export class CampfireService {
       buyerSessionPk: params.buyerSessionPk.toLowerCase(),
       arbiterPk: doc.arbiter.toLowerCase(),
       oraclePk: doc.oracle?.toLowerCase(),
+      fees: await this.feesFor(doc, params.amount),
       isDemo: this.isDemoTrade({ sellerIdentity: offerView.sellerIdentity }),
       createdAt: now,
       updatedAt: now,
@@ -676,7 +1038,11 @@ export class CampfireService {
     // Only for the service's own demo seller, which derives its session key from the record id.
     recordId?: string;
   }): Promise<StoredTrade> {
-    const offerView = await this.offerToTake(params.offerTxid, 'buy', params.amount);
+    const offerView = await this.offerToTake(params.offerTxid, 'buy', params.amount, params.sellerIdentity);
+    // A buyer who asked for a demo answer pays in simulated fiat: a real seller would lock real coins for nothing.
+    if (onlySimulatedPayment(offerView.document.paymentMethods) && !this.isDemoTrade({ sellerIdentity: params.sellerIdentity })) {
+      throw new Error('Only the demo seller answers this offer: its fiat payment is simulated');
+    }
     await this.verifyParty('seller', {
       identity: params.sellerIdentity,
       pk: params.sellerPk,
@@ -708,6 +1074,7 @@ export class CampfireService {
       sellerSessionPk: params.sellerSessionPk.toLowerCase(),
       arbiterPk: doc.arbiter.toLowerCase(),
       oraclePk: doc.oracle?.toLowerCase(),
+      fees: await this.feesFor(doc, params.amount),
       isDemo: this.isDemoTrade({ sellerIdentity: params.sellerIdentity }),
       createdAt: now,
       updatedAt: now,
@@ -756,6 +1123,7 @@ export class CampfireService {
       buyerSessionPk: buyer.sessionPk.toLowerCase(),
       refundTime,
       nonce,
+      ...(trade.fees && trade.fees.length > 0 ? { fees: trade.fees } : {}),
     };
 
     const termsJson = JSON.stringify(terms);
@@ -914,6 +1282,30 @@ export class CampfireService {
     return this.sanitizeTrade(trade, params.identity);
   }
 
+  // The one who asked takes the request back before it is accepted: the buyer on a sell offer, the seller on a buy
+  // offer. Nothing is on-chain yet, so the trade simply ends, as when the publisher declines.
+  async withdrawRequest(params: {
+    tradeRecordId: string;
+    identity: string;
+  }): Promise<StoredTrade> {
+    const trade = await this.options.storage.getTrade(params.tradeRecordId);
+    if (!trade) {
+      throw new Error('Trade not found');
+    }
+    const requester = trade.side === 'buy' ? trade.sellerIdentity : trade.buyerIdentity;
+    if (requester !== params.identity) {
+      throw new Error('Only the person who sent this request can withdraw it');
+    }
+    if (trade.status !== 'Requested') {
+      throw new Error(`Cannot withdraw a request for a trade in state "${trade.status}"`);
+    }
+    trade.status = 'Dropped';
+    trade.withdrawnAt = this.nowSeconds();
+    trade.updatedAt = trade.withdrawnAt;
+    await this.options.storage.saveTrade(trade);
+    return this.sanitizeTrade(trade, params.identity);
+  }
+
   // Stores the signed funding transaction before it is broadcast, so any later attempt (from this
   // or another server instance) rebroadcasts the same transaction instead of funding twice.
   async recordFundingAttempt(tradeRecordId: string, fundingTxHex: string): Promise<void> {
@@ -929,10 +1321,12 @@ export class CampfireService {
     await this.options.storage.saveTrade(trade);
   }
 
+  // Nothing here takes the caller's word for the chain: the deposit is looked up at the escrow address, and how many
+  // confirmations it has is not accepted from the request. A client that said "1 confirmation" turned off the buyer's
+  // double-spend watch.
   async confirmFunding(params: {
     idOrTradeId: string;
     fundingTxHex?: string;
-    confirmations?: number;
     // Buy offers: the seller sends the payment details, encrypted for the buyer and signed with the seller's
     // session key, along with the deposit.
     encryptedPaymentDetails?: string;
@@ -949,10 +1343,25 @@ export class CampfireService {
     if (!trade.terms || !trade.tradeId) {
       throw new Error('Trade terms are incomplete');
     }
+    // The txid of the deposit sent with this request, so the escrow coin that counts is the one it created.
+    let sentTxid: string | undefined;
+    if (params.fundingTxHex) {
+      try {
+        sentTxid = hashTransaction(hexToBin(params.fundingTxHex));
+      } catch {
+        throw new Error('The funding transaction could not be read');
+      }
+    }
+    if (sentTxid && trade.status === 'Funded') {
+      // Once funded, the deposit is the one already recorded. The same one again is a retry after a lost answer;
+      // any other would only be broadcast for nothing or, worse, be taken for the deposit.
+      if (sentTxid !== trade.fundingTxid) throw new Error('The deposit for this trade is already recorded');
+      return this.sanitizeTrade(trade);
+    }
 
     // The payment details of a buy offer travel with the deposit. Every check on them comes before anything
     // is broadcast, so a rejected request never leaves a deposit on the network without details to go with it.
-    // Identities are not proven (section 1), and the buyer can encrypt with the same key as the seller, so only the
+    // The arbiter cannot take the service's word for who wrote them, and the buyer can encrypt with the same key as the seller, so only the
     // signature by the seller's session key, committed in the terms, shows that the seller wrote them. Without it the
     // buyer could swap in an account of their own and show it to an arbiter as the one they paid.
     const details = params.encryptedPaymentDetails?.trim();
@@ -973,6 +1382,16 @@ export class CampfireService {
       throw new Error('The seller must send the encrypted payment details with the deposit');
     }
 
+    // The fees travel in the same transaction as the escrow output (section 5.1). A deposit without them is refused
+    // before it is broadcast: once on the network, the escrow would stay locked until the refund time.
+    const fees = trade.status === 'Accepted' ? trade.terms.fees : undefined;
+    if (params.fundingTxHex && fees && fees.length > 0) {
+      const problem = missingFundingFees(params.fundingTxHex, fees);
+      if (problem) {
+        throw new Error(`${problem}. Nothing was broadcast.`);
+      }
+    }
+
     if (params.fundingTxHex) {
       await this.options.provider.sendRawTransaction(params.fundingTxHex);
     }
@@ -987,10 +1406,23 @@ export class CampfireService {
         await new Promise((resolve) => setTimeout(resolve, delayMs));
       }
       const utxos = await contract.getUtxos();
-      matchingUtxo = utxos.find((u) => matchesEscrowFunding(u, trade.terms!));
+      // With a deposit in this request, only its own output counts: another coin at the address would not have paid
+      // the fees that were checked above.
+      matchingUtxo = utxos.find((u) => matchesEscrowFunding(u, trade.terms!) && (sentTxid === undefined || u.txid === sentTxid));
     }
     if (!matchingUtxo) {
-      throw new Error('No UTXO at the escrow address matches the required value and token terms');
+      throw new Error(
+        sentTxid
+          ? 'The funding transaction does not create an escrow output with the required value and token terms'
+          : 'No UTXO at the escrow address matches the required value and token terms',
+      );
+    }
+    if (!params.fundingTxHex && fees && fees.length > 0) {
+      // A deposit made outside this request: the transaction that created the escrow output must pay the fees too.
+      const problem = missingFundingFees(await this.options.provider.getRawTransaction(matchingUtxo.txid), fees);
+      if (problem) {
+        throw new Error(`${problem}. The trade is not counted as funded.`);
+      }
     }
     if (needsDetails) {
       // The deposit is already on the network (it was not sent through this request): the seller sends the
@@ -1012,8 +1444,8 @@ export class CampfireService {
       trade.fundingVout = matchingUtxo.vout;
       trade.fundedAt = now;
       trade.paymentDeadline = now + paymentWindowSec;
+      trade.fundingConfirmations = 0;
     }
-    trade.fundingConfirmations = params.confirmations ?? trade.fundingConfirmations ?? 0;
     trade.updatedAt = now;
 
     await this.options.storage.saveTrade(trade);
@@ -1061,17 +1493,26 @@ export class CampfireService {
       throw new Error(`Cannot open a dispute when trade is in state "${trade.status}"`);
     }
     const now = this.nowSeconds();
-    trade.status = 'Disputed';
-    trade.disputedBy = trade.buyerIdentity === params.callerIdentity ? 'buyer' : 'seller';
-    if (params.reason) {
-      trade.disputeReason = params.reason;
+    // Opening a dispute again (the other party, or a retry) never rewrites who opened it or why: the arbiter reads
+    // the opener's account as the opener wrote it.
+    if (trade.status !== 'Disputed') {
+      trade.status = 'Disputed';
+      trade.disputedBy = trade.buyerIdentity === params.callerIdentity ? 'buyer' : 'seller';
+      if (params.reason) {
+        trade.disputeReason = params.reason;
+      }
     }
     if (params.sharedTradeKeyHex) {
       const keyBytes = toBytes(params.sharedTradeKeyHex, 'sharedTradeKeyHex');
       if (keyBytes.length !== 32) {
         throw new Error('sharedTradeKeyHex must be a 32-byte key in hex');
       }
-      trade.sharedTradeKeyHex = binToHex(keyBytes);
+      // Each party fills only its own slot, so neither can replace the key the other handed over. Both parties
+      // derive the same key, and the arbiter tries every key it holds (see decryptDisputedChatForArbiter).
+      const offered = binToHex(keyBytes);
+      const role = trade.buyerIdentity === params.callerIdentity ? 'buyer' : 'seller';
+      trade.disputeKeys = { ...trade.disputeKeys, [role]: offered };
+      trade.sharedTradeKeyHex = trade.sharedTradeKeyHex ?? offered;
     }
     trade.disputedAt = trade.disputedAt ?? now;
     trade.updatedAt = now;
@@ -1100,6 +1541,9 @@ export class CampfireService {
       if (!verifyPriceQuote(trade.terms.quote, trade.terms.oraclePk)) {
         throw new Error('Trade quote failed oracle signature verification');
       }
+      if (trade.terms.quote.timestamp > this.nowSeconds() + QUOTE_MAX_CLOCK_SKEW_SEC) {
+        throw new Error('Trade quote is dated in the future');
+      }
     }
 
     const sig = signVerdict(this.arbiterPrivateKey, trade.tradeId, params.verdict);
@@ -1112,7 +1556,7 @@ export class CampfireService {
     if (params.broadcastOnChain ?? true) {
       const contract = createEscrowContract(trade.terms, trade.tradeId, this.options.provider);
       const utxos = await contract.getUtxos();
-      const escrowUtxo = utxos.find((u) => matchesEscrowFunding(u, trade.terms!));
+      const escrowUtxo = escrowUtxoOf(trade, utxos);
       if (!escrowUtxo) {
         throw new Error('Escrow UTXO not found on-chain for arbitrate broadcast');
       }
@@ -1158,7 +1602,7 @@ export class CampfireService {
 
     const contract = createEscrowContract(trade.terms, trade.tradeId, this.options.provider);
     const utxos = await contract.getUtxos();
-    const escrowUtxo = utxos.find((u) => matchesEscrowFunding(u, trade.terms!));
+    const escrowUtxo = escrowUtxoOf(trade, utxos);
     if (!escrowUtxo) {
       throw new Error('Escrow UTXO is not available on-chain');
     }
@@ -1176,6 +1620,10 @@ export class CampfireService {
         buyerPayoutPkh: trade.terms.buyerPayoutPkh,
         sellerDefiIndex: trade.sellerDefiIndex ?? 0,
       });
+      const mismatch = settlementMismatch(params.signedTxHex, expected.unsignedHex);
+      if (mismatch) {
+        throw new Error(`Signed release transaction rejected: ${mismatch}`);
+      }
       const check = verifySignedContractSpend(params.signedTxHex, expected.sourceOutputs);
       if (!check.valid) {
         throw new Error(`Signed release transaction failed VM verification: ${check.error}`);
@@ -1192,6 +1640,10 @@ export class CampfireService {
         sellerPayoutPkh: trade.terms.sellerPayoutPkh,
         buyerDefiIndex: trade.buyerDefiIndex ?? 0,
       });
+      const mismatch = settlementMismatch(params.signedTxHex, expected.unsignedHex);
+      if (mismatch) {
+        throw new Error(`Signed cancel transaction rejected: ${mismatch}`);
+      }
       const check = verifySignedContractSpend(params.signedTxHex, expected.sourceOutputs);
       if (!check.valid) {
         throw new Error(`Signed cancel transaction failed VM verification: ${check.error}`);
@@ -1258,8 +1710,8 @@ export class CampfireService {
 
   // --- Encrypted Chat (Section 6) ---
 
-  // A message counts only with a signature by the sender's session key, committed in the trade terms. Identities are
-  // not proven (section 1) and both parties share the chat key, so without it one party could post messages in the
+  // A message counts only with a signature by the sender's session key, committed in the trade terms. The arbiter
+  // cannot take the service's word for who wrote what, and both parties share the chat key, so without it one party could post messages in the
   // other's name, such as "payment received", and show them to the arbiter.
   async postChatMessage(params: {
     idOrTradeId: string;
@@ -1277,11 +1729,18 @@ export class CampfireService {
     ) {
       throw new Error('Only trade participants can post chat messages');
     }
-    if (!params.ciphertext || !params.ciphertext.includes(':')) {
+    if (typeof params.ciphertext !== 'string' || !params.ciphertext.includes(':')) {
       throw new Error('Chat message must be an encrypted AES-GCM payload');
+    }
+    if (params.ciphertext.length > MAX_CHAT_CIPHERTEXT_LENGTH) {
+      throw new Error(`Chat messages can be at most ${MAX_CHAT_MESSAGE_CHARS} characters long, and images at most ${MAX_CHAT_IMAGE_BYTES / 1000} KB`);
     }
     if (!trade.tradeId || !trade.buyerSessionPk || !trade.sellerSessionPk) {
       throw new Error('The chat opens once the trade is accepted');
+    }
+    // A finished trade keeps its chat open for seven days, then as a record that takes nothing new.
+    if (TRADE_ENDED_STATES.has(trade.status) && this.nowSeconds() >= chatClosesAt(trade)) {
+      throw new Error('The chat closed seven days after the trade ended');
     }
     // The role whose session key signed it; a person trading with themselves holds both roles.
     const roles: ('buyer' | 'seller')[] = [];
@@ -1319,29 +1778,43 @@ export class CampfireService {
     return msg;
   }
 
-  async listChatMessages(idOrTradeId: string): Promise<StoredChatMessage[]> {
+  // `sinceSeconds`: only messages created at or after it, so a client that polls asks for what is new.
+  async listChatMessages(idOrTradeId: string, sinceSeconds?: number): Promise<StoredChatMessage[]> {
     const trade = await this.options.storage.getTrade(idOrTradeId);
     if (!trade) {
       throw new Error('Trade not found');
     }
-    return this.options.storage.listChatMessages(trade.id);
+    return this.options.storage.listChatMessages(trade.id, sinceSeconds);
   }
 
-  // In a dispute where a party handed over `sharedTradeKeyHex`, the arbiter can decrypt the chat log.
+  // In a dispute where a party handed over its trade key, the arbiter can decrypt the chat log.
   async decryptDisputedChatForArbiter(
     idOrTradeId: string,
+    sinceSeconds?: number,
   ): Promise<DecryptedChatMessage[]> {
     const trade = await this.options.storage.getTrade(idOrTradeId);
     if (!trade) {
       throw new Error('Trade not found');
     }
-    if (!trade.sharedTradeKeyHex) {
+    // Every key a party handed over is tried, so a wrong key from one party cannot hide the chat.
+    const keys = [...new Set([trade.sharedTradeKeyHex, trade.disputeKeys?.buyer, trade.disputeKeys?.seller].filter((k): k is string => !!k))];
+    if (keys.length === 0) {
       throw new Error('No shared trade key has been handed to the arbiter for this trade');
     }
-    const messages = await this.options.storage.listChatMessages(trade.id);
+    const messages = await this.options.storage.listChatMessages(trade.id, sinceSeconds);
     const decrypted: DecryptedChatMessage[] = [];
     for (const m of messages) {
-      const plaintext = await decryptChatMessage(trade.sharedTradeKeyHex, m.ciphertext);
+      // One message that does not decrypt (a party can post a signed message encrypted with another key) must not
+      // hide the rest of the chat from the arbiter: it is returned as unreadable, with its author and signature.
+      let plaintext: string | null = null;
+      for (const key of keys) {
+        try {
+          plaintext = await decryptChatMessage(key, m.ciphertext);
+          break;
+        } catch {
+          // Not encrypted with this key: try the next one.
+        }
+      }
       // Checked again here so the arbiter never relies on what was stored: a message counts as written by a role
       // only if that role's session key signed it.
       const sessionPk = m.senderRole === 'buyer' ? trade.buyerSessionPk : m.senderRole === 'seller' ? trade.sellerSessionPk : undefined;

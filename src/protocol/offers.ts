@@ -25,6 +25,9 @@ import {
 
 export const PROTOCOL_IDENTIFIER = 'CMPF';
 export const FORMAT_VERSION = 1;
+// On-chain format 2: the same offer JSON (still `v: 1`), with an NFT marker instead of a 1,000-sat one (section 3.4).
+export const FORMAT_VERSION_NFT = 2;
+export type OnChainFormatVersion = typeof FORMAT_VERSION | typeof FORMAT_VERSION_NFT;
 export const MESSAGE_TYPE_OFFER = 1;
 export const MARKER_SATOSHIS = 1000n;
 export const OP_RETURN_MAX_BYTES = 223;
@@ -33,6 +36,19 @@ export const BCH_ASSET = 'BCH';
 export const BCH_DECIMALS = 8;
 export const PUSD_CATEGORY = '2469acc5afa4b10cb5b5c04afb89c3a3ffd61c5da9c01e26d00951cae2a02544';
 export const PUSD_DECIMALS = 2;
+
+/** The demo's payment method: the fiat payment is simulated, and only the service's demo seller answers it. */
+export const SIMULATED_PAYMENT_METHOD = 'simulated';
+
+/** The offer names the simulated payment, alone or next to real methods. */
+export function namesSimulatedPayment(methods: readonly string[]): boolean {
+  return methods.includes(SIMULATED_PAYMENT_METHOD);
+}
+
+/** The offer can only be paid in simulated fiat: a real counterparty would trade real coins for nothing. */
+export function onlySimulatedPayment(methods: readonly string[]): boolean {
+  return methods.length > 0 && methods.every((m) => m === SIMULATED_PAYMENT_METHOD);
+}
 
 export const ZERO_PUBKEY_HEX = '00'.repeat(33);
 export const MIN_UNIX_TIMESTAMP = 500_000_000;
@@ -63,7 +79,7 @@ export interface OfferDocument {
 }
 
 export interface OfferOnChainRecord {
-  version: 1;
+  version: OnChainFormatVersion;
   messageType: 1;
   arbiterPk: string;
   oraclePk: string | null;
@@ -190,6 +206,7 @@ export function encodeOfferOpReturn(params: {
   arbiterPk: Uint8Array | string;
   oraclePk?: Uint8Array | string | null;
   contentHash: Uint8Array | string;
+  version?: OnChainFormatVersion;
 }): Uint8Array {
   const arbiterHex = binToHex(toBytes(params.arbiterPk, 'arbiterPk'));
   if (!isCompressedPubkeyHex(arbiterHex)) {
@@ -218,7 +235,7 @@ export function encodeOfferOpReturn(params: {
 
   const pushes = [
     utf8ToBin(PROTOCOL_IDENTIFIER),
-    Uint8Array.from([FORMAT_VERSION]),
+    Uint8Array.from([params.version ?? FORMAT_VERSION]),
     Uint8Array.from([MESSAGE_TYPE_OFFER]),
     arbiterBytes,
     oracleBytes,
@@ -263,7 +280,7 @@ export function decodeOfferOpReturn(bytecode: Uint8Array | string): OfferOnChain
     throw new Error(`Unexpected protocol identifier: "${protocolId}"`);
   }
   const versionBytes = extractPushBytes(verInst);
-  if (versionBytes.length !== 1 || versionBytes[0] !== FORMAT_VERSION) {
+  if (versionBytes.length !== 1 || (versionBytes[0] !== FORMAT_VERSION && versionBytes[0] !== FORMAT_VERSION_NFT)) {
     throw new Error(`Unsupported on-chain format version`);
   }
   const typeBytes = extractPushBytes(typeInst);
@@ -292,7 +309,7 @@ export function decodeOfferOpReturn(bytecode: Uint8Array | string): OfferOnChain
   }
 
   return {
-    version: FORMAT_VERSION,
+    version: versionBytes[0] as OnChainFormatVersion,
     messageType: MESSAGE_TYPE_OFFER,
     arbiterPk: arbiterHex,
     oraclePk,
@@ -322,7 +339,8 @@ export function verifyOfferAgainstOpReturn(
   const document = parsed as OfferDocument;
   validateOfferDocument(document);
 
-  if (document.v !== onChain.version) {
+  // Both on-chain formats carry the version-1 JSON; format 2 changes only the marker.
+  if (document.v !== FORMAT_VERSION) {
     throw new Error('Offer JSON version does not match on-chain version');
   }
   if (document.arbiter.toLowerCase() !== onChain.arbiterPk) {

@@ -3,13 +3,16 @@ import { Shell } from './components/Shell';
 import { About } from './pages/About';
 import { Arbiter } from './pages/Arbiter';
 import { ArbiterList } from './pages/ArbiterList';
+import { Chats } from './pages/Chats';
 import { CreateOffer } from './pages/CreateOffer';
 import { DevComponents } from './pages/DevComponents';
 import { Home } from './pages/Home';
 import { Landing } from './pages/Landing';
+import { MyOffers } from './pages/MyOffers';
 import { MyTrades } from './pages/MyTrades';
-import { NotBuilt } from './pages/NotBuilt';
+import { NotFound } from './pages/NotFound';
 import { Offers } from './pages/Offers';
+import { Roadmap } from './pages/Roadmap';
 import { Take } from './pages/Take';
 import { TradePage } from './pages/TradePage';
 import { Welcome } from './pages/Welcome';
@@ -40,7 +43,7 @@ function Front() {
   return <Landing />;
 }
 
-// Every route from the design handoff. Pages that are not built yet say so instead of showing a mock-up.
+// Every route from the design handoff, and a not-found page for any other address.
 export function App() {
   return (
     <Routes>
@@ -49,18 +52,20 @@ export function App() {
         <Route path="welcome" element={<Welcome />} />
         <Route path="offers" element={<Offers />} />
         <Route path="offers/new" element={<CreateOffer />} />
+        <Route path="offers/mine" element={<MyOffers />} />
         <Route path="offers/:offerTxid" element={<Take />} />
         <Route path="trade/:id" element={<TradePage />} />
         <Route path="trade/:id/arbiter" element={<Arbiter />} />
         <Route path="arbiter" element={<ArbiterList />} />
         <Route path="trades" element={<MyTrades />} />
-        <Route path="chats" element={<NotBuilt title="Chats" />} />
+        <Route path="chats" element={<Chats />} />
         <Route path="about" element={<About />} />
         {/* The design's Help FAQ lives at the end of About. */}
         <Route path="help" element={<Navigate to="/about" replace />} />
         <Route path="transparency" element={<Transparency />} />
+        <Route path="roadmap" element={<Roadmap />} />
         {import.meta.env.DEV && <Route path="dev/components" element={<DevComponents />} />}
-        <Route path="*" element={<NotBuilt title="Page not found" />} />
+        <Route path="*" element={<NotFound />} />
       </Route>
     </Routes>
   );

@@ -1,28 +1,31 @@
 import type { ReactNode } from 'react';
+import { useMessages } from '../lang';
+import type { Messages } from '../messages';
 
 // The honesty rule (design principle 2): on-chain and simulated must never be confused.
 // On-chain is solid, green and links to the explorer; simulated is dashed, violet and striped.
 
 export type Provenance = 'chain' | 'sim' | 'offchain';
 
-const DEFAULT_LABEL: Record<Provenance, string> = {
-  chain: 'On-chain',
-  sim: 'Simulated',
-  offchain: 'Off-chain',
+const DEFAULT_LABEL: Record<Provenance, keyof Messages['common']> = {
+  chain: 'onChain',
+  sim: 'simulated',
+  offchain: 'offChain',
 };
 
 /** Says where a piece of data comes from. Stays visible even when the technical details are folded. */
 export function ProvenanceTag({ kind, children }: { kind: Provenance; children?: ReactNode }) {
+  const t = useMessages().common;
   return (
     <span className="cf-tag" data-kind={kind}>
-      {children ?? DEFAULT_LABEL[kind]}
+      {children ?? (t[DEFAULT_LABEL[kind]] as string)}
     </span>
   );
 }
 
 /** Wraps every simulated block of the demo: payment details, the demo arbiter, and so on. */
 export function SimBox({
-  tag = 'Simulated',
+  tag,
   label,
   children,
   bodyGap,
@@ -50,11 +53,15 @@ export function SimBox({
 
 const EXPLORER = 'https://blockchair.com/bitcoin-cash';
 
+/** A transaction's page in the block explorer. */
+export const explorerTxUrl = (txid: string) => `${EXPLORER}/transaction/${txid}`;
+
 /**
  * A chain reference: a transaction id or an address, shortened in the middle and linked to the
  * block explorer in a new tab. `plain` shows a value that is not on-chain (an identity, a key) without a link.
  */
 export function HashLink({ value, kind }: { value: string; kind: 'transaction' | 'address' | 'plain' }) {
+  const t = useMessages().common;
   const text = shorten(value);
   if (kind === 'plain') {
     return (
@@ -70,7 +77,7 @@ export function HashLink({ value, kind }: { value: string; kind: 'transaction' |
       target="_blank"
       rel="noreferrer"
       title={value}
-      aria-label={`${value}, open in block explorer`}
+      aria-label={t.openInExplorer(value)}
     >
       {text}
     </a>

@@ -1,6 +1,11 @@
 // A friendly name for an identity, so a list of offers reads as people instead of hex. It is derived from the
 // identity key itself: nobody picks it, it cannot be impersonated by choice, and it is the same on every screen.
 // Pure, no DOM; see test/alias.test.ts.
+//
+// Provisional: for the hackathon the name is derived, not chosen. It is a label to recognise someone, not a proof of
+// who they are: there are only 1,024 names, so two people can share one and a determined user could generate wallets
+// until one lands on a name they want to imitate. Letting people pick a personal name (signed by their wallet, unique
+// across the service) is planned; see "Names" under Identity and sign-in in docs/protocol.md.
 
 const ADJECTIVES = [
   'Quiet', 'Swift', 'Amber', 'Gentle', 'Bright', 'Hidden', 'Golden', 'Calm',

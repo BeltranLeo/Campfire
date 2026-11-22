@@ -1,6 +1,8 @@
-import { useState } from 'react';
+import { useState, type ReactNode } from 'react';
 import { Link, useNavigate, useParams } from 'react-router';
 import { verifyPriceQuote } from '../../protocol/trades.js';
+import { expectedEscrowFunding } from '../../protocol/escrow.js';
+import { SIMULATED_PAYMENT_METHOD, onlySimulatedPayment } from '../../protocol/offers.js';
 import { aliasFor } from '../alias';
 import { ApiError, apiGet, apiPost, type DemoInfo, type Offer, type PriceQuote, type Reputation, type TradeSummary } from '../api';
 import { assetInfo, type AssetInfo } from '../assets';
@@ -11,14 +13,17 @@ import { noWalletNote } from '../components/NoWalletNote';
 import { Term } from '../components/Term';
 import { HashLink, ProvenanceTag } from '../components/Provenance';
 import { EmptyState, Notice, Skeleton } from '../components/States';
+import { reversibleWarning } from '../paymentMethods';
 import { useConfig } from '../config';
 import { applyMargin, formatAmount, formatBch, formatClock, formatFiat, formatFiatAmount, formatPaymentWindow, formatRange, paymentMethodLabel, toAmountInput } from '../format';
 import { fiatForUnits } from '../fiatAmount';
+import { useFindingAddressNote } from '../hooks/useBusyStep';
 import { prepareIndices } from '../indices';
-import { depositNeeds } from '../seller';
-import { spendableBch } from '../coins';
+import { canDeposit, checkDeposit } from '../seller';
+import { spendableBch, tokenBalance } from '../coins';
 import { useWalletCoins } from '../walletCoins';
 import { useNow } from '../hooks/useNow';
+import { useCompletedWith } from '../hooks/useCompletedWith';
 import { usePoll } from '../hooks/usePoll';
 import {
   browserStore,
@@ -34,6 +39,7 @@ import {
 } from '../take';
 import { effectiveMode, resolveAmount, usablePrice, type AmountMode } from '../takeAmount';
 import { useWallet } from '../wallet';
+import { useMessages } from '../lang';
 
 // Taking an offer (Take-* screens). On a sell offer the buyer chooses an amount, sees an indicative signed quote and
 // takes the offer without signing anything; against the demo seller the answer comes back already funded. On a buy
@@ -50,14 +56,16 @@ export function Take() {
   const config = useConfig();
   const symbol = offer.data ? assetInfo(offer.data.document.asset, offer.data.document.assetDecimals, config).symbol : null;
   const buyOffer = offer.data?.document.side === 'buy';
+  const m = useMessages();
+  const t = m.take;
 
   return (
     <main className="s-main" data-narrow>
       <div className="s-pagehead">
         <Link className="s-back" to="/offers">
-          ← Offers
+          {t.back}
         </Link>
-        <h1 className="cf-title">{symbol ? (buyOffer ? `Sell ${symbol} to this buyer` : `Buy ${symbol}`) : 'Offer'}</h1>
+        <h1 className="cf-title">{symbol ? (buyOffer ? t.titleSellTo(symbol) : t.titleBuy(symbol)) : t.titleLoading}</h1>
       </div>
       {offer.data ? (
         buyOffer ? <TakeBuyOffer offer={offer.data} /> : <TakeOffer offer={offer.data} />
@@ -71,19 +79,19 @@ export function Take() {
         </section>
       ) : offer.error instanceof ApiError && offer.error.status === 404 ? (
         <section className="cf-card">
-          <EmptyState title="This offer does not exist" action={<Button to="/offers">Back to offers</Button>}>
-            It may have been published from another service, or the link is incomplete.
+          <EmptyState title={t.notFound} action={<Button to="/offers">{t.backToOffers}</Button>}>
+            {t.notFoundBody}
           </EmptyState>
         </section>
       ) : (
         <section className="cf-card">
           <div className="cf-stack">
-            <Notice tone="danger" title="We could not load this offer">
-              {offer.error instanceof ApiError ? offer.error.message : 'The server did not answer.'}
+            <Notice tone="danger" title={t.loadError}>
+              {offer.error instanceof ApiError ? offer.error.message : t.noAnswer}
             </Notice>
             <div className="s-actions">
               <Button variant="primary" onClick={offer.reload}>
-                Try again
+                {m.common.tryAgain}
               </Button>
             </div>
           </div>
@@ -99,8 +107,11 @@ function TakeOffer({ offer }: { offer: Offer }) {
   const asset = assetInfo(doc.asset, doc.assetDecimals, config);
   const wallet = useWallet();
   const navigate = useNavigate();
+  const m = useMessages();
+  const t = m.take;
 
   const reputation = usePoll(() => apiGet<Reputation>(`/api/identities/${offer.sellerIdentity}/reputation`), offer.sellerIdentity);
+  const withYou = useCompletedWith(offer.sellerIdentity);
   const demo = usePoll(() => (offer.isDemo ? apiGet<DemoInfo>('/api/demo') : Promise.resolve(null)), String(offer.isDemo));
 
   // --- Indicative quote, verified against the offer's oracle key ---
@@ -128,7 +139,7 @@ function TakeOffer({ offer }: { offer: Offer }) {
   const [wanted, setWanted] = useState<AmountMode>('fiat');
   const [fiatInput, setFiatInput] = useState<string | null>(null);
   const [coinInput, setCoinInput] = useState(() => toAmountInput(doc.min, asset));
-  const mode = effectiveMode(wanted, { isBch: asset.isBch, hasPrice: priced });
+  const mode = effectiveMode(wanted, { hasPrice: priced });
   const priceArgs = unitPrice ? { unitPrice, marginBps, assetDecimals: doc.assetDecimals } : null;
   const fiatOf = (units: bigint) => (priceArgs && priced ? fiatForUnits({ units, ...priceArgs }) : null);
   // Until the buyer types, the field offers the fiat price of the smallest amount.
@@ -136,11 +147,11 @@ function TakeOffer({ offer }: { offer: Offer }) {
   const result = resolveAmount({ ...asked, mode, input });
   const amount = result.units;
   const inRange = result.state === 'ok';
-  const coinRange = `${toAmountInput(doc.min, asset)} and ${formatAmount(doc.max, asset)}`;
+  const coinRange = t.rangeEnds(toAmountInput(doc.min, asset), formatAmount(doc.max, asset));
   const fiatRange = (() => {
     const lo = fiatOf(BigInt(doc.min));
     const hi = fiatOf(BigInt(doc.max));
-    return lo && hi ? `${formatFiatAmount(lo, '').trim()} and ${formatFiatAmount(hi, '').trim()} ${doc.fiat}` : coinRange;
+    return lo && hi ? t.rangeEnds(formatFiatAmount(lo, '').trim(), `${formatFiatAmount(hi, '').trim()} ${doc.fiat}`) : coinRange;
   })();
   // What the buyer pays is recomputed from the units that will be sent, never from the number typed.
   const payFiat = amount !== null && amount > 0n ? fiatOf(amount) : null;
@@ -158,6 +169,7 @@ function TakeOffer({ offer }: { offer: Offer }) {
   // --- The buyer's keys: next Campfire indices, and a payout address never used on-chain ---
   const identity = wallet.status === 'connected' ? wallet.identity : null;
   const xpubs = wallet.xpubs;
+  const findingNote = useFindingAddressNote();
   const prep = usePoll(() => (identity && xpubs ? prepareIndices(identity, xpubs, 'buyer') : Promise.resolve(null)), identity ?? 'none');
   const payout = prep.data && xpubs ? payoutAddress(xpubs.receive, prep.data.receive, !asset.isBch) : null;
 
@@ -208,7 +220,7 @@ function TakeOffer({ offer }: { offer: Offer }) {
       } catch {
         // Fall through to the original error.
       }
-      setFailure(err instanceof ApiError ? err.message : 'Something went wrong. Try again.');
+      setFailure(err instanceof ApiError ? err.message : t.somethingWrong);
       setTaking(false);
       prep.reload();
     }
@@ -219,83 +231,46 @@ function TakeOffer({ offer }: { offer: Offer }) {
 
   return (
     <>
-      <section className="cf-card" data-flush>
-        <div className="cf-card__section">
-          <div className="cf-row" data-between>
-            <span className="s-asset">
-              <CoinIcon asset={asset} />
-              {offer.isDemo ? `${asset.symbol} from Demo seller` : asset.symbol}
-            </span>
-            {offer.isDemo && <ProvenanceTag kind="sim">Demo seller · simulated fiat</ProvenanceTag>}
-          </div>
-          <div style={{ marginTop: 'var(--space-3)' }}>
-            <dl className="cf-dl">
-              <dt>Range</dt>
-              <dd>
-                <span className="cf-mono">{formatRange(doc.min, doc.max, asset)}</span>
-              </dd>
-              <dt>Payment</dt>
-              <dd>
-                <span className="s-chips">
-                  {doc.paymentMethods.map((method) => (
-                    <span key={method} className="s-chip">
-                      {paymentMethodLabel(method)}
-                    </span>
-                  ))}
-                  <span>· {formatPaymentWindow(doc.paymentWindowSec)}</span>
-                </span>
-              </dd>
-              <dt>Seller</dt>
-              <dd>
-                {aliasFor(offer.sellerIdentity).name}
-                {rep && ` · ${rep.completedAsSeller} completed`}
-              </dd>
-              {doc.terms && (
-                <>
-                  <dt>Terms</dt>
-                  <dd>
-                    <span className="cf-small">{doc.terms}</span>
-                  </dd>
-                </>
-              )}
-            </dl>
-          </div>
-        </div>
-      </section>
-
-      <OfferDetails
-        offer={offer}
-        party="Seller"
-        priceBy="seller"
-        quote={verified}
-        payout={identity ? { address: payout, fresh: prep.data?.fresh !== false } : null}
+      <OfferSummary
+        asset={asset}
+        title={offer.isDemo ? t.fromDemoSeller(asset.symbol) : asset.symbol}
+        tag={
+          // Only what is simulated is marked, as everywhere else: an offer without a tag is real.
+          offer.isDemo ? (
+            <ProvenanceTag kind="sim">{t.demoTag}</ProvenanceTag>
+          ) : (
+            onlySimulatedPayment(doc.paymentMethods) && <ProvenanceTag kind="sim">{t.simulatedFiat}</ProvenanceTag>
+          )
+        }
+        range={formatRange(doc.min, doc.max, asset)}
+        methods={doc.paymentMethods}
+        window={formatPaymentWindow(doc.paymentWindowSec)}
+        party={t.sellerRecord(aliasFor(offer.sellerIdentity).name, rep ? rep.completedAsSeller : null, withYou)}
+        terms={doc.terms}
       />
 
       {offer.status !== 'Published' ? (
         <section className="cf-card">
-          <EmptyState title="This offer is closed" action={<Button to="/offers">Back to offers</Button>}>
-            The seller closed it or it expired. Other offers are still open.
+          <EmptyState title={t.closed} action={<Button to="/offers">{t.backToOffers}</Button>}>
+            {t.closedBySeller}
           </EmptyState>
         </section>
       ) : (
         <section className="cf-card" data-pad>
           <div className="s-form">
             <div className="cf-field" data-invalid={!inRange || undefined}>
-              {asset.isBch ? (
-                <div className="tk-label">
-                  <label htmlFor="amount">You pay</label>
-                  <div className="cf-seg" role="group" aria-label="Type the amount in">
-                    <button type="button" aria-pressed={mode === 'fiat'} disabled={!priced} title={priced ? undefined : priceUnavailable} onClick={() => chooseMode('fiat')}>
-                      {doc.fiat}
-                    </button>
-                    <button type="button" aria-pressed={mode === 'coin'} onClick={() => chooseMode('coin')}>
-                      {asset.symbol}
-                    </button>
-                  </div>
+              {/* Pesos or coins for every coin: a PUSD buyer thinks in their own money as much as a BCH buyer. */}
+              <div className="tk-label">
+                <label htmlFor="amount">{mode === 'fiat' ? t.youPay : t.youGet}</label>
+                <div className="cf-seg" role="group" aria-label={t.typeIn}>
+                  <button type="button" aria-pressed={mode === 'fiat'} disabled={!priced} title={priced ? undefined : t.priceUnavailable} onClick={() => chooseMode('fiat')}>
+                    {doc.fiat}
+                  </button>
+                  <button type="button" aria-pressed={mode === 'coin'} onClick={() => chooseMode('coin')}>
+                    {asset.symbol}
+                  </button>
                 </div>
-              ) : (
-                <label htmlFor="amount">Amount to buy</label>
-              )}
+              </div>
               <div className="cf-inputgroup">
                 <input
                   id="amount"
@@ -311,56 +286,44 @@ function TakeOffer({ offer }: { offer: Offer }) {
               <span className="cf-hint">
                 {mode === 'fiat'
                   ? inRange
-                    ? `Between ${fiatRange}`
+                    ? t.between(fiatRange)
                     : result.state === 'invalid'
-                      ? `Enter an amount of money, between ${fiatRange}`
-                      : `That is outside what this offer accepts. Enter between ${fiatRange}`
+                      ? t.enterMoney(fiatRange)
+                      : t.outside(fiatRange)
                   : inRange
-                    ? `Between ${coinRange}.`
-                    : `Enter an amount between ${coinRange}.`}
+                    ? t.betweenDot(coinRange)
+                    : t.enterBetween(coinRange)}
               </span>
             </div>
 
             {expired ? (
-              <Notice tone="warn" title="This quote expired">
-                The price was not refreshed for over 10 minutes. Get a new quote to continue.
+              <Notice tone="attention" title={t.expired}>
+                {t.expiredBody}
               </Notice>
             ) : (
               <TakeWell
-                label={mode === 'fiat' ? 'You get' : 'You pay'}
+                label={mode === 'fiat' ? t.youGet : t.youPay}
                 big={mode === 'fiat' ? (amount !== null && amount > 0n ? `≈ ${formatAmount(amount, asset)}` : null) : youPay && `≈ ${youPay}`}
                 unitPrice={unitPrice}
                 marginBps={marginBps}
                 fiat={doc.fiat}
                 asset={asset}
-                lockWhen="you take it"
+                holds={t.priceHeldTake}
                 loading={price.type === 'floating' && quote.loading && !quote.data}
               />
             )}
 
-            {identity ? (
-              <Notice title="You do not need any BCH.">
-                Taking an offer is free and needs no signature. The seller locks the BCH and pays its network fee. The
-                funds will be sent to {prep.data?.fresh === false ? 'an address' : 'a fresh address'} of your wallet. The
-                address is under Offer details.
-              </Notice>
-            ) : (
-              <Notice title="You do not need any BCH.">
-                You only need a wallet to receive the funds. Taking an offer is free and needs no signature.
-              </Notice>
-            )}
-
             {limit && <LimitNotice message={limit} demo={demo.data ?? null} />}
             {prep.error && !prep.data ? (
-              <Notice tone="danger" title="We could not prepare your wallet for this trade">
-                {prep.error instanceof ApiError ? prep.error.message : 'The server did not answer.'}{' '}
+              <Notice tone="danger" title={t.prepError}>
+                {prep.error instanceof ApiError ? prep.error.message : t.noAnswer}{' '}
                 <button type="button" className="cf-copy" onClick={prep.reload}>
-                  Try again
+                  {m.common.tryAgain}
                 </button>
               </Notice>
             ) : null}
             {failure && (
-              <Notice tone="danger" title="The offer was not taken">
+              <Notice tone="danger" title={t.notTaken}>
                 {failure}
               </Notice>
             )}
@@ -373,29 +336,29 @@ function TakeOffer({ offer }: { offer: Offer }) {
                   onClick={wallet.connect}
                   note={noWalletNote}
                 >
-                  Connect wallet to take this offer
+                  {t.connectToTake}
                 </Button>
               ) : ownOffer ? (
-                <Notice>This is your own offer. Someone else has to take it.</Notice>
+                <Notice>{t.ownOffer}</Notice>
               ) : limit && demoLimitKind(limit) === 'daily' ? (
                 <Button variant="primary" to="/transparency">
-                  See past trades on-chain
+                  {t.seePastTrades}
                 </Button>
               ) : limit && demoLimitKind(limit) === 'funds' ? (
                 <Button variant="primary" to="/offers">
-                  Back to offers
+                  {t.backToOffers}
                 </Button>
               ) : limit ? (
                 <Button variant="primary" onClick={take}>
-                  Try again
+                  {m.common.tryAgain}
                 </Button>
               ) : expired ? (
                 <Button variant="primary" onClick={quote.reload}>
-                  Get a new quote
+                  {t.newQuote}
                 </Button>
               ) : !inRange || !youPay ? (
                 <Button variant="primary" disabled>
-                  Take offer
+                  {t.takeOffer}
                 </Button>
               ) : (
                 <Button
@@ -403,22 +366,33 @@ function TakeOffer({ offer }: { offer: Offer }) {
                   busy={taking}
                   disabled={!prep.data}
                   onClick={take}
-                  note={
-                    // Say why the button waits: a long-used wallet takes a few seconds to find a fresh address.
-                    !prep.data
-                      ? 'Finding a fresh address of your wallet…'
-                      : offer.isDemo
-                        ? 'No signature needed. The demo seller locks the BCH right away.'
-                        : 'No signature needed.'
-                  }
+                  // Say why the button waits: a long-used wallet takes a few seconds to find a fresh address.
+                  note={!prep.data ? findingNote : t.noSignature}
                 >
-                  {`Take offer: buy ${formatAmount(amount!, asset)} for ${youPay}`}
+                  {/* Only the coins: the fiat is re-quoted when the offer is taken, so the well above gives it with ≈. */}
+                  {t.takeBuy(formatAmount(amount!, asset))}
                 </Button>
               )}
             </div>
+            {/* What reassures a first-time buyer, under the button instead of a box above it: what it costs, and what
+                taking starts. "You pay only once the coins are locked" is the escrow's whole promise to the buyer. */}
+            <p className="cf-small cf-muted">
+              <strong>{t.noBchNeeded}</strong>{' '}
+              {identity ? t.freeWithWallet(prep.data?.fresh !== false, asset.symbol) : t.freeNoWallet}
+            </p>
+            <p className="cf-small cf-muted">
+              <strong>{t.nextTitle}</strong> {t.nextTake(offer.isDemo === true, asset.symbol)}
+            </p>
           </div>
         </section>
       )}
+
+      <OfferDetails
+        offer={offer}
+        party="seller"
+        quote={verified}
+        payout={identity ? { address: payout, fresh: prep.data?.fresh !== false } : null}
+      />
     </>
   );
 }
@@ -433,11 +407,14 @@ function TakeBuyOffer({ offer }: { offer: Offer }) {
   const wallet = useWallet();
   const navigate = useNavigate();
   const reputation = usePoll(() => apiGet<Reputation>(`/api/identities/${offer.sellerIdentity}/reputation`), offer.sellerIdentity);
+  const withYou = useCompletedWith(offer.sellerIdentity);
+  const m = useMessages();
+  const t = m.take;
 
   const [input, setInput] = useState(() => toAmountInput(doc.min, asset));
   const amount = parseAmount(input, doc.assetDecimals);
   const inRange = amount !== null && amount >= BigInt(doc.min) && amount <= BigInt(doc.max);
-  const range = `${toAmountInput(doc.min, asset)} and ${formatAmount(doc.max, asset)}`;
+  const range = t.rangeEnds(toAmountInput(doc.min, asset), formatAmount(doc.max, asset));
 
   const price = doc.price;
   const quote = usePoll(
@@ -467,11 +444,17 @@ function TakeBuyOffer({ offer }: { offer: Offer }) {
   const identity = wallet.status === 'connected' ? wallet.identity : null;
   const xpubs = wallet.xpubs;
   const coins = useWalletCoins(identity ? 15_000 : undefined);
+  const findingNote = useFindingAddressNote();
   const prep = usePoll(() => (identity && xpubs ? prepareIndices(identity, xpubs, 'seller') : Promise.resolve(null)), identity ?? 'none');
   const have = coins.data ? spendableBch(coins.data.coins) : null;
-  const deposit = amount !== null && amount > 0n && asset.isBch ? depositNeeds({ asset: doc.asset, amount: amount.toString() }) : null;
-  const lock = amount !== null && asset.isBch ? formatAmount(amount + 1000n, asset) : null;
-  const short = deposit !== null && have !== null && have < deposit;
+  const haveToken = coins.data && !asset.isBch ? tokenBalance(coins.data.coins, doc.asset) : null;
+  // The fees are not known until the buyer accepts, so this checks the escrow and the deposit's own fee only.
+  const check = amount !== null && amount > 0n && coins.data ? checkDeposit({ asset: doc.asset, amount: amount.toString() }, coins.data.coins) : null;
+  const escrowSats = amount !== null && amount > 0n ? expectedEscrowFunding({ asset: doc.asset, amount: amount.toString() }).satoshis : null;
+  const lock =
+    amount === null || escrowSats === null ? null : asset.isBch ? formatAmount(escrowSats, asset) : t.plus(formatAmount(amount, asset), formatBch(escrowSats));
+  const shortToken = check?.token !== undefined && check.token.have < check.token.need;
+  const short = check !== null && !canDeposit(check);
 
   const [taking, setTaking] = useState(false);
   const [failure, setFailure] = useState<string | null>(null);
@@ -510,7 +493,7 @@ function TakeBuyOffer({ offer }: { offer: Offer }) {
       } catch {
         // Fall through to the original error.
       }
-      setFailure(err instanceof ApiError ? err.message : 'Something went wrong. Try again.');
+      setFailure(err instanceof ApiError ? err.message : t.somethingWrong);
       setTaking(false);
       prep.reload();
     }
@@ -521,63 +504,45 @@ function TakeBuyOffer({ offer }: { offer: Offer }) {
 
   return (
     <>
-      <section className="cf-card" data-flush>
-        <div className="cf-card__section">
-          <div className="cf-row" data-between>
-            <span className="s-asset">
-              <CoinIcon asset={asset} />A buyer wants {asset.symbol}
-            </span>
-            <ProvenanceTag kind="chain">Offer on mainnet</ProvenanceTag>
-          </div>
-          <div style={{ marginTop: 'var(--space-3)' }}>
-            <dl className="cf-dl">
-              <dt>Wants</dt>
-              <dd>
-                <span className="cf-mono">{formatRange(doc.min, doc.max, asset)}</span>
-              </dd>
-              <dt>Pays with</dt>
-              <dd>
-                <span className="s-chips">
-                  {doc.paymentMethods.map((method) => (
-                    <span key={method} className="s-chip">
-                      {paymentMethodLabel(method)}
-                    </span>
-                  ))}
-                  <span>· within {formatPaymentWindow(doc.paymentWindowSec).replace(' to pay', '')}</span>
-                </span>
-              </dd>
-              <dt>Buyer</dt>
-              <dd>
-                {aliasFor(offer.sellerIdentity).name}
-                {rep && ` · ${rep.completedAsBuyer} ${rep.completedAsBuyer === 1 ? 'trade' : 'trades'} completed`}
-              </dd>
-              {doc.terms && (
-                <>
-                  <dt>Terms</dt>
-                  <dd>
-                    <span className="cf-small">{doc.terms}</span>
-                  </dd>
-                </>
-              )}
-            </dl>
-          </div>
-        </div>
-      </section>
-
-      <OfferDetails offer={offer} party="Buyer" priceBy="buyer" quote={verified} payout={null} />
+      <OfferSummary
+        asset={asset}
+        title={t.buyerWants(asset.symbol)}
+        tag={
+          // Next to a real method the trade is real, so only an offer paid in simulated fiat alone gets the tag.
+          onlySimulatedPayment(doc.paymentMethods) ? (
+            <ProvenanceTag kind="sim">{t.simulatedFiat}</ProvenanceTag>
+          ) : (
+            <ProvenanceTag kind="chain">{t.offerOnMainnet}</ProvenanceTag>
+          )
+        }
+        range={formatRange(doc.min, doc.max, asset)}
+        methods={doc.paymentMethods}
+        window={t.within(Math.round(doc.paymentWindowSec / 60))}
+        party={t.buyerRecord(aliasFor(offer.sellerIdentity).name, rep ? rep.completedAsBuyer : null, withYou)}
+        terms={doc.terms}
+      />
+      {/* Invented copy: answering a buy offer makes you the one paid in fiat, so the risk of a reversed payment is yours. */}
+      {reversibleWarning(doc.paymentMethods, doc.fiat) && <Notice tone="attention">{reversibleWarning(doc.paymentMethods, doc.fiat)}</Notice>}
 
       {offer.status !== 'Published' ? (
         <section className="cf-card">
           {/* Invented copy: the closed state of a buy offer. */}
-          <EmptyState title="This offer is closed" action={<Button to="/offers?side=sell">Back to offers</Button>}>
-            The buyer closed it or it expired. Other offers are still open.
+          <EmptyState title={t.closed} action={<Button to="/offers?side=sell">{t.backToOffers}</Button>}>
+            {t.closedByBuyer}
+          </EmptyState>
+        </section>
+      ) : onlySimulatedPayment(doc.paymentMethods) ? (
+        <section className="cf-card">
+          {/* The service refuses a real seller here too (requestBuyOfferTrade); this says why before anyone tries. */}
+          <EmptyState title={t.demoOnly} action={<Button to="/offers?side=sell">{t.backToOffers}</Button>}>
+            {t.demoOnlyBody}
           </EmptyState>
         </section>
       ) : (
         <section className="cf-card" data-pad>
           <div className="s-form">
             <div className="cf-field" data-invalid={!inRange || undefined}>
-              <label htmlFor="amount">Amount to sell</label>
+              <label htmlFor="amount">{t.amountToSell}</label>
               <div className="cf-inputgroup">
                 <input
                   id="amount"
@@ -591,63 +556,55 @@ function TakeBuyOffer({ offer }: { offer: Offer }) {
                 <span className="cf-addon">{asset.symbol}</span>
               </div>
               <span className="cf-hint">
-                {inRange ? `Between ${range}.` : `Enter an amount between ${range}.`}
-                {have !== null && ` Your wallet has ${formatBch(have)}.`}
+                {inRange ? t.betweenDot(range) : t.enterBetween(range)}
+                {have !== null && t.walletHas(haveToken !== null ? t.rangeEnds(formatAmount(haveToken, asset), formatBch(have)) : formatBch(have))}
               </span>
             </div>
 
             {expired ? (
-              <Notice tone="warn" title="This quote expired">
-                The price was not refreshed for over 10 minutes. Get a new quote to continue.
+              <Notice tone="attention" title={t.expired}>
+                {t.expiredBody}
               </Notice>
             ) : (
               <TakeWell
-                label="You get"
+                label={t.youGet}
                 big={youReceive && `≈ ${youReceive}`}
                 unitPrice={unitPrice}
                 marginBps={marginBps}
                 fiat={doc.fiat}
                 asset={asset}
-                lockWhen="you send the request"
+                holds={t.priceHeldRequest}
                 loading={price.type === 'floating' && quote.loading && !quote.data}
               />
             )}
 
-            <Notice title="What happens next">
-              The buyer accepts. Then you lock {lock ?? 'the coins'} in the contract and share how to pay you. The buyer pays, and you release the coins.
-            </Notice>
-
-            {!asset.isBch && (
-              // Invented copy: the page deposits BCH only for now.
-              <Notice tone="warn" title="Selling PUSD is not available yet">
-                Only BCH can be locked from this page for now.
-              </Notice>
-            )}
             {Boolean(coins.error) && !coins.data && identity && (
-              <Notice tone="danger" title="We could not read your wallet's coins">
-                The network did not answer.{' '}
+              <Notice tone="danger" title={t.coinsError}>
+                {t.networkNoAnswer}{' '}
                 <button type="button" className="cf-copy" onClick={coins.reload}>
-                  Try again
+                  {m.common.tryAgain}
                 </button>
               </Notice>
             )}
-            {short && (
-              // Invented copy: the design does not show a seller without enough BCH here.
-              <Notice tone="warn" title="Your wallet does not have enough BCH">
-                Locking this amount needs about {deposit !== null && formatBch(deposit)} with the network fee, and Campfire can see{' '}
-                {have !== null && formatBch(have)}. The buyer would accept and wait for coins you cannot lock.
+            {short && check && (
+              // Invented copy: the design does not show a seller without enough coins here.
+              <Notice tone="attention" title={t.notEnough(shortToken ? asset.symbol : 'BCH')}>
+                {shortToken && check.token
+                  ? t.needsToken(formatAmount(check.token.need, asset), formatAmount(check.token.have, asset))
+                  : t.needsBch(formatBch(check.bch.need), asset.isBch ? null : asset.symbol, formatBch(check.bch.have))}{' '}
+                {t.buyerWouldWait}
               </Notice>
             )}
             {prep.error && !prep.data ? (
-              <Notice tone="danger" title="We could not prepare your wallet for this trade">
-                {prep.error instanceof ApiError ? prep.error.message : 'The server did not answer.'}{' '}
+              <Notice tone="danger" title={t.prepError}>
+                {prep.error instanceof ApiError ? prep.error.message : t.noAnswer}{' '}
                 <button type="button" className="cf-copy" onClick={prep.reload}>
-                  Try again
+                  {m.common.tryAgain}
                 </button>
               </Notice>
             ) : null}
             {failure && (
-              <Notice tone="danger" title="The request was not sent">
+              <Notice tone="danger" title={t.notSent}>
                 {failure}
               </Notice>
             )}
@@ -660,34 +617,95 @@ function TakeBuyOffer({ offer }: { offer: Offer }) {
                   onClick={wallet.connect}
                   note={noWalletNote}
                 >
-                  Connect wallet to sell
+                  {t.connectToSell}
                 </Button>
               ) : ownOffer ? (
-                <Notice>This is your own offer. A seller has to answer it.</Notice>
+                <Notice>{t.ownBuyOffer}</Notice>
               ) : expired ? (
                 <Button variant="primary" onClick={quote.reload}>
-                  Get a new quote
+                  {t.newQuote}
                 </Button>
               ) : (
                 <Button
                   variant="primary"
                   busy={taking}
-                  disabled={!inRange || !youReceive || !prep.data || !asset.isBch || short || have === null}
+                  disabled={!inRange || !youReceive || !prep.data || short || have === null}
                   onClick={take}
-                  note={!prep.data ? 'Finding a fresh address of your wallet…' : 'No signature yet. You sign when you lock the coins.'}
+                  note={!prep.data ? findingNote : t.signLater}
                 >
-                  {inRange && amount !== null ? `Offer to sell ${formatAmount(amount, asset)}` : 'Offer to sell'}
+                  {t.offerToSell(inRange && amount !== null ? formatAmount(amount, asset) : null)}
                 </Button>
               )}
             </div>
+            <p className="cf-small cf-muted">
+              <strong>{t.nextTitle}</strong> {t.next(lock)}
+            </p>
           </div>
         </section>
       )}
+
+      <OfferDetails offer={offer} party="buyer" quote={verified} payout={null} />
     </>
   );
 }
 
-const priceUnavailable = 'The price could not be loaded or verified. It is retried every 30 s.';
+// The offer at a glance in three short lines, so the amount field and the button fit on a phone's first screen.
+function OfferSummary(props: {
+  asset: AssetInfo;
+  title: string;
+  tag: ReactNode;
+  range: string;
+  methods: string[];
+  /** The payment window, already worded. */
+  window: string;
+  /** Who published it and their record. */
+  party: string;
+  terms?: string;
+}) {
+  const t = useMessages().take;
+  const realMethods = props.methods.filter((method) => method !== SIMULATED_PAYMENT_METHOD);
+  const mixed = realMethods.length > 0 && realMethods.length < props.methods.length;
+  return (
+    <section className="cf-card" data-flush>
+      <div className="cf-card__section tk-summary">
+        <div className="cf-row" data-between>
+          <span className="s-asset">
+            <CoinIcon asset={props.asset} />
+            {props.title}
+          </span>
+          {props.tag}
+        </div>
+        <span className="s-chips">
+          <span className="cf-mono">{props.range}</span>
+          {props.methods.map((method) =>
+            // The simulated payment is drawn like everything simulated, never like a real method next to it.
+            method === SIMULATED_PAYMENT_METHOD ? (
+              <ProvenanceTag key={method} kind="sim">
+                {paymentMethodLabel(method)}
+              </ProvenanceTag>
+            ) : (
+              <span key={method} className="s-chip">
+                {paymentMethodLabel(method)}
+              </span>
+            ),
+          )}
+        </span>
+        {mixed && <span className="cf-small cf-muted">{t.mixedMethods(realMethods.map(paymentMethodLabel).join(', '))}</span>}
+        <span className="cf-small cf-muted">
+          {props.window} · {props.party}
+        </span>
+        {/* Long terms show two lines; a tap opens the rest. */}
+        {props.terms && (
+          <details className="tk-terms cf-small cf-muted">
+            <summary>
+              {t.terms} {props.terms}
+            </summary>
+          </details>
+        )}
+      </div>
+    </section>
+  );
+}
 
 // The big figure is the answer to "what do I get / pay"; the small line says which price made it and how long it holds.
 function TakeWell(props: {
@@ -697,21 +715,21 @@ function TakeWell(props: {
   marginBps: number;
   fiat: string;
   asset: AssetInfo;
-  /** "you take it" or "you send the request". */
-  lockWhen: string;
+  /** When the final price is signed and how long it holds, worded for this side. */
+  holds: string;
   loading: boolean;
 }) {
+  const t = useMessages().take;
   return (
     <div className="cf-well cf-stack" data-gap="2">
       <span className="cf-label">{props.label}</span>
       <span className="tk-big">{props.big ?? (props.loading ? <Skeleton width={140} height={28} /> : '—')}</span>
       {props.unitPrice ? (
         <p className="cf-small cf-muted">
-          1 {props.asset.symbol} = {formatFiat(applyMargin(props.unitPrice, props.marginBps), props.fiat)} · Price locked for{' '}
-          <strong>10:00</strong> once {props.lockWhen}
+          1 {props.asset.symbol} = {formatFiat(applyMargin(props.unitPrice, props.marginBps), props.fiat)} · {props.holds}
         </p>
       ) : props.loading ? null : (
-        <p className="cf-small cf-muted">{priceUnavailable}</p>
+        <p className="cf-small cf-muted">{t.priceUnavailable}</p>
       )}
     </div>
   );
@@ -720,40 +738,41 @@ function TakeWell(props: {
 // Technical identifiers, folded: the On-chain tag stays visible in the summary.
 function OfferDetails(props: {
   offer: Offer;
-  /** "Seller" on a sell offer, "Buyer" on a buy offer: whoever published it. */
-  party: 'Seller' | 'Buyer';
-  priceBy: 'seller' | 'buyer';
+  /** The seller on a sell offer, the buyer on a buy offer: whoever published it, and so set a fixed price. */
+  party: 'seller' | 'buyer';
   quote: PriceQuote | null;
   payout: { address: string | null; fresh: boolean } | null;
 }) {
   const { offer } = props;
   const doc = offer.document;
+  const m = useMessages();
+  const t = m.take;
   return (
-    <Details summary="Offer details" tag={<ProvenanceTag kind="chain">On-chain</ProvenanceTag>}>
+    <Details summary={t.offerDetails} tag={<ProvenanceTag kind="chain">{m.common.onChain}</ProvenanceTag>}>
       <dl className="cf-dl">
-        <dt>Offer</dt>
+        <dt>{t.offer}</dt>
         <dd>
           <HashLink value={offer.offerTxid} kind="transaction" />
-          {offer.sponsored && <span className="cf-small cf-subtle"> Publishing fee paid by Campfire</span>}
+          {offer.sponsored && <span className="cf-small cf-subtle">{t.sponsored}</span>}
         </dd>
-        <dt>{props.party} ID</dt>
+        <dt>{props.party === 'seller' ? t.sellerId : t.buyerId}</dt>
         <dd>
           <HashLink value={offer.sellerIdentity} kind="plain" />
         </dd>
         <dt>
-          <Term word="arbiter">Arbiter</Term>
+          <Term word="arbiter">{t.arbiter}</Term>
         </dt>
         <dd>
           <HashLink value={doc.arbiter} kind="plain" />
         </dd>
-        <dt>Price source</dt>
+        <dt>{t.priceSource}</dt>
         <dd>
           {doc.price.type === 'fixed' ? (
-            `Fixed by the ${props.priceBy}`
+            props.party === 'seller' ? t.fixedBySeller : t.fixedByBuyer
           ) : doc.oracle ? (
             <>
-              Oracle <HashLink value={doc.oracle} kind="plain" />
-              {props.quote && `, signed ${formatClock(new Date(props.quote.timestamp * 1000))}`}
+              <Term word="oracle">{t.oracle}</Term> <HashLink value={doc.oracle} kind="plain" />
+              {props.quote && t.signedAt(formatClock(new Date(props.quote.timestamp * 1000)))}
             </>
           ) : (
             '—'
@@ -761,10 +780,10 @@ function OfferDetails(props: {
         </dd>
         {props.payout && (
           <>
-            <dt>Payout address</dt>
+            <dt>{t.payoutAddress}</dt>
             <dd>
               {props.payout.address ? <HashLink value={props.payout.address} kind="address" /> : <Skeleton width={160} style={{ display: 'inline-block' }} />}
-              <span className="cf-small cf-subtle">{props.payout.fresh ? ' A fresh address of your wallet.' : ' An address of your wallet.'}</span>
+              <span className="cf-small cf-subtle">{props.payout.fresh ? t.freshAddress : t.anAddress}</span>
             </dd>
           </>
         )}
@@ -775,27 +794,27 @@ function OfferDetails(props: {
 
 function LimitNotice({ message, demo }: { message: string; demo: DemoInfo | null }) {
   const limits = demo?.limits;
+  const t = useMessages().take;
   switch (demoLimitKind(message)) {
     case 'busy':
       return (
-        <Notice tone="warn" title="The demo seller is busy with other visitors">
-          {limits ? `It handles ${limits.maxActiveTrades} trades at a time. ` : ''}Please try again in a few minutes.
+        <Notice tone="attention" title={t.busy}>
+          {t.busyBody(limits ? limits.maxActiveTrades : null)}
         </Notice>
       );
     case 'daily':
       return (
-        <Notice tone="warn" title="The demo seller has reached its daily limit of trades">
-          {limits ? `It funds ${limits.maxDailyFundings} trades per day across all visitors. ` : ''}Please try again
-          tomorrow, or see the real transactions of earlier trades.
+        <Notice tone="attention" title={t.daily}>
+          {t.dailyBody(limits ? limits.maxDailyFundings : null)}
         </Notice>
       );
     case 'funds':
       return (
-        <Notice tone="warn" title="The demo seller has run out of funds for this offer">
-          Please try again later, or try the other demo offer.
+        <Notice tone="attention" title={t.noFunds}>
+          {t.noFundsBody}
         </Notice>
       );
     default:
-      return <Notice tone="warn">{message}</Notice>;
+      return <Notice tone="attention">{message}</Notice>;
   }
 }

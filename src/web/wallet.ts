@@ -8,13 +8,39 @@ import { useSyncExternalStore } from 'react';
 import { DappConnectionManager, clearSession, loadSession } from '@wizardconnect/dapp';
 import type { DappRelayResult, SignTransactionRequest } from '@wizardconnect/core';
 import { initiateDappRelay } from './dappRelay';
-import { ApiError, apiGet, apiPost, isFinalState, type RegisteredIdentity, type Reputation, type TradeSummary } from './api';
+import { ApiError, apiGet, apiPost, isFinalState, setSessionToken, type RegisteredIdentity, type Reputation, type TradeSummary } from './api';
+import { derivePubkeyFromXpub } from '../protocol/keys.js';
+import { buildSignInRequest, type SignInChallenge } from '../protocol/signin.js';
+import { electrum } from './electrum';
 
 const SESSION_KEY = 'campfire.wallet';
+// The service's session token, kept so a reload or a later visit on this browser needs no new signature.
+const TOKEN_KEY = 'campfire.session-token';
+
+function storedToken(): string | null {
+  try {
+    return localStorage.getItem(TOKEN_KEY);
+  } catch {
+    return null;
+  }
+}
+
+function keepToken(token: string | null) {
+  setSessionToken(token);
+  try {
+    if (token) localStorage.setItem(TOKEN_KEY, token);
+    else localStorage.removeItem(TOKEN_KEY);
+  } catch {
+    // Without storage the token lasts until the page closes; the next visit signs in again.
+  }
+}
 const DAPP_NAME = 'Campfire';
 const PAIRING_TIMEOUT_MS = 2 * 60 * 1000;
 // A closed wallet app never answers; without a limit the button would say "Waiting for wallet…" forever.
 const SIGN_TIMEOUT_MS = 2 * 60 * 1000;
+// After a reload that needs a new sign-in, how long to wait for a closed wallet app before offering to ask again or
+// cancel. Without it the header said "Connecting…" forever and nothing on the page could stop it.
+const WALLET_WAIT_MS = 20 * 1000;
 
 /** The wallet refused, failed or did not answer. Nothing was sent; the caller shows one sentence for all three. */
 export class WalletDeclined extends Error {
@@ -25,6 +51,14 @@ export class WalletDeclined extends Error {
 }
 
 /** Which key signs which input: the input's position, the wallet path (`defi` for contracts) and the key index. */
+/** The wallet refused, failed or did not answer the sign-in request. */
+class SignInDeclined extends Error {
+  constructor() {
+    super('The wallet did not sign the sign-in request');
+    this.name = 'SignInDeclined';
+  }
+}
+
 export type SigningPath = [number, 'receive' | 'change' | 'defi', number];
 
 export type WalletStatus = 'disconnected' | 'pairing' | 'connecting' | 'connected';
@@ -47,7 +81,10 @@ export interface WalletState {
   activeTrades: number | null;
   /** A signature request is out and the wallet has not answered yet. */
   signing: boolean;
-  error: { title: string; message: string } | null;
+  /** The wallet refused or ignored the sign-in signature; the pairing stays open so it can be asked again. */
+  signInFailed: boolean;
+  /** Why the last pairing failed; the words are in messages.ts (wallet.timeout*, wallet.load*). */
+  error: { kind: 'timeout' } | { kind: 'load'; detail: string | null } | null;
 }
 
 const INITIAL: WalletState = {
@@ -59,6 +96,7 @@ const INITIAL: WalletState = {
   reputation: null,
   activeTrades: null,
   signing: false,
+  signInFailed: false,
   error: null,
 };
 
@@ -68,9 +106,12 @@ class WalletController {
   private manager: DappConnectionManager | null = null;
   private relay: DappRelayResult | null = null;
   private pairingTimer: ReturnType<typeof setTimeout> | undefined;
+  private waitTimer: ReturnType<typeof setTimeout> | undefined;
   /** The defi key registered with the service for the current manager, if any. */
   private registeredDefi: string | null = null;
   private registering = false;
+  // Whether the current pairing has heard from the wallet in this page; sign requests need it.
+  private walletAnswered = false;
 
   subscribe = (listener: () => void) => {
     this.listeners.add(listener);
@@ -115,16 +156,19 @@ class WalletController {
     this.startPairingTimer();
   }
 
+  /**
+   * The page is in view again. A phone pauses a hidden page, and the relay only reconnects once it is visible, so a
+   * pairing that waited while the wallet app was open gets its full time from here, not from when it started.
+   */
+  pageShown() {
+    if (this.state.status === 'pairing') this.startPairingTimer();
+  }
+
   private startPairingTimer() {
     clearTimeout(this.pairingTimer);
     this.pairingTimer = setTimeout(() => {
       this.disconnect();
-      this.set({
-        error: {
-          title: 'The wallet did not answer',
-          message: 'Pairing timed out after 2 minutes. Open the wallet and try again.',
-        },
-      });
+      this.set({ error: { kind: 'timeout' } });
     }, PAIRING_TIMEOUT_MS);
   }
 
@@ -133,7 +177,25 @@ class WalletController {
     // Tell the wallet only if it is paired; a pairing in progress has nobody to tell.
     this.close(this.state.status !== 'pairing');
     clearSession(SESSION_KEY);
+    keepToken(null);
     this.set(INITIAL);
+  }
+
+  /**
+   * While a restored pairing waits for the wallet to sign in, shows the sign-in dialog with its "Ask my wallet again"
+   * and "Cancel" choices. Called by the header button and by a timer, so a closed wallet app never leaves the page stuck.
+   */
+  offerSignInChoice() {
+    if (this.state.status === 'connecting' && !this.state.signing && !this.state.signInFailed) this.set({ signInFailed: true });
+  }
+
+  /** Asks the wallet again for the sign-in signature after it refused or did not answer. */
+  retrySignIn() {
+    if (!this.manager || !this.state.signInFailed) return;
+    // A wallet that has not answered since the reload cannot sign yet: go back to waiting for it (the header says
+    // "Connecting…" again and the timer brings the choice back), and ask as soon as it answers.
+    if (!this.walletAnswered) this.set({ signInFailed: false });
+    void this.register();
   }
 
   /** Reloads the count of unfinished trades (for the wallet menu and the Trades badge). */
@@ -172,10 +234,37 @@ class WalletController {
     }
   }
 
+  // Asks the wallet to sign the service's sign-in challenge with defi/0 (docs/protocol.md, section 1). The
+  // transaction spends a coin that does not exist, so it is never broadcast and moves nothing.
+  private async proveOwnership(manager: DappConnectionManager, xpubs: WalletXpubs) {
+    const { challenge } = await apiPost<{ challenge: SignInChallenge }>('/api/identities/challenge', {
+      defiXpub: xpubs.defi,
+      receiveXpub: xpubs.receive,
+    });
+    const { request, inputPaths } = buildSignInRequest(electrum(), {
+      nonce: challenge.nonce,
+      defiPubkey: derivePubkeyFromXpub(xpubs.defi, 0),
+    });
+    this.set({ signing: true, signInFailed: false });
+    try {
+      const response = await manager.signTransaction(
+        { transaction: request as unknown as SignTransactionRequest['transaction'], inputPaths },
+        { signal: AbortSignal.timeout(SIGN_TIMEOUT_MS) },
+      );
+      if (response.error || !response.signedTransaction) throw new Error(response.error ?? 'No signature');
+      return { expiresAt: challenge.expiresAt, salt: challenge.salt, signedTransaction: response.signedTransaction };
+    } catch {
+      throw new SignInDeclined();
+    } finally {
+      this.set({ signing: false });
+    }
+  }
+
   private open(existing?: { privateKey: string; secret: string; walletPublicKey: string }): DappRelayResult {
     const manager = new DappConnectionManager(DAPP_NAME, undefined, { session: { key: SESSION_KEY } });
     this.manager = manager;
     this.registeredDefi = null;
+    this.walletAnswered = false;
     const relay = initiateDappRelay(
       (payload) => {
         if (this.manager !== manager) return;
@@ -191,6 +280,7 @@ class WalletController {
       // The wallet answered. A hidden page may have kept the timer running, so give the
       // rest of the pairing (Selene's second wallet_ready, with the keys) a fresh two minutes.
       if (this.state.status === 'pairing') this.startPairingTimer();
+      this.walletAnswered = true;
       this.set({ walletName: manager.walletName });
       void this.register();
     });
@@ -206,6 +296,7 @@ class WalletController {
    */
   private close(notifyWallet = false) {
     clearTimeout(this.pairingTimer);
+    clearTimeout(this.waitTimer);
     const manager = this.manager;
     const relay = this.relay;
     // Detach at once so events from this pairing are ignored; the shutdown finishes in the background.
@@ -231,6 +322,7 @@ class WalletController {
   private endedByWallet() {
     this.close();
     clearSession(SESSION_KEY);
+    keepToken(null);
     this.set(INITIAL);
   }
 
@@ -252,15 +344,36 @@ class WalletController {
     this.registering = true;
     if (this.state.status !== 'connected') this.set({ status: 'connecting', pairing: null });
     try {
-      const result = await apiPost<RegisteredIdentity>('/api/identities', {
-        defiXpub: xpubs.defi,
-        receiveXpub: xpubs.receive,
-        changeXpub: xpubs.change,
-      });
+      const keys = { defiXpub: xpubs.defi, receiveXpub: xpubs.receive };
+      // A token from an earlier sign-in on this browser resumes it without a new signature.
+      setSessionToken(storedToken());
+      let result: RegisteredIdentity;
+      try {
+        result = await apiPost<RegisteredIdentity>('/api/identities', keys);
+      } catch (err) {
+        // 401: no valid token for these keys, so the wallet must prove it owns them.
+        if (!(err instanceof ApiError && err.status === 401)) throw err;
+        if (this.manager !== manager) return;
+        // After a reload the relay reconnects in the background, and a sign request sent before the wallet
+        // answers fails. Stay "connecting": the wallet_ready that follows runs this again and asks then.
+        if (!this.walletAnswered) {
+          clearTimeout(this.waitTimer);
+          this.waitTimer = setTimeout(() => {
+            if (this.manager === manager) this.offerSignInChoice();
+          }, WALLET_WAIT_MS);
+          return;
+        }
+        clearTimeout(this.waitTimer);
+        const proof = await this.proveOwnership(manager, xpubs);
+        if (this.manager !== manager) return;
+        result = await apiPost<RegisteredIdentity>('/api/identities', { ...keys, proof });
+      }
       if (this.manager !== manager) return;
+      keepToken(result.session);
       this.registeredDefi = defi;
       this.set({
         status: 'connected',
+        signInFailed: false,
         identity: result.identity,
         xpubs,
         reputation: result.reputation,
@@ -270,14 +383,17 @@ class WalletController {
       void this.refreshActiveTrades();
     } catch (err) {
       if (this.manager !== manager) return;
+      // A refused or unanswered signature keeps the pairing open: the sign-in dialog offers to ask again or cancel.
+      if (err instanceof SignInDeclined) {
+        this.set({ signInFailed: true });
+        return;
+      }
       // The pairing stays stored, so reloading the page tries again without a new QR code.
       this.close();
       this.set({
         ...INITIAL,
-        error: {
-          title: 'Campfire could not load your wallet',
-          message: err instanceof ApiError ? err.message : 'Something went wrong. Reload the page to try again.',
-        },
+        // The service's own words when it gave a reason (they are in English), else a general line.
+        error: { kind: 'load', detail: err instanceof ApiError ? err.message : null },
       });
     } finally {
       this.registering = false;
@@ -291,10 +407,15 @@ const controller = new WalletController();
 
 export const startWallet = () => controller.restore();
 
+/** Called by main.tsx whenever the page is in view again. */
+export const walletPageShown = () => controller.pageShown();
+
 // Created once, so components can pass these to effects without re-running them on every render.
 const actions = {
   connect: () => controller.connect(),
   disconnect: () => controller.disconnect(),
+  retrySignIn: () => controller.retrySignIn(),
+  offerSignInChoice: () => controller.offerSignInChoice(),
   refreshActiveTrades: () => controller.refreshActiveTrades(),
   sign: (request: Record<string, unknown>, inputPaths: SigningPath[]) => controller.sign(request, inputPaths),
 };

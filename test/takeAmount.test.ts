@@ -4,11 +4,18 @@ import { effectiveMode, resolveAmount, usablePrice } from '../src/web/takeAmount
 const base = { min: 100_000n, max: 10_000_000n, assetDecimals: 8, unitPrice: '500000', marginBps: 0 };
 
 describe('effectiveMode', () => {
-  it('uses fiat only for BCH with a price', () => {
-    expect(effectiveMode('fiat', { isBch: true, hasPrice: true })).toBe('fiat');
-    expect(effectiveMode('fiat', { isBch: true, hasPrice: false })).toBe('coin');
-    expect(effectiveMode('fiat', { isBch: false, hasPrice: true })).toBe('coin');
-    expect(effectiveMode('coin', { isBch: true, hasPrice: true })).toBe('coin');
+  it('uses fiat whenever there is a price, for any coin', () => {
+    expect(effectiveMode('fiat', { hasPrice: true })).toBe('fiat');
+    expect(effectiveMode('fiat', { hasPrice: false })).toBe('coin');
+    expect(effectiveMode('coin', { hasPrice: true })).toBe('coin');
+  });
+
+  it('turns pesos into PUSD cents, rounding down, and accepts exactly the price of the minimum', () => {
+    // 1 PUSD at 1,776.43 ARS: 1,776.43 ARS buys 1.00 PUSD, 3,000 ARS buys 1.68 PUSD.
+    const pusd = { mode: 'fiat' as const, min: 100n, max: 500n, assetDecimals: 2, unitPrice: '1776.43', marginBps: 0 };
+    expect(resolveAmount({ ...pusd, input: '1776.43' })).toEqual({ units: 100n, state: 'ok' });
+    expect(resolveAmount({ ...pusd, input: '3000' })).toEqual({ units: 168n, state: 'ok' });
+    expect(resolveAmount({ ...pusd, input: '1000' })).toEqual({ units: 56n, state: 'range' });
   });
 });
 

@@ -49,6 +49,8 @@ export async function createAppFromEnv(
     provider?: NetworkProvider;
     priceFeed?: PriceFeedProvider;
     createStorage?: (databaseUrl: string) => StorageAdapter;
+    // The platform's way to finish work after the response (Vercel's waitUntil); see createApiHandler.
+    waitUntil?: (work: Promise<unknown>) => void;
   } = {},
 ): Promise<CampfireApp> {
   const errors: string[] = [];
@@ -64,6 +66,12 @@ export async function createAppFromEnv(
   const databaseUrl = env.DATABASE_URL?.trim() || env.POSTGRES_URL?.trim() || undefined;
   if (!databaseUrl && env.VERCEL) {
     errors.push('DATABASE_URL is required on Vercel: in-memory storage is lost between function instances');
+  }
+
+  // Set once the offer category exists (scripts/offer-genesis.ts); until then offers keep the 1,000-sat marker.
+  const offerCategory = env.CAMPFIRE_OFFER_CATEGORY?.trim().toLowerCase() || undefined;
+  if (offerCategory && !/^[0-9a-f]{64}$/.test(offerCategory)) {
+    errors.push('CAMPFIRE_OFFER_CATEGORY must be a 64-character hexadecimal token category');
   }
 
   const adminToken = env.ADMIN_TOKEN?.trim() || undefined;
@@ -96,6 +104,7 @@ export async function createAppFromEnv(
     oracle,
     arbiterPrivateKey: arbiterKey,
     demoSellerIdentity: demoWallet?.identity,
+    offerCategory,
   });
 
   let demo: DemoSeller | undefined;
@@ -110,7 +119,7 @@ export async function createAppFromEnv(
   }
 
   return {
-    handler: createApiHandler({ service, oracle, demo, adminToken }),
+    handler: createApiHandler({ service, oracle, demo, adminToken, waitUntil: deps.waitUntil }),
     service,
     storage,
     demo,

@@ -26,18 +26,23 @@ import {
   buildCancelRequest,
   buildPublishOfferTransaction,
   createEscrowContract,
+  decryptChatMessage,
   decryptPaymentDetails,
+  deriveSharedTradeKey,
   derivePayoutPkhFromXpub,
   derivePubkeyFromXpub,
   deriveWalletAddressMap,
   generateSessionKeyPair,
+  offerMinter,
   pkhToCashAddress,
   pkhToLockingBytecode,
   tagWalletUtxos,
+  verifyChatMessageSignature,
   type OfferDocument,
 } from '../src/protocol/index.js';
 import {
   CampfireService,
+  DEMO_GREETING,
   DEMO_TRADE_INDEX_BASE,
   DemoSeller,
   MemoryStorage,
@@ -45,10 +50,12 @@ import {
   StaticPriceFeed,
   createApiHandler,
   deriveDemoSellerWallet,
+  feeAddress,
   type DemoSellerLimits,
   type StoredOffer,
   type StoredTrade,
 } from '../src/server/index.js';
+import { registerSignedIn, sessionHeaders, sessionOf } from './signin-helper.js';
 
 function makeWallet(label: string) {
   const seed = new Uint8Array(64);
@@ -94,6 +101,8 @@ async function setupDemo(options?: {
   // After each broadcast, this many lookups of the bot's main address return the coins as they were
   // before it, like an Electrum server that has not processed the transaction yet.
   indexerLagLookups?: number;
+  reconcileWaitMs?: number;
+  waitUntil?: (work: Promise<unknown>) => void;
 }) {
   let currentNow = 1_794_900_000;
   const nowSeconds = () => currentNow;
@@ -158,7 +167,7 @@ async function setupDemo(options?: {
     indexPollMs: 0,
   });
   await demo.init();
-  const api = createApiHandler({ service, oracle, demo, adminToken: ADMIN_TOKEN });
+  const api = createApiHandler({ service, oracle, demo, adminToken: ADMIN_TOKEN, reconcileWaitMs: options?.reconcileWaitMs, waitUntil: options?.waitUntil });
 
   provider.addUtxo(botWallet.receiveAddress(0), randomUtxo({ satoshis: options?.botSats ?? 500_000n }));
   if (options?.botPusd !== 0n) {
@@ -174,7 +183,7 @@ async function setupDemo(options?: {
     body?: unknown,
     extraHeaders?: Record<string, string>,
   ): Promise<{ status: number; data: T }> => {
-    const headers: Record<string, string> = { ...extraHeaders };
+    const headers: Record<string, string> = { ...sessionHeaders(path, body), ...extraHeaders };
     if (body) headers['content-type'] = 'application/json';
     const res = await api(
       new Request(`http://localhost${path}`, {
@@ -186,10 +195,7 @@ async function setupDemo(options?: {
     return { status: res.status, data: (await res.json()) as T };
   };
 
-  const { data: reg } = await jsonReq('POST', '/api/identities', {
-    defiXpub: buyer.defiXpub,
-    receiveXpub: buyer.receiveXpub,
-  });
+  const { data: reg } = await registerSignedIn(jsonReq, buyer);
   const buyerId: string = reg.identity;
 
   const { data: published } = await jsonReq<{ offers: StoredOffer[] }>(
@@ -306,6 +312,24 @@ describe('Demo seller bot (protocol section 8)', () => {
     );
     expect(details.simulated).toBe(true);
     expect(details.notice).toMatch(/SIMULATED/);
+
+    // The bot writes one automatic message once the escrow is funded, signed with its session key and readable
+    // with the key the buyer shares with it. Reading the trade again does not repeat it.
+    await ctx.jsonReq('GET', `/api/trades/${trade.id}`);
+    const chat = await ctx.jsonReq<{ messages: { senderIdentity: string; senderRole?: string; ciphertext: string; signature: string }[] }>(
+      'GET',
+      `/api/trades/${trade.id}/chat`,
+      undefined,
+      sessionOf(ctx.buyerId),
+    );
+    expect(chat.data.messages).toHaveLength(1);
+    const [greeting] = chat.data.messages;
+    expect(greeting.senderIdentity).toBe(botWallet.identity);
+    expect(greeting.senderRole).toBe('seller');
+    expect(verifyChatMessageSignature(trade.sellerSessionPk!, trade.tradeId!, greeting.ciphertext, greeting.signature)).toBe(true);
+    const chatKey = deriveSharedTradeKey(taken.session.privateKey, trade.sellerSessionPk!);
+    expect(await decryptChatMessage(chatKey, greeting.ciphertext)).toBe(DEMO_GREETING);
+    expect(DEMO_GREETING).toMatch(/^Automatic message/);
 
     const paid = await ctx.jsonReq<{ trade: StoredTrade }>('POST', `/api/trades/${trade.id}/paid`, {
       buyerIdentity: ctx.buyerId,
@@ -458,6 +482,62 @@ describe('Demo seller bot (protocol section 8)', () => {
     expect(trades.map((t) => t.status)).toEqual(['Dropped', 'Dropped']);
   });
 
+  it('does not count the sats under an offer NFT or another token as funds it can deposit', async () => {
+    // About 7,000 plain sats are left after the two offers. An offer NFT at the main address carries many more sats,
+    // but the funding transaction never spends a token coin, so the take must be declined, not accepted and stuck.
+    const ctx = await setupDemo({ botSats: 10_000n, botPusd: 0n });
+    ctx.provider.addUtxo(
+      botWallet.receiveAddress(0, true),
+      randomUtxo({ satoshis: 50_000n, token: { category: '11'.repeat(32), amount: 0n, nft: { capability: 'none', commitment: '' } } }),
+    );
+    const taken = await ctx.take(ctx.bchOffer.offerTxid, '20000');
+    expect(taken.status).toBe(429);
+    expect(taken.data.error).toMatch(/run out of funds/);
+    const trades = await ctx.service.listTrades({ identity: ctx.buyerId });
+    expect(trades.map((t) => t.status)).toEqual(['Dropped']);
+  });
+
+  it('answers a trade read while the bot is stuck on its deposit, and runs one retry at a time', async () => {
+    const ctx = await setupDemo({ reconcileWaitMs: 20 });
+    ctx.failBroadcasts(1);
+    const taken = await ctx.take(ctx.bchOffer.offerTxid, '20000');
+    expect(taken.status).toBe(400);
+    const [trade] = await ctx.service.listTrades({ identity: ctx.buyerId });
+    expect(trade.status).toBe('Accepted');
+
+    // From now on the network never answers a broadcast.
+    let sends = 0;
+    ctx.provider.sendRawTransaction = () => {
+      sends += 1;
+      return new Promise<string>(() => {});
+    };
+    const reads = await Promise.all([1, 2, 3].map(() => ctx.jsonReq<{ trade: StoredTrade }>('GET', `/api/trades/${trade.id}`)));
+    expect(reads.map((r) => r.status)).toEqual([200, 200, 200]);
+    expect(reads.map((r) => r.data.trade.status)).toEqual(['Accepted', 'Accepted', 'Accepted']);
+    // The three polls joined one retry instead of queuing three behind the lock.
+    expect(sends).toBe(1);
+  });
+
+  it('answers a take within the wait and hands the unfinished deposit to waitUntil', async () => {
+    const kept: Promise<unknown>[] = [];
+    const ctx = await setupDemo({ reconcileWaitMs: 20, waitUntil: (work) => kept.push(work) });
+    // The network takes its time with the deposit.
+    let finishBroadcast: () => void = () => {};
+    const realSend = ctx.provider.sendRawTransaction.bind(ctx.provider);
+    ctx.provider.sendRawTransaction = (hex: string) =>
+      new Promise<void>((resolve) => (finishBroadcast = resolve)).then(() => realSend(hex));
+
+    const taken = await ctx.take(ctx.bchOffer.offerTxid, '20000');
+    expect(taken.status).toBe(201);
+    expect(taken.data.trade.status).not.toBe('Funded');
+    expect(kept).toHaveLength(1);
+
+    // Once the network answers, the work kept alive finishes the deposit.
+    finishBroadcast();
+    await Promise.all(kept);
+    expect((await ctx.service.getTrade(taken.data.trade.id))?.status).toBe('Funded');
+  });
+
   it('returns the funds to the bot by arbiter verdict when the 5-minute payment window ends', async () => {
     const ctx = await setupDemo();
     const taken = await ctx.take(ctx.bchOffer.offerTxid, '15000');
@@ -476,7 +556,7 @@ describe('Demo seller bot (protocol section 8)', () => {
 
     // One GET reads the trade twice (demo reconcile, then the response), so fail both attempts.
     ctx.failBroadcasts(2);
-    const first = await ctx.jsonReq<{ trade: StoredTrade }>('GET', `/api/trades/${taken.data.trade.id}`);
+    const first = await ctx.jsonReq<{ trade: StoredTrade }>('GET', `/api/trades/${taken.data.trade.id}?viewer=${ctx.buyerId}`);
     expect(first.data.trade.status).toBe('ResolvedSeller');
     expect(first.data.trade.verdictSignature).toBeDefined();
     expect(first.data.trade.settlementTxid).toBeUndefined();
@@ -492,8 +572,12 @@ describe('Demo seller bot (protocol section 8)', () => {
 
     const early = await ctx.jsonReq('POST', `/api/demo/trades/${id}/verdict`, { verdict: VERDICT_BUYER });
     expect(early.status).toBe(400);
+    // Before the dispute a visitor reads the public view only: no names, no fiat terms.
     const earlyView = await ctx.jsonReq('GET', `/api/trades/${id}?arbiter=true`);
-    expect(earlyView.status).toBe(403);
+    expect(earlyView.status).toBe(200);
+    expect(earlyView.data.trade.public).toBe(true);
+    expect(earlyView.data.trade.buyerIdentity).toBeUndefined();
+    expect(earlyView.data.trade.fiatAmount).toBeUndefined();
 
     const disputed = await ctx.jsonReq<{ trade: StoredTrade }>('POST', `/api/trades/${id}/dispute`, {
       callerIdentity: ctx.buyerId,
@@ -501,9 +585,12 @@ describe('Demo seller bot (protocol section 8)', () => {
     });
     expect(disputed.data.trade.status).toBe('Disputed');
 
-    // Any visitor can open the arbiter view of a disputed demo trade.
+    // Any visitor can open the arbiter view of a disputed demo trade: the whole record, without the chat key.
     const view = await ctx.jsonReq('GET', `/api/trades/${id}?arbiter=true`);
     expect(view.status).toBe(200);
+    expect(view.data.trade.public).toBeUndefined();
+    expect(view.data.trade.disputeReason).toBe('Testing the demo arbiter console');
+    expect(view.data.trade.sharedTradeKeyHex).toBeUndefined();
 
     const decided = await ctx.jsonReq<{ trade: StoredTrade; simulatedArbiter: boolean }>(
       'POST',
@@ -525,10 +612,7 @@ describe('Demo seller bot (protocol section 8)', () => {
 
   it('ignores a client-supplied isDemo flag and keeps the console closed for other sellers', async () => {
     const ctx = await setupDemo();
-    const { data: reg } = await ctx.jsonReq('POST', '/api/identities', {
-      defiXpub: otherSeller.defiXpub,
-      receiveXpub: otherSeller.receiveXpub,
-    });
+    const { data: reg } = await registerSignedIn(ctx.jsonReq, otherSeller);
     const cfg = await ctx.jsonReq('GET', '/api/config');
     expect(cfg.data.demoSellerIdentity).toBe(botWallet.identity);
     const doc: OfferDocument = {
@@ -604,5 +688,102 @@ describe('Demo seller bot (protocol section 8)', () => {
     const nextDay = await ctx.take(ctx.bchOffer.offerTxid, '10000');
     expect(nextDay.status).toBe(201);
     expect(nextDay.data.trade.status).toBe('Funded');
+  });
+
+  describe('administration panel: GET /api/admin/accounts', () => {
+    it('shows the bot balance and the fee addresses only to the admin, and the fees a trade paid', async () => {
+      const ctx = await setupDemo();
+      // 5% each, so a 0.0002 BCH trade pays fees above the dust limit.
+      await ctx.service.setFeeRates({ arbiterBps: 500, oracleBps: 500 });
+
+      const anon = await ctx.jsonReq('GET', '/api/admin/accounts');
+      expect(anon.status).toBe(403);
+
+      const before = await ctx.jsonReq('GET', '/api/admin/accounts', undefined, ADMIN);
+      expect(before.status).toBe(200);
+      expect(before.data.bchUsd).toBe('450.00');
+      expect(before.data.bot.address).toBe(botWallet.receiveAddress(0));
+      expect(before.data.bot.tokenAddress).toBe(botWallet.receiveAddress(0, true));
+      expect(before.data.bot.pusdUnits).toBe('1000');
+      expect(before.data.bot.addressCount).toBe(1);
+      expect(before.data.bot.canFundMax).toEqual({ BCH: true, PUSD: true });
+      expect(before.data.bot.maxBchSats).toBe('20000');
+      // The same coins the bot decides with: the panel and spendableUtxos never disagree.
+      const coins = await ctx.demo.spendableUtxos();
+      expect(before.data.bot.bchSats).toBe(coins.reduce((sum, u) => sum + u.satoshis, 0n).toString());
+      expect(before.data.oracle.address).toBe(feeAddress(ctx.service.oraclePublicKeyHex));
+      expect(before.data.arbiter.address).toBe(feeAddress(ctx.service.arbiterPublicKeyHex));
+      expect(before.data.oracle.bchSats).toBe('0');
+      expect(before.data.arbiter.bchSats).toBe('0');
+
+      const taken = await ctx.take(ctx.bchOffer.offerTxid, '20000');
+      expect(taken.data.trade.status).toBe('Funded');
+      const after = await ctx.jsonReq('GET', '/api/admin/accounts', undefined, ADMIN);
+      expect(after.data.oracle.bchSats).toBe('1000');
+      expect(after.data.arbiter.bchSats).toBe('1000');
+    });
+
+    it('warns when the bot cannot fund a trade at its maximum', async () => {
+      const ctx = await setupDemo({ botSats: 10_000n, botPusd: 0n });
+      const { data } = await ctx.jsonReq('GET', '/api/admin/accounts', undefined, ADMIN);
+      expect(data.bot.pusdUnits).toBe('0');
+      expect(data.bot.canFundMax).toEqual({ BCH: false, PUSD: false });
+    });
+
+    it('counts the coins a trade returned to the bot at its payout address', async () => {
+      const ctx = await setupDemo();
+      const taken = await ctx.take(ctx.bchOffer.offerTxid, '15000');
+      ctx.advanceTime(301);
+      const expired = await ctx.jsonReq<{ trade: StoredTrade }>('GET', `/api/trades/${taken.data.trade.id}`);
+      expect(expired.data.trade.status).toBe('ResolvedSeller');
+      const { data } = await ctx.jsonReq('GET', '/api/admin/accounts', undefined, ADMIN);
+      expect(data.bot.addressCount).toBe(2);
+      const back = await ctx.provider.getUtxos(botWallet.receiveAddress(DEMO_TRADE_INDEX_BASE));
+      const main = await ctx.provider.getUtxos(botWallet.receiveAddress(0));
+      const total = [...back, ...main].reduce((sum, u) => sum + u.satoshis, 0n);
+      expect(data.bot.bchSats).toBe(total.toString());
+    });
+  });
+});
+
+describe('Demo offers through the minter lanes', () => {
+  it('builds the offer again on another lane when the network refuses the first one', async () => {
+    const category = binToHex(sha256.hash(utf8ToBin('demo-lane-category')));
+    const provider = new MockNetworkProvider();
+    provider.network = Network.MAINNET;
+    const minting = { category, amount: 0n, nft: { capability: 'minting' as const, commitment: '' } };
+    const minter = offerMinter(provider).tokenAddress;
+    provider.addUtxo(minter, randomUtxo({ satoshis: 1000n, token: minting }));
+    provider.addUtxo(minter, randomUtxo({ satoshis: 1000n, token: minting }));
+
+    // The first broadcast is refused, as when someone else just spent the same lane.
+    const lanesTried: string[] = [];
+    const send = provider.sendRawTransaction.bind(provider);
+    provider.sendRawTransaction = async (hex: string) => {
+      const input = decodeTransactionUnsafe(hexToBin(hex)).inputs[0];
+      lanesTried.push(`${binToHex(input.outpointTransactionHash)}:${input.outpointIndex}`);
+      if (lanesTried.length === 1) throw new Error('txn-mempool-conflict');
+      return send(hex);
+    };
+
+    const nowSeconds = () => 1_794_900_000;
+    const oracle = new OracleService({ privateKey: sha256.hash(utf8ToBin('lane-oracle')), feed: new StaticPriceFeed({ 'BCH/USD': '450.00' }), nowSeconds });
+    const service = new CampfireService({
+      storage: new MemoryStorage(),
+      provider,
+      oracle,
+      arbiterPrivateKey: sha256.hash(utf8ToBin('lane-arbiter')),
+      nowSeconds,
+      demoSellerIdentity: botWallet.identity,
+      offerCategory: category,
+    });
+    const demo = new DemoSeller({ service, provider, wallet: botWallet, nowSeconds, indexPollMs: 0 });
+    await demo.init();
+    provider.addUtxo(botWallet.receiveAddress(0), randomUtxo({ satoshis: 500_000n }));
+
+    const [offer] = await demo.publishOffers(['BCH']);
+    expect(offer.onChain.version).toBe(2);
+    expect(lanesTried).toHaveLength(2);
+    expect(new Set(lanesTried).size).toBe(2);
   });
 });

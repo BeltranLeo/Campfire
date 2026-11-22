@@ -41,6 +41,7 @@ import {
   type StoredOffer,
   type StoredTrade,
 } from '../src/server/index.js';
+import { registerSignedIn, sessionHeaders, sessionOf } from './signin-helper.js';
 
 function makeWallet(label: string) {
   const seed = new Uint8Array(64);
@@ -101,11 +102,16 @@ async function setup(options?: { limits?: Partial<SponsorshipLimits>; botSats?: 
   provider.addUtxo(botWallet.receiveAddress(0), randomUtxo({ satoshis: options?.botSats ?? 500_000n }));
   const api = createApiHandler({ service, oracle, demo, adminToken: ADMIN_TOKEN });
 
-  const req = async <T = any>(method: string, path: string, body?: unknown): Promise<{ status: number; data: T }> => {
+  const req = async <T = any>(
+    method: string,
+    path: string,
+    body?: unknown,
+    extraHeaders?: Record<string, string>,
+  ): Promise<{ status: number; data: T }> => {
     const res = await api(
       new Request(`http://localhost${path}`, {
         method,
-        headers: body ? { 'content-type': 'application/json' } : {},
+        headers: { ...sessionHeaders(path, body), ...(body ? { 'content-type': 'application/json' } : {}), ...extraHeaders },
         body: body ? JSON.stringify(body) : undefined,
       }),
     );
@@ -113,7 +119,7 @@ async function setup(options?: { limits?: Partial<SponsorshipLimits>; botSats?: 
   };
 
   const register = async (w: ReturnType<typeof makeWallet>): Promise<string> =>
-    (await req('POST', '/api/identities', { defiXpub: w.defiXpub, receiveXpub: w.receiveXpub })).data.identity;
+    (await registerSignedIn(req, w)).data.identity;
   const cfg = (await req('GET', '/api/config')).data;
 
   const buyOffer = (overrides: Partial<OfferDocument> = {}): OfferDocument => ({
@@ -276,7 +282,7 @@ describe('Buy offers published and paid for by the service', () => {
       fundingTxHex: fundTx.hex,
       encryptedPaymentDetails: details,
       paymentDetailsSignature: signPaymentDetails(sellerSession.privateKey, acceptedTrade.tradeId!, details),
-    });
+    }, sessionOf(sellerId));
     expect(funded.status).toBe(200);
     expect(funded.data.trade.status).toBe('Funded');
     // Once funded, the buyer still cannot swap the details.
@@ -318,17 +324,29 @@ describe('Buy offers published and paid for by the service', () => {
     ).rejects.toThrow(/buy offer/);
 
     const taken = await ctx.req<{ trade: StoredTrade }>('POST', '/api/trades', { offerTxid: offer.offerTxid, amount: '200000', sellerIdentity: sellerId, ...sellerKeys(0) });
-    // The seller who took the request cannot accept it for the buyer.
+    // The seller who took the request cannot accept it for the buyer: the buyer's route needs the buyer's session.
     const viaSellerRoute = await ctx.req('POST', `/api/trades/${taken.data.trade.id}/accept`, {
       sellerIdentity: sellerId,
       ...sellerKeys(1),
       encryptedPaymentDetails: 'x:y',
     });
-    expect(viaSellerRoute.status).toBe(400);
+    expect(viaSellerRoute.status).toBe(403);
     // The amount is chosen by the seller within the offer's range.
     const outOfRange = await ctx.req('POST', '/api/trades', { offerTxid: offer.offerTxid, amount: '50', sellerIdentity: sellerId, ...sellerKeys(2) });
     expect(outOfRange.status).toBe(400);
     expect(outOfRange.data.error).toMatch(/outside offer range/);
+  });
+
+  it('does not let the publisher take their own offer, even past the page', async () => {
+    const ctx = await setup();
+    const buyerId = await ctx.register(buyer);
+    const offer = (await ctx.publish(buyerId, ctx.buyOffer())).data.offer;
+
+    // The page hides the button; a second tab with the same wallet, or a direct request, reaches the service.
+    const own = await ctx.req('POST', '/api/trades', { offerTxid: offer.offerTxid, amount: '200000', sellerIdentity: buyerId, ...sellerKeys(0) });
+    expect(own.status).toBe(400);
+    expect(own.data.error).toMatch(/your own offer/);
+    expect(await ctx.service.listTrades({ offerTxid: offer.offerTxid })).toHaveLength(0);
   });
 
   it('lets only the buyer who published the offer decline a request', async () => {
@@ -352,6 +370,34 @@ describe('Buy offers published and paid for by the service', () => {
     const late = await ctx.req('POST', `/api/trades/${second.id}/accept`, { buyerIdentity: buyerId, ...buyerKeys(buyer, 0) });
     expect(late.status).toBe(400);
     expect(late.data.error).toMatch(/state "Dropped"/);
+  });
+
+  it('lets only the seller who sent the request withdraw it, and only before the buyer accepts', async () => {
+    const ctx = await setup();
+    const buyerId = await ctx.register(buyer);
+    const sellerId = await ctx.register(seller);
+    const offer = (await ctx.publish(buyerId, ctx.buyOffer())).data.offer;
+    const request = async () =>
+      (await ctx.req<{ trade: StoredTrade }>('POST', '/api/trades', { offerTxid: offer.offerTxid, amount: '200000', sellerIdentity: sellerId, ...sellerKeys(0) })).data.trade;
+
+    const first = await request();
+    // The publisher declines; the requester withdraws. Neither can do the other's part.
+    const byBuyer = await ctx.req('POST', `/api/trades/${first.id}/withdraw`, { identity: buyerId });
+    expect(byBuyer.status).toBe(400);
+    expect(byBuyer.data.error).toMatch(/Only the person who sent this request/);
+    const bySeller = await ctx.req<{ trade: StoredTrade }>('POST', `/api/trades/${first.id}/withdraw`, { identity: sellerId });
+    expect(bySeller.status).toBe(200);
+    expect(bySeller.data.trade.status).toBe('Dropped');
+    expect(bySeller.data.trade.withdrawnAt).toBeDefined();
+    // Nothing to accept any more.
+    const late = await ctx.req('POST', `/api/trades/${first.id}/accept`, { buyerIdentity: buyerId, ...buyerKeys(buyer, 0) });
+    expect(late.data.error).toMatch(/state "Dropped"/);
+
+    // Once accepted, the request is a trade: leaving it goes through the escrow, not a withdrawal.
+    const { taken } = await takeAndAccept(ctx, offer.offerTxid, buyerId, sellerId);
+    const afterAccept = await ctx.req('POST', `/api/trades/${taken.data.trade.id}/withdraw`, { identity: sellerId });
+    expect(afterAccept.status).toBe(400);
+    expect(afterAccept.data.error).toMatch(/state "Accepted"/);
   });
 
   it('keeps client-signed publication for sell offers only', async () => {
@@ -415,9 +461,9 @@ describe('Limits on offers the service pays for', () => {
     expect(sell.status).toBe(400);
     expect(sell.data.error).toMatch(/only pays for buy offers/);
 
+    // An identity nobody signed in as has no session token.
     const unknown = await ctx.publish('f'.repeat(64), ctx.buyOffer(), 1);
-    expect(unknown.status).toBe(400);
-    expect(unknown.data.error).toMatch(/not registered/);
+    expect(unknown.status).toBe(401);
     // Nothing was spent on the refused ones: one publication so far.
     expect((await ctx.req('GET', '/api/offers/sponsored')).data.usedToday).toBe(1);
   });
@@ -538,6 +584,22 @@ describe('The demo seller and buy offers', () => {
     const ars = await ctx.publish(buyerId, ctx.buyOffer({ paymentMethods: ['simulated'], min: '5000', max: '20000' }), 2);
     expect(ars.status).toBe(201);
     expect(ars.data.trade?.fiatAmount).toBe('25.13'); // the bot takes it too: 5,000 sats at 500,000 ARS + 0.5%, rounded up
+  });
+
+  it('lets only the demo seller answer an offer whose payment is simulated alone', async () => {
+    const ctx = await setup();
+    const buyerId = await ctx.register(buyer);
+    const sellerId = await ctx.register(seller);
+    const demoOnly = (await ctx.publish(buyerId, ctx.buyOffer({ paymentMethods: ['simulated'], fiat: 'USD', price: { type: 'floating', pair: 'BCH/USD', marginBps: 0 }, min: '5000', max: '50000' }))).data.offer;
+    const human = await ctx.req<{ error: string }>('POST', '/api/trades', { offerTxid: demoOnly.offerTxid, amount: '20000', sellerIdentity: sellerId, ...sellerKeys(0) });
+    expect(human.status).toBe(400);
+    expect(human.data.error).toMatch(/Only the demo seller/);
+
+    // Next to a real method, a real seller may answer: the buyer can pay for real.
+    const mixed = (await ctx.publish(buyerId, ctx.buyOffer({ paymentMethods: ['simulated', 'Bank transfer'], fiat: 'USD', price: { type: 'floating', pair: 'BCH/USD', marginBps: 0 }, min: '5000', max: '50000' }), 1)).data.offer;
+    const real = await ctx.req<{ trade: StoredTrade }>('POST', '/api/trades', { offerTxid: mixed.offerTxid, amount: '20000', sellerIdentity: sellerId, ...sellerKeys(1) });
+    expect(real.status).toBe(201);
+    expect(real.data.trade.isDemo).toBe(false);
   });
 
   it('retries the deposit on the next read when it failed right after the buyer accepted', async () => {

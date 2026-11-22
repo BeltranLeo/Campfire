@@ -31,8 +31,25 @@ The service stores public keys and unsigned transactions only. It never stores a
 Connecting a wallet with WizardConnect is the only sign-in. There are no accounts, passwords or e-mail addresses.
 
 - A user's **identity** is the SHA-256 of the `defi` extended public key their wallet shares on connection. The same wallet yields the same identity on every visit.
-- The service treats the extended public key presented by the client as the user, without a further proof of possession. This is acceptable because sign-in never controls funds: every movement of funds needs a wallet signature or an arbiter verdict.
+- Knowing the extended public keys proves nothing: WizardConnect gives the same keys to every dapp the wallet connects to. So the first time the service sees a pair of `defi` and `receive` keys, it asks the wallet to sign a **sign-in challenge** with its `defi/0` key (below). Presenting keys already on record without a session token asks for the signature again: knowing the keys is never enough.
+- A sign-in returns a **session token**, which the client keeps in the browser and sends in the `X-Campfire-Session` header. Every request that acts for an identity must carry that identity's token, or the answer is `401` (no valid token) or `403` (a token of another identity): publishing, paying for or closing an offer, listing one's trades, taking, accepting, declining, marking as paid, disputing and posting to the chat. Reads of an offer or a trade by its id stay public, and steps that carry a wallet signature (funding, settling) are proven by that signature.
+- The token is `identity.expiresAt.mac`, where `mac` is `HMAC-SHA256(key, "CMPF-SESSION-v1|" ‖ identity ‖ "|" ‖ expiresAt)` with another key derived from the arbiter key. The service checks it by recomputing the MAC, so it stores no sessions. It lasts 30 days. Presenting a valid token with the keys on record renews it, so a returning visitor on the same browser signs once a month, not once per visit; another browser, or one with cleared storage, signs again.
 - With the extended public key the service can check that the signing keys and payout addresses of a trade belong to that identity. It can therefore link all trades of one wallet, while those trades remain unlinked on-chain.
+
+**Sign-in challenge.** WizardConnect cannot sign messages, only transactions, so the wallet proves it owns `defi/0` by signing a transaction that can never be broadcast:
+
+1. The client asks `POST /api/identities/challenge` with both keys. The service answers a `nonce`, an `expiresAt` five minutes ahead and a random `salt`. The nonce is `HMAC-SHA256(key, "CMPF-SIGNIN-v1|" ‖ identity ‖ "|" ‖ SHA-256(receive key) ‖ "|" ‖ expiresAt ‖ "|" ‖ salt)`, with a key derived from the arbiter key, so the service keeps no state and every instance can check it.
+2. The wallet signs, with `inputPaths = [[0, "defi", 0]]`, a transaction with one input and two outputs. The input spends output 0 of the made-up transaction `SHA-256("CMPF-SIGNIN-v1:" ‖ nonce)`, a coin of 10,000 sats locked to `defi/0`. Output 0 is an OP_RETURN with `CMPF-SIGNIN-v1` and the nonce; output 1 sends 9,500 sats back to `defi/0`, so the wallet shows a payment to itself.
+3. The client sends the keys again to `POST /api/identities` with `proof: { expiresAt, salt, signedTransaction }`. The service recomputes the nonce, rebuilds the coin from the `defi` key and checks the signature with the BCH virtual machine (`src/protocol/signin.ts`).
+
+The coin does not exist, so the transaction can never be confirmed, and the signature covers the coin, so it answers one challenge only. The nonce covers the `receive` key, so a signed challenge cannot register another one. Without a valid proof or session token, the answer is `401`. With one, the owner can also replace the `receive` key on record, which undoes a registration someone else made first. Selene and Paytaca both sign this challenge.
+
+**What the service holds.** On connection the client sends the `defi` and `receive` extended public keys to `POST /api/identities`, and the service stores them unencrypted (in Postgres on Vercel) and never deletes them. It needs them to check the keys and payout addresses of each trade and to build the marker address of a buy offer. Whoever can read that database can derive every address of the wallet's `receive` and `defi` paths, read their balances and history, and link all of its trades. They cannot spend: no private key ever reaches the service. The `change` extended public key never leaves the browser, which uses it only to find the wallet's coins. No endpoint returns these keys to anyone else, and a counterparty receives only the keys derived for the trade they share. The wallet's addresses are also visible to the public Electrum server the browser queries to read balances and find unused addresses, together with the visitor's IP address.
+
+**Names.** The interface does not show the identity hash. It shows a name derived from it, such as «Quiet Cedar» with its initials, the same on every screen, including the connected wallet's own button and menu (under «You appear as»). The hash stays in the menu as «Your fingerprint».
+
+- The name is provisional. Nobody chooses it, which keeps the sign-in to one confirmation in the wallet, but it is a label to recognise someone, not a proof of who they are. There are 1,024 names, so two identities can share one, and since an identity costs nothing, a user could generate wallets until one lands on the name of a trusted seller.
+- Planned, not built: a personal name that the user picks. It must be signed by the wallet, so that nobody can claim another identity's name, and unique across the service. Until then, trade counts and the offer page, not the name, are what a visitor should judge by.
 
 ### Reputation
 
@@ -69,14 +86,14 @@ stateDiagram-v2
 | Transition | Triggered by | Operation | Deadline |
 | --- | --- | --- | --- |
 | → Published | Seller | On-chain transaction with the offer `OP_RETURN` and a marker output (section 3) | — |
-| Published → Closed | Seller | On-chain transaction spending the marker output | Any time |
+| Published → Closed | Seller | On-chain transaction spending the marker output (in format 2, burning the marker NFT) | Any time |
 | Published → Expired | Nobody | None; clients compare `expiresAt` with the current time | `expiresAt` |
 
 Publishing an offer locks no funds. An offer with a `min`–`max` range can be taken many times, each time for an amount the taker chooses within the range, until the publisher closes it.
 
 **Buy offers.** A buyer who publishes an offer signs nothing and owns no BCH. The buyer's client sends the offer document and the index of a fresh `receive` address (`POST /api/offers/sponsored`); the service builds the usual offer transaction, pays its fee from its own wallet and broadcasts it. The 1,000-sat marker output goes to the buyer's `receive` address, not to the service, so the buyer closes the offer with the same transaction as any publisher, without depending on the service. The service stores the publisher in the offer record's `sellerIdentity` field, a name that dates from when only sell offers existed.
 
-The service limits what it pays for. Identities are not proven (section 1), so only the daily limit across everyone bounds its spending; the limit per identity is a courtesy that a fresh wallet gets around.
+The service limits what it pays for. A fresh wallet is a new identity (section 1), so only the daily limit across everyone bounds its spending; the limit per identity is a courtesy that a fresh wallet gets around.
 
 | Limit | Value | When it is reached |
 | --- | --- | --- |
@@ -93,7 +110,7 @@ The service limits what it pays for. Identities are not proven (section 1), so o
 stateDiagram-v2
     [*] --> Requested: taker requests the offer
     Requested --> Accepted: publisher accepts
-    Requested --> Dropped: publisher declines or quote expires
+    Requested --> Dropped: publisher declines, taker withdraws or quote expires
     Accepted --> Funded: seller funds escrow
     Accepted --> Dropped: funding window ends
     Funded --> Paid: buyer marks fiat as sent
@@ -144,7 +161,7 @@ The states, the escrow contract, the `tradeId` and the windows are the same. Onl
 | Pay → `Paid` | Buyer | Buyer | No |
 | Release → `Released` | Seller | Seller | Yes |
 
-The request on a buy offer already carries the seller's keys, so a `Requested` trade has its `sellerIdentity` and its `buyerIdentity` (the publisher) from the start, and each finds it under their own identity. The trade record keeps the `side` of the offer it came from; records without one are sell trades. The publisher can decline a request (`POST /api/trades/:id/decline`); the taker cannot accept or decline it.
+The request on a buy offer already carries the seller's keys, so a `Requested` trade has its `sellerIdentity` and its `buyerIdentity` (the publisher) from the start, and each finds it under their own identity. The trade record keeps the `side` of the offer it came from; records without one are sell trades. The publisher can decline a request (`POST /api/trades/:id/decline`); the taker cannot accept or decline it, but can withdraw it while it waits (`POST /api/trades/:id/withdraw`, no signature: nothing is on-chain yet), which records `withdrawnAt`.
 
 The buyer has to accept within the 10 minutes of the quote, or the request lapses and the seller must take the offer again. This is an accepted risk for the hackathon: a notification, or a longer window, would remove it.
 
@@ -170,12 +187,14 @@ An offer is published by a transaction from the seller's wallet with these outpu
 | 1 | Marker: 1,000 sats to a fresh address of the seller. The offer is open while this output is unspent. |
 | 2 | Change (optional) |
 
+This is format 1. Format 2 (section 3.4) carries the same offer JSON and the same `OP_RETURN` fields, with format version `0x02`, and replaces the plain marker with an NFT. The service accepts both; offers published in format 1 keep working until they close or expire.
+
 `OP_RETURN` data pushes, in order:
 
 | # | Field | Size (bytes) | Value |
 | --- | --- | --- | --- |
 | 1 | Protocol identifier | 4 | ASCII `CMPF` |
-| 2 | Format version | 1 | `0x01` |
+| 2 | Format version | 1 | `0x01`, or `0x02` for an NFT marker (section 3.4) |
 | 3 | Message type | 1 | `0x01` = offer |
 | 4 | Arbiter public key | 33 | Compressed secp256k1 key |
 | 5 | Oracle public key | 33 | Compressed secp256k1 key; 33 zero bytes for a fixed-price offer |
@@ -243,13 +262,89 @@ When the seller accepts, both clients hold the same trade-terms document:
   "sellerPayoutPkh": "…", "buyerPayoutPkh": "…",
   "sellerSessionPk": "…", "buyerSessionPk": "…",
   "refundTime": 1796109600,
-  "nonce": "…"
+  "nonce": "…",
+  "fees": [
+    { "role": "arbiter", "pkh": "…", "satoshis": "625" },
+    { "role": "oracle", "pkh": "…", "satoshis": "625" }
+  ]
 }
 ```
 
-`tradeId` = SHA-256 of these bytes. It is a constructor parameter of the escrow contract, so the escrow address commits to every term: the price, the oracle that signed it, the fiat amount and the session keys. Anyone holding the document can recompute the address and check it against the chain.
+`tradeId` = SHA-256 of these bytes. It is a constructor parameter of the escrow contract, so the escrow address commits to every term: the price, the oracle that signed it, the fiat amount, the session keys and the service fees (section 5.1). Anyone holding the document can recompute the address and check it against the chain.
 
-**Price quote.** For a floating offer, the oracle signs `SHA-256("CMPF-QUOTE" ‖ pair ‖ price ‖ timestamp)` with its key. Clients verify the signature against the oracle key in the offer before accepting. The contract does not verify the quote; it commits to it through `tradeId`, and the arbiter checks it in a dispute. For a fixed offer, `quote` is omitted and the price comes from the offer.
+**Price quote.** For a floating offer, the oracle signs `SHA-256("CMPF-QUOTE" ‖ pair ‖ price ‖ timestamp)` with its key. The fields are joined with no separator, so a quote is valid only when `pair` is capital letters and one `/` (no digits) and `timestamp` has exactly 10 digits: that leaves a single way to split the signed bytes back into fields. Clients verify the signature against the oracle key in the offer before accepting. The contract does not verify the quote; it commits to it through `tradeId`, and the arbiter checks it in a dispute. For a fixed offer, `quote` is omitted and the price comes from the offer.
+
+### 3.4 NFT markers (format 2)
+
+**Why.** A 1,000-sat marker is an ordinary coin: a wallet that knows nothing about Campfire spends it to pay for something else, and the offer closes without its publisher meaning to. A CashTokens NFT is set apart by every token-aware wallet, which never spends it as plain BCH; it shows up in the wallet as a ticket for the offer; and all open offers can be found by looking for the live NFTs of one category.
+
+**The marker.** An immutable NFT (no capability) of the Campfire offer category, holding 1,000 sats, at the publisher's identity address: the token-aware (`z…`) form of `receive/0`. Its 33-byte commitment is:
+
+| Bytes | Field | Value |
+| --- | --- | --- |
+| 0 | Side | `0x01` = sell offer, `0x02` = buy offer |
+| 1–32 | Offer content hash | The hash in the `OP_RETURN` (section 3.1) |
+
+The offer is open while that exact output (`offerTxid`, output 1) is unspent, not while the NFT exists somewhere. Any spend closes the offer: burning the NFT, moving it to another address or selling it. Someone who receives a marker NFT from its publisher therefore gets no offer with it. Campfire closes an offer by spending the NFT into a plain BCH output at the same address, which burns it (`buildCloseNftOfferTransaction`, `src/protocol/marker.ts`).
+
+**Identity address.** Every format-2 marker of a wallet goes to the same address, `receive/0`, and the service refuses any other (`markerReceiveIndex` must be 0). All of a publisher's offers are therefore linked on-chain, which gives them a public history of offers that later versions can build reputation on. Trades are not linked to it: escrow keys and payout addresses stay fresh for each trade, and the escrow contract does not name the offer. Two things can still link, and neither is a weakness the protocol can remove:
+
+- `receive/0` is the address that many wallets show for receiving payments, so whoever paid the publisher there can tell which offers are theirs.
+- The seller's escrow deposit is paid with coins already in their wallet, and coins from the identity address can fund it, because that is where many wallets keep their balance. How well a deposit is kept apart from the identity depends on the seller's own coin habits (address reuse, coin control), which no web page can guarantee. What Campfire does guarantee is that the coins a trade pays out always go to a fresh address of the recipient.
+
+This address is not the Campfire identity of section 1, which is the hash of the `defi` key; it only gathers the wallet's offers. A marker NFT proves nothing on its own: the minter lets anyone mint one to any address, and once moved it no longer marks an open offer. Whether an offer is open is known from the service's record and the unspent marker output, not from holding the NFT.
+
+**Future work: a portable identity.** An identity and its reputation belong to one wallet: a new seed starts from zero. Two designs are open. An identity NFT, minted once by the covenant and spent and returned in every publication, could move to another wallet, but it could also be sold along with its reputation. A signed hand-over, in which the old identity's `defi/0` key signs the new identity's key, moves the history once and cannot be traded. The two can also be combined: an identity NFT whose reputation follows only a signed hand-over.
+
+**Who mints.** Only a minting NFT can create NFTs of a category, so Campfire keeps its minting NFTs in a covenant, `CampfireOfferMinter` (`contracts/CampfireOfferMinter.cash`), which has no key and no owner. Anyone may spend a minter UTXO to publish one offer, and the contract then requires:
+
+| Output | Rule |
+| --- | --- |
+| 0 | A format-2 offer `OP_RETURN` (111 bytes, prefix `6a04434d504601020101`), without tokens |
+| 1 | One immutable NFT of the category whose commitment is a side byte followed by the hash from output 0 |
+| 2 | The minting NFT, back at the covenant with the same commitment and at least the same value |
+| 3 | Optional change, without tokens; no further outputs |
+
+The minter must be input 0, so a transaction cannot carry two minters, and no output other than 1 may hold tokens, so nothing else of the category is minted. The covenant cannot read the offer JSON: it does not check that the side byte matches the document's `side`. The service does, and refuses to list an offer whose marker is of another category or whose commitment does not match its side and hash.
+
+| Input | Content |
+| --- | --- |
+| 0 | A minter UTXO (unlocked by the covenant's `mint()`, no signature) |
+| 1… | The publisher's plain BCH coins, which pay the marker and the fee |
+
+**Minter lanes.** Each publication spends a minter UTXO and creates a new one, so a minter is a lane that carries one publication at a time. The next publication can follow at once, without waiting for a block, because it spends the new UTXO while it is still unconfirmed. What collides is two publications built at the same moment from the same UTXO: both spend the same outpoint, the network keeps the first, and the second is rejected and has to be built and signed again. The genesis transaction (section 3.5) therefore creates four lanes, each a minter UTXO numbered by a one-byte commitment (`00` to `03`), and clients pick one at random. Two publishers who build at the same moment then share a lane one time in four, and a rejected publication is published again from a lane picked anew.
+
+The number of lanes is fixed for this category. A minting NFT could mint more minting NFTs, but the covenant forbids it (output 2 returns the same minter and no other output may hold tokens), so nobody can add lanes, and nobody can remove one either: the covenant always returns it. More lanes would take a new version of the covenant with a function that splits a minter in two.
+
+**WizardConnect.** The wallet signs only its own inputs (`inputPaths` starts at index 1); the minter's unlocking bytecode is complete before the wallet sees the transaction. This is the same request format as the escrow deposit, which already spends token outputs.
+
+**Buy offers.** The service builds a format-2 offer with its own coins as inputs 1… and the marker at the buyer's identity address, so the buyer closes it without the service, as in format 1.
+
+### 3.5 Metadata registry (BCMR)
+
+The offer category publishes a Bitcoin Cash Metadata Registry, so wallets show a marker as a "Sell offer" or "Buy offer" from "Campfire offer" with the Campfire logo, instead of an unknown token. Every text is in English. The registry is built by `buildOfferRegistry` (`src/protocol/bcmr.ts`) and served at `https://campfire.cash/.well-known/bitcoin-cash-metadata-registry.json`.
+
+| Part | Content |
+| --- | --- |
+| Identity | Name "Campfire offer", symbol `CAMPFIRE`, icon `https://campfire.cash/bcmr/campfire-offer.png`, links to the site and the source code |
+| NFT field | `offerHash`, hex |
+| `parse.bytecode` | `00cf517f7c6b6b` (`OP_0 OP_UTXOTOKENCOMMITMENT OP_1 OP_SPLIT OP_SWAP OP_TOALTSTACK OP_TOALTSTACK`): the side byte becomes the NFT type and the rest the `offerHash` field |
+| NFT types | `01` "Sell offer", `02` "Buy offer" |
+
+**On-chain publication.** The category's ID is the TXID of its authbase transaction, and the genesis transaction spends that transaction's output 0. The genesis transaction is therefore the next link of the category's authchain, and it carries the publication output `OP_RETURN <'BCMR'> <SHA-256 of the registry> <'campfire.cash'>`. A bare domain means the well-known path, and the hash is in `OP_SHA256` byte order. Its output 0, a plain 1,000-sat output to the key that created the category, is the identity output: as long as it stays unspent, the genesis transaction is the authhead and this publication is the current one. Spending it without a new publication would leave wallets with no registry on-chain.
+
+| Genesis output | Content |
+| --- | --- |
+| 0 | Identity output (1,000 sats, no token) |
+| 1…N | Minting NFTs at the minter covenant (N = 4 by default) |
+| N+1 | BCMR publication |
+| N+2 | Change (optional) |
+
+**On mainnet.** Category `dfe5f513117cd41512a2230be4e8dd4a6659b5e3ed41a8e6813be7a32ef60096`, created by genesis transaction [`696cd711…ecede9`](https://blockchair.com/bitcoin-cash/transaction/696cd7114e0f6c0a5bf529d27eeb8e40512f923626e6204bcadf1ac1a7ecede9). Its registry is `public/.well-known/bitcoin-cash-metadata-registry.json`, SHA-256 `8fc5f9ae0bba2687967b0b93e2eba0ffe8ec2a44e5b47f6f42932b10f90f7269`.
+
+`scripts/offer-genesis.ts` builds this transaction, writes the registry file before broadcasting, and prints the category for `CAMPFIRE_OFFER_CATEGORY`. The registry's bytes must not change after the genesis: wallets compare their hash with the publication. Changing the metadata means a new publication that spends the identity output.
+
+**What is not in the registry.** The details of each offer (price, amounts, payment methods) stay in the offer JSON. A registry that changed with every offer would no longer match the hash committed on-chain, and few wallets show parsed NFT fields yet.
 
 ## 4. Escrow contract
 
@@ -364,6 +459,21 @@ The same contract handles BCH and any CashToken, because the payout rule copies 
 - Before the buyer is told the escrow is funded, the client checks that a UTXO at the escrow address holds the exact value, category and token amount from the trade terms.
 - Payout addresses for token trades are shown in the token-aware format (`bitcoincash:z…`).
 
+### 5.1 Service fees
+
+The seller pays a fee to the arbiter and, on a floating-price trade, to the price oracle. The fees are extra outputs of the funding transaction, next to the escrow output, so the escrow contract does not change.
+
+- **Rates.** Basis points of the trade's value, one rate per role (0.25% each by default). The administrator changes them with `POST /api/admin/fees` (admin token), from the arbiter console; `GET /api/fees` returns them. Each rate is a whole number between 0 and 500 (5%).
+- **Fixed per trade.** The service computes the fees when the trade is requested, shows them with the request and copies them into the trade terms (`fees`), so they are part of `tradeId`. A later change of rates does not affect a trade already requested.
+- **Value.** A BCH trade is worth its amount. A PUSD trade is worth its dollar amount at the oracle's BCH/USD price at request time. A trade in any other token pays no fee.
+- **Paid in BCH.** Each fee is a P2PKH output, without tokens, to `hash160` of the role's key in the terms (`arbiterPk`, `oraclePk`). If the offer names another arbiter, that arbiter is paid.
+- **Rounding and dust.** Fees round down; a fee below 546 sats is left out.
+- **Balances.** `GET /api/admin/accounts` (admin token) returns the addresses and BCH and PUSD balances of the service's fee addresses and of the demo seller (section 8), and whether the demo seller can fund a trade at its maximum. The arbiter console shows them.
+- **Fixed-price offers** have no oracle, so they pay no oracle fee.
+- **Checks.** The terms are refused if a fee pays a key other than its role's, appears twice, is below the dust limit, or, on a BCH trade, is above 5% of the amount. The seller's client refuses terms whose fees differ from the ones shown with the request. The service counts the trade as funded only if the funding transaction has an output of at least each fee to its address.
+- **Not refundable.** The fees are paid with the deposit, so they stay paid if the trade is later cancelled or refunded.
+- Trades whose terms have no `fees` field (all trades before this section existed) pay no fee.
+
 ## 6. Payment details and chat
 
 | Data | Encrypted for | Stored where | Revealed when |
@@ -377,8 +487,28 @@ The same contract handles BCH and any CashToken, because the payout rule copies 
 - On a sell offer, the seller's client encrypts the payment details for this trade when accepting and uploads the ciphertext. The service releases it to the buyer when it sees the funding transaction. Payment details are entered per trade and never appear in an offer.
 - On a buy offer the seller does not know who they are paying until the buyer accepts and their session key becomes part of the terms. The seller therefore sends the ciphertext **with the deposit** (`POST /api/trades/:id/funding`, with `encryptedPaymentDetails` and `paymentDetailsSignature`). The service refuses the deposit without them, before broadcasting anything, so a rejected request never leaves a deposit on the network without details.
 - The buyer can derive the same ECDH key as the seller, so a ciphertext alone does not show who wrote it: a buyer could encrypt an account of their own and later show it to an arbiter as the one they paid. On a buy offer the seller therefore signs the ciphertext with their session key: a Schnorr signature over `SHA-256("CMPF-PAYMENT-DETAILS-SIG-v1:" ‖ tradeId in hex ‖ ":" ‖ ciphertext)`. The session key is committed by `tradeId`, so the service, the buyer and the arbiter can each check the signature. The service stores it next to the ciphertext and accepts a replacement only with a new valid signature.
-- Every chat message is signed by its author's session key: a Schnorr signature over `SHA-256("CMPF-CHAT-SIG-v1:" ‖ tradeId in hex ‖ ":" ‖ ciphertext)`. Both parties hold the chat key, and identities are not proven (section 1), so without the signature one party could post a message in the other's name ("payment received") and show it to the arbiter. The service accepts a message only if the signature matches the session key of the role it claims, refuses the same signed message twice, and checks every signature again when it decrypts the chat for the arbiter, who sees which role signed each message. The chat therefore opens once the trade is accepted and both session keys are in the terms.
+- Every chat message is signed by its author's session key: a Schnorr signature over `SHA-256("CMPF-CHAT-SIG-v1:" ‖ tradeId in hex ‖ ":" ‖ ciphertext)`. Both parties hold the chat key, and the arbiter should not have to take the service's word for who wrote what, so without the signature one party could post a message in the other's name ("payment received") and show it to the arbiter. The service accepts a message only if the signature matches the session key of the role it claims, refuses the same signed message twice, and checks every signature again when it decrypts the chat for the arbiter, who sees which role signed each message. The chat therefore opens once the trade is accepted and both session keys are in the terms.
+- A receipt (proof of payment) is a chat message whose plaintext is `cmpf-image:v1:<mime>:<base64>`, with `mime` one of `image/jpeg`, `image/png` or `image/webp`. It is encrypted and signed exactly like text, so both parties can send one while the chat is open and the arbiter reads it in a dispute like any other message. The browser shrinks the image to at most 150 KB before sending. The service cannot tell an image from text, so its ciphertext cap is the larger of the two. Clients show only a well-formed image, never its raw text, and refuse to send typed text that starts with the prefix.
+- `GET /api/trades/:id/chat` answers only the two parties (by their session token) and the admin. It takes an optional `since` (whole Unix seconds) and returns only messages created at or after it; the arbiter's view (`?arbiter=true`) takes the same parameter. Messages are ordered by second, so clients ask from a few seconds before the newest message they hold and drop repeats by `id`, instead of counting messages.
+- The chat stays open for seven days after the trade ends (settled, resolved, cancelled, refunded or dropped), counted from `completedAt`, or from the last update for a dropped trade, which has none. Then the service refuses new messages and the history stays readable. Late payment questions, a missing receipt or a thank-you still have a place. After a dispute the arbiter keeps the trade key, so messages sent after the verdict are readable by the arbiter too.
 - The service relays and stores ciphertext only. It can read a chat only after a party opens a dispute.
+
+### Who reads a trade
+
+A trade record links two identities to an amount, a fiat sum, payout addresses and, in a dispute, a reason in plain text. The service sends the whole record only to:
+
+- the buyer and the seller, recognised by their session token (section 1), never by a parameter;
+- the admin, with the admin token: the arbiter console lists open disputes with `GET /api/admin/trades?status=Disputed`;
+- any visitor, on a demo trade that went to dispute, because the demo arbiter console is open to everyone (section 8).
+
+Everyone else gets the **public view** (`src/server/tradeViews.ts`), marked `public: true`. It keeps the state, the asset and amount, the arbiter key, the escrow address, the deposit and settlement transactions, and the times of each step: what the chain shows anyway. It leaves out identities, keys and payout addresses, the offer, the price and fiat amount, the payment details, who opened a dispute and why, and the verdict's reason. A field added to the record stays out of the public view until it is added there.
+
+- `GET /api/trades?identity=` lists that identity's trades, whole, and needs its session token.
+- `GET /api/trades` without `identity` returns one page of public views, newest change first (`limit` up to 100, default 20; `cursor` from the previous answer's `nextCursor`), and `stats` over every trade: how many ended with the coins going to the buyer, the BCH they moved and how many were demo trades.
+- `GET /api/trades/:id` and the answers of the trade actions follow the same rule. A request with a wrong admin token is refused rather than answered as a visitor.
+- No HTTP answer carries the chat key a party handed to the arbiter, nor the demo seller's signed deposit kept for rebroadcasts. Only the service uses them.
+
+Settling still puts the payout addresses on the chain, where anyone can follow the escrow. What the public view avoids is the service adding, on top of that, who the two people are, what they paid in fiat and why they disagreed.
 
 ## 7. Sequence diagrams
 
@@ -457,7 +587,7 @@ Goal: a judge alone completes a real trade on mainnet in a few minutes, from the
   - *Dispute:* the judge opens a dispute and may then act as arbiter in a demo console that signs the verdict with the service arbiter key. This console only works for trades against the bot.
 - **Buy offers:** a judge with one wallet can also publish a buy offer (the service pays the fee) that names `simulated` among its payment methods. The bot then takes it at once, for the offer's minimum or the bot's own minimum if higher, and only if the amount fits the bot's range and the oracle can price the currency. The judge accepts the request, the bot deposits a real escrow with simulated payment details, and the rest is as above. Offers that do not name `simulated` are left to real sellers, so a real buyer is never handed a simulated trade. The bot takes an offer once, when it is published: if the judge misses the 10-minute quote, they publish again. These trades count against the bot's limits below.
 - **Offers:** the bot sells BCH and PUSD at a floating USD price from the oracle, with no margin, and uses `simulated` as its payment method.
-- **Limits:** at most 20,000 sats or 0.10 PUSD per trade, at most 2 unfinished trades at a time and at most 10 trades funded per day, counted across all visitors. Limits per wallet would not help: a new wallet is a new identity (section 1).
+- **Limits:** at most 20,000 sats or 0.10 PUSD per trade, at most 10 unfinished trades at a time and at most 200 trades funded per day, counted across all visitors. Limits per wallet would not help: a new wallet is a new identity (section 1).
 - **Arbiter access:** the service arbiter key is the default arbiter of every offer, so its views and verdicts require an admin token. The demo console is the only exception: anyone may decide a disputed trade whose seller is the bot.
 - **Honesty rule:** everything simulated carries a visible "simulated" label. On-chain steps are real and link to the explorer. The 14-day `refund` path cannot be shown live; the README links a real mainnet transaction for it instead.
 
@@ -473,7 +603,6 @@ Two wallets (or two people) can also trade with each other through the same inte
 - Buyer deposit against malicious takes.
 - Split verdicts (the arbiter can only choose one party).
 - Reputation beyond the completed-trades counter (ratings, volume, distinct counterparties, resistance to self-trading).
-- Proof of possession at sign-in (for example, signing a challenge transaction that is never broadcast).
 - Privacy tools beyond one address per use.
 - XO template.
 - A market of independent arbiters and oracles (the format supports it; no interface for it).
