@@ -103,8 +103,8 @@ export const DEFAULT_DEMO_LIMITS: DemoSellerLimits = {
   maxBchSats: 20_000n,
   minPusdUnits: 1n, // 0.01 PUSD
   maxPusdUnits: 10n, // 0.10 PUSD
-  maxActiveTrades: 2,
-  maxDailyFundings: 10,
+  maxActiveTrades: 5,
+  maxDailyFundings: 40,
   paymentWindowSec: 300, // 5 minutes (protocol section 8)
   offerLifetimeSec: 30 * 86_400,
 };
