@@ -141,13 +141,14 @@
   main.s-main[data-desk] { max-width: calc(var(--layout-site-max-width) + 2 * var(--space-6)); padding-left: var(--space-6); padding-right: var(--space-6); }
   main.s-main[data-desk="medium"] { max-width: calc(960px + 2 * var(--space-6)); }
   /* A trade with a chat: what to do on the left, the chat on the right. The chat spans the action card and the
-     progress and ends level with them, its field at the bottom like any messenger; the on-chain details take the
-     full width below. contain: size keeps a long chat from stretching the left side: its messages scroll inside.
-     When the left side is taller than the window, the chat stops at the window's height and stays in view while the
-     page scrolls (88 px: the sticky header and a gap). */
+     progress and ends level with them, its field at the bottom like any messenger; the on-chain details stay in the
+     left column below, because the chat is sticky and anything to its right would scroll under (or over) it.
+     contain: size keeps a long chat from stretching the left side: its messages scroll inside. When the left side
+     is taller than the window, the chat stops at the window's height and stays in view while the page scrolls
+     (88 px: the sticky header and a gap). */
   .s-trade:has(> .tr-chat) { max-width: 1080px; display: grid; grid-template-columns: minmax(0, 1fr) minmax(360px, 400px); column-gap: var(--space-6); align-items: start; }
   .s-trade:has(> .tr-chat) > * { grid-column: 1; }
-  .s-trade:has(> .tr-chat) > .s-pagehead, .s-trade:has(> .tr-chat) > .tr-chat ~ .cf-details { grid-column: 1 / -1; }
+  .s-trade:has(> .tr-chat) > .s-pagehead { grid-column: 1 / -1; }
   .s-trade > .tr-chat { grid-column: 2; grid-row: 2 / 4; align-self: stretch; contain: size; min-height: 400px; max-height: calc(100vh - 88px - var(--space-6)); position: sticky; top: 88px; display: flex; flex-direction: column; }
   .s-trade > .tr-chat > .cf-card__section { flex: 1; min-height: 0; display: flex; flex-direction: column; }
   .s-trade > .tr-chat .cf-chat { flex: 1; min-height: 0; max-height: none; }
