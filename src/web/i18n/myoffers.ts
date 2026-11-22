@@ -19,6 +19,8 @@ const en = {
   offerStatus: (status: string): string => (status === 'Published' ? 'Open' : status),
   tradeCount: (n: number) => `${n} ${n === 1 ? 'trade' : 'trades'}`,
   expires: (expired: boolean, date: string) => `${expired ? 'expired' : 'expires'} ${date}`,
+  // A closed offer no longer expires: its row shows when it was published.
+  published: (date: string) => `published ${date}`,
   offer: 'Offer',
   close: 'Close',
   publicationTx: 'Publication transaction',
@@ -28,6 +30,16 @@ const en = {
   expiredNote: (buying: boolean, marker: string) =>
     `It no longer shows to ${buying ? 'sellers' : 'buyers'}. Close it to get the ${marker} marker back.`,
   closeOffer: 'Close offer',
+  // Under the Close button: it still says that it signs, and that closing is final.
+  closeSigns: "Signs in your wallet · can't be undone",
+  // The button once the wallet has signed, while the service sends the transaction.
+  closing: 'Closing…',
+  closedTitle: 'Offer closed',
+  closedBody: 'It no longer shows in All offers.',
+  // The wallet's server no longer lists the marker, but the service's still does: no transaction was sent, and
+  // either view may be the one running late.
+  notYetTitle: 'Not closed yet',
+  notYetBody: 'Nothing was signed or sent. Your wallet and Campfire see this offer differently right now. Try again in a minute.',
   requestsNote: 'Requests to trade on your offers show up in My trades.',
 };
 
@@ -49,6 +61,7 @@ const es: typeof en = {
   offerStatus: (status) => (status === 'Published' ? 'Abierta' : status === 'Expired' ? 'Vencida' : status === 'Closed' ? 'Cerrada' : status),
   tradeCount: (n) => `${n} ${n === 1 ? 'operación' : 'operaciones'}`,
   expires: (expired, date) => `${expired ? 'venció el' : 'vence el'} ${date}`,
+  published: (date) => `publicada el ${date}`,
   offer: 'Oferta',
   close: 'Cierre',
   publicationTx: 'Transacción de publicación',
@@ -58,6 +71,12 @@ const es: typeof en = {
   expiredNote: (buying, marker) =>
     `Ya no se les muestra a los ${buying ? 'vendedores' : 'compradores'}. Ciérrala para recuperar el marcador de ${marker}.`,
   closeOffer: 'Cerrar la oferta',
+  closeSigns: 'Se firma en tu billetera · no se puede deshacer',
+  closing: 'Cerrando…',
+  closedTitle: 'Oferta cerrada',
+  closedBody: 'Ya no aparece en Todas las ofertas.',
+  notYetTitle: 'Todavía no se cerró',
+  notYetBody: 'No se firmó ni se envió nada. Tu billetera y Campfire ven esta oferta distinto en este momento. Vuelve a intentarlo en un minuto.',
   requestsNote: 'Las solicitudes para operar con tus ofertas aparecen en Mis operaciones.',
 };
 

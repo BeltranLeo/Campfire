@@ -77,6 +77,9 @@ export function MyOffers() {
   );
 }
 
+/** What the last close did, when it did not fail: closed (with its transaction when known), or not yet. */
+type CloseOutcome = { kind: 'closed'; closeTxid?: string } | { kind: 'notYet' };
+
 function ListSkeleton() {
   return (
     <section className="cf-card" data-flush aria-busy="true">
@@ -96,38 +99,50 @@ function OfferList({ identity, offers, trades }: { identity: string; offers: Pol
   const wallet = useWallet();
   const config = useConfig();
   const [closing, setClosing] = useState<string | null>(null);
+  // True once the wallet has signed (or nothing needed signing), so the button stops saying "Preparing…".
+  const [sent, setSent] = useState(false);
   const advanced = useAdvanced();
   const [failure, setFailure] = useState<string | null>(null);
+  const [outcome, setOutcome] = useState<CloseOutcome | null>(null);
   const messages = useMessages();
   const t = messages.myoffers;
 
   async function close(offer: Offer) {
     if (!wallet.xpubs) return;
     setClosing(offer.offerTxid);
+    setSent(false);
     setFailure(null);
+    setOutcome(null);
     try {
       const receiveXpub = wallet.xpubs.receive;
       const tx = await withKeptElectrum((provider) => buildCloseOffer({ offer, provider, receiveXpub }));
-      // No transaction when the marker is already spent: the offer is closed on-chain and the service only checks it.
+      // No transaction when the wallet's server no longer lists the marker: the service then only checks the chain.
       const closeTxHex = tx ? await wallet.sign(tx.request, tx.inputPaths) : undefined;
+      setSent(true);
       const send = (hex?: string) =>
-        apiPost(`/api/offers/${offer.offerTxid}/close`, { sellerIdentity: identity, ...(hex ? { closeTxHex: hex } : {}) });
+        apiPost<{ offer: Offer }>(`/api/offers/${offer.offerTxid}/close`, {
+          sellerIdentity: identity,
+          ...(hex ? { closeTxHex: hex } : {}),
+        });
+      let closed: Offer | null = null;
       try {
-        await send(closeTxHex);
+        closed = (await send(closeTxHex)).offer;
       } catch (err) {
-        // The transaction was sent, but the service looked before its indexer listed the spent marker: ask again
-        // without the transaction, which only re-checks. Any other error is real.
-        if (!(err instanceof ApiError && /still unspent/i.test(err.message))) throw err;
-        let done = false;
-        for (let i = 0; i < CLOSE_RETRIES && !done; i++) {
+        // With a transaction, the service sends it and records the close at once, so "still unspent" only comes
+        // back when nothing was sent: the wallet's server no longer lists the marker, but the service's indexer
+        // still does. Ask again a few times, since one of the two is running late. Any other error is real.
+        if (closeTxHex || !(err instanceof ApiError && /still unspent/i.test(err.message))) throw err;
+        for (let i = 0; i < CLOSE_RETRIES && !closed; i++) {
           await new Promise((r) => setTimeout(r, CLOSE_RETRY_MS));
-          done = await send().then(
-            () => true,
-            () => false,
+          closed = await send().then(
+            (r) => r.offer,
+            () => null,
           );
         }
-        if (!done) throw err;
       }
+      // If the retries end with the two views still disagreeing, nothing was signed or sent. That is not a failure
+      // either: the offer may well still be open, so the notice says "not yet", not "not closed".
+      setOutcome(closed ? { kind: 'closed', closeTxid: closed.closeTxid } : { kind: 'notYet' });
       offers.reload();
     } catch (err) {
       setFailure(
@@ -139,6 +154,7 @@ function OfferList({ identity, offers, trades }: { identity: string; offers: Pol
       );
     } finally {
       setClosing(null);
+      setSent(false);
     }
   }
 
@@ -185,6 +201,24 @@ function OfferList({ identity, offers, trades }: { identity: string; offers: Pol
           {failure}
         </Notice>
       )}
+      {/* Always in the page, so a screen reader announces what a close did when its notice appears. */}
+      <div role="status" aria-live="polite">
+        {outcome?.kind === 'closed' && (
+          <Notice tone="verified" title={t.closedTitle}>
+            {t.closedBody}
+            {/* A close the service only detected on-chain may have no recorded transaction to link. */}
+            {outcome.closeTxid && (
+              <>
+                {' '}
+                <a href={explorerTxUrl(outcome.closeTxid)} target="_blank" rel="noreferrer">
+                  {t.closingTx}
+                </a>
+              </>
+            )}
+          </Notice>
+        )}
+        {outcome?.kind === 'notYet' && <Notice title={t.notYetTitle}>{t.notYetBody}</Notice>}
+      </div>
       <section className="cf-card" data-flush>
         {mine.map((offer) => {
           const doc = offer.document;
@@ -202,7 +236,11 @@ function OfferList({ identity, offers, trades }: { identity: string; offers: Pol
                   <span className="cf-pill" data-tone={offer.status === 'Published' ? 'escrow' : undefined}>
                     {t.offerStatus(offer.status)}
                   </span>{' '}
-                  {t.tradeCount(n)} · {t.expires(offer.status === 'Expired', formatDayMonth(doc.expiresAt))} ·{' '}
+                  {t.tradeCount(n)} ·{' '}
+                  {offer.status === 'Closed'
+                    ? t.published(formatDayMonth(offer.createdAt))
+                    : t.expires(offer.status === 'Expired', formatDayMonth(doc.expiresAt))}{' '}
+                  ·{' '}
                   {advanced ? (
                     <>
                       {t.offer} <HashLink value={offer.offerTxid} kind="transaction" />
@@ -243,7 +281,14 @@ function OfferList({ identity, offers, trades }: { identity: string; offers: Pol
                 )}
               </div>
               {offer.status !== 'Closed' && (
-                <Button size="sm" signs busy={closing === offer.offerTxid} disabled={closing !== null && closing !== offer.offerTxid} onClick={() => close(offer)}>
+                <Button
+                  size="sm"
+                  signs={t.closeSigns}
+                  busy={closing === offer.offerTxid}
+                  busyLabel={closing === offer.offerTxid && sent ? t.closing : null}
+                  disabled={closing !== null && closing !== offer.offerTxid}
+                  onClick={() => close(offer)}
+                >
                   {t.closeOffer}
                 </Button>
               )}
