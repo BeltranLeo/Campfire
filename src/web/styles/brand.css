@@ -28,7 +28,7 @@
 .cf-header .cf-btn, .cf-header .cf-wallet { min-height: 40px; background: transparent; border-color: rgba(244, 243, 238, 0.45); color: var(--luz-perla); box-shadow: none; }
 .cf-header .cf-btn:hover, .cf-header .cf-wallet:hover { background: rgba(244, 243, 238, 0.08); }
 .cf-header :focus-visible { outline-color: var(--azul-300); }
-.cf-header .cf-muted, .cf-header .cf-small { color: var(--noche-niebla); }
+.cf-header .cf-muted, .cf-header .cf-small, .cf-header .cf-subtle { color: var(--noche-niebla); }
 
 /* ---------- Footer: the landing page's night footer ---------- */
 .cf-footer { background: var(--noche-950); color: var(--noche-niebla); border-top: 0; padding: var(--space-12) var(--space-6) var(--space-8); font-size: 14px; line-height: 20px; }
@@ -40,6 +40,8 @@
 .cf-footer .cf-seg > button { color: var(--noche-niebla); }
 .cf-footer .cf-seg > button[aria-pressed="true"] { background: rgba(244, 243, 238, 0.1); color: var(--luz-perla); box-shadow: none; }
 .cf-footer .cf-btn { background: transparent; border-color: rgba(244, 243, 238, 0.35); color: var(--luz-perla); }
+.cf-footer .cf-copy { color: var(--noche-niebla); }
+.cf-footer .cf-copy:hover { background: rgba(244, 243, 238, 0.08); color: var(--luz-perla); }
 .cf-footer :focus-visible { outline-color: var(--azul-300); }
 
 /* ---------- Type: Rubik titles, as large and tight as the landing page's ---------- */
