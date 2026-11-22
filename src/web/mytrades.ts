@@ -139,10 +139,24 @@ export function historyNote(trade: Trade, role: 'buyer' | 'seller', other?: stri
 
 export const isActive = (trade: Trade) => !isFinalState(trade.status);
 
-/** How many trades each offer has had, by offer transaction. */
-export function tradesPerOffer(trades: Pick<Trade, 'offerTxid'>[]): Map<string, number> {
-  const counts = new Map<string, number>();
-  for (const t of trades) counts.set(t.offerTxid, (counts.get(t.offerTxid) ?? 0) + 1);
+/** The trades on one offer: how many in all, how many still going, and how many requests wait for its owner. */
+export interface OfferTrades {
+  total: number;
+  active: number;
+  /** Requests the offer's owner has not accepted yet. The request lapses if they don't answer in time. */
+  waiting: number;
+}
+
+/** The trades on each offer, by offer transaction. */
+export function tradesPerOffer(trades: Pick<Trade, 'offerTxid' | 'status'>[]): Map<string, OfferTrades> {
+  const counts = new Map<string, OfferTrades>();
+  for (const t of trades) {
+    const c = counts.get(t.offerTxid) ?? { total: 0, active: 0, waiting: 0 };
+    c.total += 1;
+    if (!isFinalState(t.status)) c.active += 1;
+    if (t.status === 'Requested') c.waiting += 1;
+    counts.set(t.offerTxid, c);
+  }
   return counts;
 }
 

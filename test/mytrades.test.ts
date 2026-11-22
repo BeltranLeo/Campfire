@@ -100,10 +100,14 @@ describe('offers', () => {
     expect(myOffers(list, 'me').map((o) => o.offerTxid)).toEqual(['new-open', 'old-open', 'old-closed']);
   });
 
-  it('counts the trades each offer has had', () => {
-    const counts = tradesPerOffer([{ offerTxid: 'a' }, { offerTxid: 'a' }, { offerTxid: 'b' }]);
-    expect(counts.get('a')).toBe(2);
-    expect(counts.get('b')).toBe(1);
+  it('counts the trades on each offer, the ones still going and the requests waiting', () => {
+    const counts = tradesPerOffer([
+      { offerTxid: 'a', status: 'Requested' },
+      { offerTxid: 'a', status: 'Released' },
+      { offerTxid: 'b', status: 'Funded' },
+    ]);
+    expect(counts.get('a')).toEqual({ total: 2, active: 1, waiting: 1 });
+    expect(counts.get('b')).toEqual({ total: 1, active: 1, waiting: 0 });
     expect(counts.get('c')).toBeUndefined();
   });
 });

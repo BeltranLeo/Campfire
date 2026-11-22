@@ -18,6 +18,8 @@ const en = {
   offerTitle: (buying: boolean, symbol: string, fiat: string) => (buying ? `Buying ${symbol} with ${fiat}` : `Selling ${symbol} for ${fiat}`),
   offerStatus: (status: string): string => (status === 'Published' ? 'Open' : status),
   tradeCount: (n: number) => `${n} ${n === 1 ? 'trade' : 'trades'}`,
+  // Requests on this offer that only its owner can accept, before their time runs out.
+  waiting: (n: number) => `${n} ${n === 1 ? 'request waits' : 'requests wait'} for you`,
   expires: (expired: boolean, date: string) => `${expired ? 'expired' : 'expires'} ${date}`,
   // A closed offer no longer expires: its row shows when it was published.
   published: (date: string) => `published ${date}`,
@@ -40,7 +42,9 @@ const en = {
   // either view may be the one running late.
   notYetTitle: 'Not closed yet',
   notYetBody: 'Nothing was signed or sent. Your wallet and Campfire see this offer differently right now. Try again in a minute.',
-  requestsNote: 'Requests to trade on your offers show up in My trades.',
+  // Followed by a link to My trades and a full stop.
+  requestsNote: 'Requests to trade on your offers show up in',
+  myTrades: 'My trades',
 };
 
 const es: typeof en = {
@@ -60,6 +64,7 @@ const es: typeof en = {
   offerTitle: (buying, symbol, fiat) => (buying ? `Compras ${symbol} con ${fiat}` : `Vendes ${symbol} por ${fiat}`),
   offerStatus: (status) => (status === 'Published' ? 'Abierta' : status === 'Expired' ? 'Vencida' : status === 'Closed' ? 'Cerrada' : status),
   tradeCount: (n) => `${n} ${n === 1 ? 'operación' : 'operaciones'}`,
+  waiting: (n) => `${n} ${n === 1 ? 'solicitud espera' : 'solicitudes esperan'} tu respuesta`,
   expires: (expired, date) => `${expired ? 'venció el' : 'vence el'} ${date}`,
   published: (date) => `publicada el ${date}`,
   offer: 'Oferta',
@@ -77,7 +82,8 @@ const es: typeof en = {
   closedBody: 'Ya no aparece en Todas las ofertas.',
   notYetTitle: 'Todavía no se cerró',
   notYetBody: 'No se firmó ni se envió nada. Tu billetera y Campfire ven esta oferta distinto en este momento. Vuelve a intentarlo en un minuto.',
-  requestsNote: 'Las solicitudes para operar con tus ofertas aparecen en Mis operaciones.',
+  requestsNote: 'Las solicitudes para operar con tus ofertas aparecen en',
+  myTrades: 'Mis operaciones',
 };
 
 export const myoffers = { en, es };

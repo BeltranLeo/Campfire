@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { Link } from 'react-router';
 import { ApiError, apiGet, apiPost, type Offer, type Trade } from '../api';
 import { assetInfo } from '../assets';
 import { Button } from '../components/Button';
@@ -70,7 +71,9 @@ export function MyOffers() {
       ) : (
         <>
           <OfferList identity={identity} offers={offers} trades={trades.data ?? []} />
-          <p className="cf-small cf-muted">{t.requestsNote}</p>
+          <p className="cf-small cf-muted">
+            {t.requestsNote} <Link to="/trades">{t.myTrades}</Link>.
+          </p>
         </>
       )}
     </main>
@@ -223,20 +226,36 @@ function OfferList({ identity, offers, trades }: { identity: string; offers: Pol
         {mine.map((offer) => {
           const doc = offer.document;
           const asset = assetInfo(doc.asset, doc.assetDecimals, config);
-          const n = counts.get(offer.offerTxid) ?? 0;
+          const c = counts.get(offer.offerTxid) ?? { total: 0, active: 0, waiting: 0 };
           const buying = doc.side === 'buy';
+          const title = t.offerTitle(buying, asset.symbol, doc.fiat);
           return (
             <div key={offer.offerTxid} className="s-req">
               <div className="s-cell">
                 <span>
-                  <strong>{t.offerTitle(buying, asset.symbol, doc.fiat)}</strong>{' '}
+                  {/* An open offer links to its page, as the other side sees it. A closed one's page only says
+                      it is closed, so it has no link. */}
+                  <strong>{offer.status === 'Published' ? <Link to={`/offers/${offer.offerTxid}`}>{title}</Link> : title}</strong>{' '}
                   · <span className="cf-mono">{formatRange(doc.min, doc.max, asset)}</span>
                 </span>
                 <span className="cf-small cf-muted">
                   <span className="cf-pill" data-tone={offer.status === 'Published' ? 'escrow' : undefined}>
                     {t.offerStatus(offer.status)}
                   </span>{' '}
-                  {t.tradeCount(n)} ·{' '}
+                  {/* A request lapses if the owner doesn't accept it in time, so it stands out and leads to My trades. */}
+                  {c.waiting > 0 && (
+                    <>
+                      <Link className="cf-pill" data-tone="attention" to="/trades">
+                        {t.waiting(c.waiting)}
+                      </Link>{' '}
+                    </>
+                  )}
+                  {c.total > 0 ? (
+                    <Link to={c.active > 0 ? '/trades' : '/trades?tab=history'}>{t.tradeCount(c.total)}</Link>
+                  ) : (
+                    t.tradeCount(0)
+                  )}{' '}
+                  ·{' '}
                   {offer.status === 'Closed'
                     ? t.published(formatDayMonth(offer.createdAt))
                     : t.expires(offer.status === 'Expired', formatDayMonth(doc.expiresAt))}{' '}
